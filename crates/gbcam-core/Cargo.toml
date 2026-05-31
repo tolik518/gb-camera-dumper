@@ -2,6 +2,7 @@
 name = "gbcam-core"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 png = "0.17"

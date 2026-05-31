@@ -9,3 +9,6 @@ resolver = "2"
 exclude = [
     "legacy",
 ]
+
+[workspace.package]
+license = "GPL-3.0-or-later"
