@@ -219,7 +219,18 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private File dumpsDir() {
-        return new File(getExternalFilesDir(null), "dumps");
+        return new File(appFilesDir(null), "dumps");
+    }
+
+    private File appFilesDir(String type) {
+        File dir = getExternalFilesDir(type);
+        if (dir != null) {
+            return dir;
+        }
+        if (type == null) {
+            return getFilesDir();
+        }
+        return new File(getFilesDir(), type);
     }
 
     private void loadCachedGallery() {

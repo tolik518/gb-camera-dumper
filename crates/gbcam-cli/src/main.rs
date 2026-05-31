@@ -15,6 +15,9 @@ use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::process;
 
+const VID_WCH: u16 = 0x1A86;
+const PID_CH340: u16 = 0x7523;
+
 struct CliProgress;
 
 impl Progress for CliProgress {
@@ -200,14 +203,45 @@ fn find_gbxcart() -> Option<String> {
     for bus in fs::read_dir("/dev/bus/usb").ok()?.flatten() {
         for dev in fs::read_dir(bus.path()).ok()?.flatten() {
             let path = dev.path();
-            let data = fs::read(&path).ok()?;
-            if data.len() >= 12 {
-                let vid = u16::from_le_bytes([data[8], data[9]]);
-                if vid == 0x1A86 {
-                    return Some(path.to_string_lossy().into_owned());
-                }
+            let Ok(data) = fs::read(&path) else {
+                continue;
+            };
+            if data.len() >= 12 && usb_descriptor_matches_gbxcart(&data) {
+                return Some(path.to_string_lossy().into_owned());
             }
         }
     }
     None
+}
+
+fn usb_descriptor_matches_gbxcart(data: &[u8]) -> bool {
+    if data.len() < 12 {
+        return false;
+    }
+    let vid = u16::from_le_bytes([data[8], data[9]]);
+    let pid = u16::from_le_bytes([data[10], data[11]]);
+    vid == VID_WCH && pid == PID_CH340
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usb_descriptor_matches_gbxcart_ch340() {
+        let mut descriptor = vec![0u8; 18];
+        descriptor[8..10].copy_from_slice(&VID_WCH.to_le_bytes());
+        descriptor[10..12].copy_from_slice(&PID_CH340.to_le_bytes());
+
+        assert!(usb_descriptor_matches_gbxcart(&descriptor));
+    }
+
+    #[test]
+    fn usb_descriptor_rejects_other_wch_products() {
+        let mut descriptor = vec![0u8; 18];
+        descriptor[8..10].copy_from_slice(&VID_WCH.to_le_bytes());
+        descriptor[10..12].copy_from_slice(&0x5523u16.to_le_bytes());
+
+        assert!(!usb_descriptor_matches_gbxcart(&descriptor));
+    }
 }

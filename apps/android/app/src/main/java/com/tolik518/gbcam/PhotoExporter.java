@@ -29,15 +29,17 @@ final class PhotoExporter {
 
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
         String album = "GBxCAM Viewer/" + stamp;
+        String imageLocation;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             exportImagesToMediaStore(context, gallery, album);
+            imageLocation = "Pictures/" + album;
         } else {
-            exportImagesToAppFolder(context, gallery, album);
+            imageLocation = exportImagesToAppFolder(context, gallery, album).getAbsolutePath();
         }
 
         File backupDir = appExportDir(context, stamp);
         copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
-        return "Pictures/" + album + "\nBackup save: " + backupDir.getAbsolutePath();
+        return imageLocation + "\nBackup save: " + backupDir.getAbsolutePath();
     }
 
     private static void exportImagesToMediaStore(
@@ -61,24 +63,29 @@ final class PhotoExporter {
                 throw new IOException("Could not create MediaStore image: " + photo.name);
             }
 
-            try (OutputStream out = resolver.openOutputStream(uri)) {
-                if (out == null) {
-                    throw new IOException("Could not open MediaStore output: " + photo.name);
+            try {
+                try (OutputStream out = resolver.openOutputStream(uri)) {
+                    if (out == null) {
+                        throw new IOException("Could not open MediaStore output: " + photo.name);
+                    }
+                    copyToStream(new File(photo.path), out);
                 }
-                copyToStream(new File(photo.path), out);
-            }
 
-            values.clear();
-            values.put(MediaStore.Images.Media.IS_PENDING, 0);
-            resolver.update(uri, values, null, null);
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(uri, values, null, null);
+            } catch (IOException | RuntimeException e) {
+                resolver.delete(uri, null, null);
+                throw e;
+            }
         }
     }
 
-    private static void exportImagesToAppFolder(
+    private static File exportImagesToAppFolder(
             Context context,
             GalleryState gallery,
             String album) throws IOException {
-        File out = new File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), album);
+        File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
         if (!out.mkdirs() && !out.isDirectory()) {
             throw new IOException("Could not create export directory: " + out);
         }
@@ -87,15 +94,27 @@ final class PhotoExporter {
                 copy(new File(photo.path), new File(out, photo.name));
             }
         }
+        return out;
     }
 
     private static File appExportDir(Context context, String stamp) throws IOException {
-        File root = new File(context.getExternalFilesDir(null), "exports");
+        File root = new File(appFilesDir(context, null), "exports");
         File out = new File(root, "gbxcam-" + stamp);
         if (!out.mkdirs() && !out.isDirectory()) {
             throw new IOException("Could not create backup directory: " + out);
         }
         return out;
+    }
+
+    private static File appFilesDir(Context context, String type) {
+        File dir = context.getExternalFilesDir(type);
+        if (dir != null) {
+            return dir;
+        }
+        if (type == null) {
+            return context.getFilesDir();
+        }
+        return new File(context.getFilesDir(), type);
     }
 
     private static void copy(File source, File target) throws IOException {

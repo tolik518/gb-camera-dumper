@@ -276,12 +276,12 @@ pub fn make_erase_chunk(
 
 pub fn decode_tile(tile: &[u8]) -> [[u8; 8]; 8] {
     let mut px = [[0u8; 8]; 8];
-    for row in 0..8 {
-        let hi = tile[row * 2];
-        let lo = tile[row * 2 + 1];
-        for col in 0..8 {
+    for (row, px_row) in px.iter_mut().enumerate() {
+        let hi = *tile.get(row * 2).unwrap_or(&0);
+        let lo = *tile.get(row * 2 + 1).unwrap_or(&0);
+        for (col, px) in px_row.iter_mut().enumerate() {
             let bit = 7 - col;
-            px[row][col] = ((lo >> bit) & 1) << 1 | ((hi >> bit) & 1);
+            *px = ((lo >> bit) & 1) << 1 | ((hi >> bit) & 1);
         }
     }
     px
@@ -307,15 +307,21 @@ fn decode_tiled_image_indices(data: &[u8], tile_rows: usize, output_height: usiz
     let mut img = vec![0u8; IMG_W * output_height];
     for ty in 0..tile_rows {
         for tx in 0..TILES_X {
-            let tile = &data[(ty * TILES_X + tx) * 16..][..16];
+            let tile_offset = (ty * TILES_X + tx) * 16;
+            let mut padded_tile = [0u8; 16];
+            if let Some(available) = data.get(tile_offset..) {
+                let copy_len = available.len().min(padded_tile.len());
+                padded_tile[..copy_len].copy_from_slice(&available[..copy_len]);
+            }
+            let tile = &padded_tile;
             let px = decode_tile(tile);
-            for row in 0..8 {
+            for (row, px_row) in px.iter().enumerate() {
                 let y = ty * 8 + row;
                 if y >= output_height {
                     continue;
                 }
-                for col in 0..8 {
-                    img[y * IMG_W + (tx * 8 + col)] = px[row][col];
+                for (col, px) in px_row.iter().enumerate() {
+                    img[y * IMG_W + (tx * 8 + col)] = *px;
                 }
             }
         }
@@ -326,7 +332,7 @@ fn decode_tiled_image_indices(data: &[u8], tile_rows: usize, output_height: usiz
 pub fn indexed_to_gray8(pixels_indexed: &[u8]) -> Vec<u8> {
     pixels_indexed
         .iter()
-        .map(|&px| PALETTE[px as usize])
+        .map(|&px| PALETTE.get(px as usize).copied().unwrap_or(PALETTE[0]))
         .collect()
 }
 
@@ -334,7 +340,7 @@ pub fn indexed_to_rgb8(pixels_indexed: &[u8], palette: PaletteId) -> Vec<u8> {
     let colors = palette.colors();
     let mut rgb = Vec::with_capacity(pixels_indexed.len() * 3);
     for &px in pixels_indexed {
-        rgb.extend_from_slice(&colors[px as usize]);
+        rgb.extend_from_slice(colors.get(px as usize).unwrap_or(&colors[0]));
     }
     rgb
 }
@@ -631,6 +637,14 @@ mod tests {
     }
 
     #[test]
+    fn decode_tile_pads_short_input() {
+        let pixels = decode_tile(&[0b1010_1010]);
+
+        assert_eq!(pixels[0], [1, 0, 1, 0, 1, 0, 1, 0]);
+        assert_eq!(pixels[1], [0; 8]);
+    }
+
+    #[test]
     fn decode_image_maps_palette_pixels() {
         let mut data = vec![0u8; TILE_BLOCK_SIZE];
         data[0] = 0b1010_1010;
@@ -641,6 +655,14 @@ mod tests {
 
         assert_eq!(&indexed[0..8], &[3, 2, 1, 0, 3, 2, 1, 0]);
         assert_eq!(&image[0..8], &[0, 104, 176, 255, 0, 104, 176, 255]);
+        assert_eq!(image.len(), IMG_W * IMG_H);
+    }
+
+    #[test]
+    fn decode_image_pads_short_input() {
+        let image = decode_image(&[0b1010_1010]);
+
+        assert_eq!(&image[0..8], &[176, 255, 176, 255, 176, 255, 176, 255]);
         assert_eq!(image.len(), IMG_W * IMG_H);
     }
 
@@ -687,6 +709,15 @@ mod tests {
         assert_eq!(
             rgb,
             vec![208, 217, 60, 120, 164, 106, 84, 88, 84, 36, 70, 36]
+        );
+    }
+
+    #[test]
+    fn invalid_indexed_pixels_render_as_palette_zero() {
+        assert_eq!(indexed_to_gray8(&[4]), vec![255]);
+        assert_eq!(
+            indexed_to_rgb8(&[4], PaletteId::from_index(1)),
+            vec![208, 217, 60]
         );
     }
 

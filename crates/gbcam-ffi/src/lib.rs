@@ -20,6 +20,10 @@ pub extern "C" fn gbcam_version() -> *mut c_char {
         .into_raw()
 }
 
+/// # Safety
+///
+/// If `ptr` is non-null, it must be a pointer returned by `gbcam_version` that
+/// has not already been freed.
 #[no_mangle]
 pub unsafe extern "C" fn gbcam_string_free(ptr: *mut c_char) {
     if !ptr.is_null() {
@@ -232,13 +236,7 @@ fn load_gallery_from_fd(
     write_photos_to_dir_with_palette(&save, &output_dir, palette)?;
     progress.message("Gallery ready.");
 
-    Ok(gallery_json(
-        &save,
-        &output_dir,
-        &save_path,
-        &info,
-        palette,
-    )?)
+    gallery_json(&save, &output_dir, &save_path, &info, palette)
 }
 
 fn delete_photos_from_fd(
@@ -272,13 +270,7 @@ fn delete_photos_from_fd(
     write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
     progress.message("Gallery updated after delete.");
 
-    Ok(gallery_json(
-        &updated,
-        &output_dir,
-        &save_path,
-        &info,
-        palette,
-    )?)
+    gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
 fn load_gallery_from_save(

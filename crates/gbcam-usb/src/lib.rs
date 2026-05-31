@@ -814,7 +814,7 @@ impl UsbDev {
     }
 
     fn read_sram_window(&self, gb_addr: u32, out: &mut [u8]) -> Result<()> {
-        if out.len() % READ_CHUNK != 0 {
+        if !out.len().is_multiple_of(READ_CHUNK) {
             return Err(GbcamUsbError::Protocol(format!(
                 "internal error: SRAM read size {} is not aligned to {}",
                 out.len(),
@@ -1014,7 +1014,7 @@ impl UsbDev {
             ));
             for (i, value) in order.iter().enumerate() {
                 let address = 0xA000 + bank_off as u32 + i as u32;
-                if i < 4 || i >= ORDER_COUNT - 4 {
+                if !(4..ORDER_COUNT - 4).contains(&i) {
                     progress.message(&format!(
                         "[debug][delete] attempt {attempt}/3: sram_write_byte 0x{address:04X}=0x{value:02X}"
                     ));
