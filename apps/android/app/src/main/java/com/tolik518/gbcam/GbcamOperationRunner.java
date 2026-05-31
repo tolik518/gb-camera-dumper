@@ -25,11 +25,17 @@ final class GbcamOperationRunner {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
-    void loadGallery(UsbManager usbManager, UsbDevice device, File outputDir, Callback callback) {
+    void loadGallery(
+            UsbManager usbManager,
+            UsbDevice device,
+            File outputDir,
+            int paletteIndex,
+            Callback callback) {
         runUsbOperation(usbManager, device, "Loading photos from camera...", callback, connection -> {
             String json = NativeGbcam.loadGalleryFromFd(
                     connection.getFileDescriptor(),
                     outputDir.getAbsolutePath(),
+                    paletteIndex,
                     message -> postLog(callback, message));
             return GalleryState.fromJson(json);
         });
@@ -40,6 +46,7 @@ final class GbcamOperationRunner {
             UsbDevice device,
             GalleryState gallery,
             File outputDir,
+            int paletteIndex,
             Callback callback) {
         String slots = gallery.selectedPhysicalSlotsCsv();
         runUsbOperation(usbManager, device, "Deleting selected photos...", callback, connection -> {
@@ -48,6 +55,7 @@ final class GbcamOperationRunner {
                     gallery.savePath,
                     outputDir.getAbsolutePath(),
                     slots,
+                    paletteIndex,
                     message -> postLog(callback, message));
             return GalleryState.fromJson(json);
         });

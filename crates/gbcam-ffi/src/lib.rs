@@ -1,4 +1,7 @@
-use gbxcam_core::{apply_album_delete, extract_photos, write_photos_to_dir, write_png, PhotoKind};
+use gbxcam_core::{
+    apply_album_delete, extract_photos, palette_labels, write_palette_png, write_photos_to_dir,
+    write_photos_to_dir_with_palette, PaletteId, PhotoKind, DEFAULT_PALETTE_INDEX,
+};
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jint, jstring};
@@ -33,11 +36,28 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_version(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_defaultPaletteIndex(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    DEFAULT_PALETTE_INDEX as jint
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_paletteLabels(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    java_string_or_throw(&mut env, palette_labels().collect::<Vec<_>>().join("\n"))
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromFd<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     fd: jint,
     output_dir: JString<'local>,
+    palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
     let output_dir = match java_path(&mut env, output_dir) {
@@ -47,7 +67,12 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromFd<'lo
 
     let result = {
         let mut progress = JniProgress::new(&mut env, progress);
-        load_gallery_from_fd(fd, output_dir, &mut progress)
+        load_gallery_from_fd(
+            fd,
+            output_dir,
+            palette_from_jint(palette_index),
+            &mut progress,
+        )
     };
     java_result(&mut env, result, "GB Camera gallery load failed")
 }
@@ -60,6 +85,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_deletePhotosFromFd<'l
     save_path: JString<'local>,
     output_dir: JString<'local>,
     physical_slots_csv: JString<'local>,
+    palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
     let save_path = match java_path(&mut env, save_path) {
@@ -82,6 +108,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_deletePhotosFromFd<'l
             save_path,
             output_dir,
             &physical_slots_csv,
+            palette_from_jint(palette_index),
             &mut progress,
         )
     };
@@ -94,6 +121,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromSave<'
     _class: JClass<'local>,
     save_path: JString<'local>,
     output_dir: JString<'local>,
+    palette_index: jint,
 ) -> jstring {
     let save_path = match java_path(&mut env, save_path) {
         Ok(path) => path,
@@ -106,7 +134,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromSave<'
 
     java_result(
         &mut env,
-        load_gallery_from_save(save_path, output_dir),
+        load_gallery_from_save(save_path, output_dir, palette_from_jint(palette_index)),
         "GB Camera cached gallery load failed",
     )
 }
@@ -188,6 +216,7 @@ impl Progress for NoJniProgress {}
 fn load_gallery_from_fd(
     fd: jint,
     output_dir: PathBuf,
+    palette: PaletteId,
     progress: &mut impl Progress,
 ) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
@@ -200,10 +229,16 @@ fn load_gallery_from_fd(
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
     progress.message("Decoding photos...");
-    write_photos_to_dir(&save, &output_dir)?;
+    write_photos_to_dir_with_palette(&save, &output_dir, palette)?;
     progress.message("Gallery ready.");
 
-    Ok(gallery_json(&save, &output_dir, &save_path, &info)?)
+    Ok(gallery_json(
+        &save,
+        &output_dir,
+        &save_path,
+        &info,
+        palette,
+    )?)
 }
 
 fn delete_photos_from_fd(
@@ -211,6 +246,7 @@ fn delete_photos_from_fd(
     save_path: PathBuf,
     output_dir: PathBuf,
     physical_slots_csv: &str,
+    palette: PaletteId,
     progress: &mut impl Progress,
 ) -> AppResult<String> {
     let slots = parse_physical_slots(physical_slots_csv)?;
@@ -233,13 +269,23 @@ fn delete_photos_from_fd(
 
     let updated = apply_album_delete(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
-    write_photos_to_dir(&updated, &output_dir)?;
+    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
     progress.message("Gallery updated after delete.");
 
-    Ok(gallery_json(&updated, &output_dir, &save_path, &info)?)
+    Ok(gallery_json(
+        &updated,
+        &output_dir,
+        &save_path,
+        &info,
+        palette,
+    )?)
 }
 
-fn load_gallery_from_save(save_path: PathBuf, output_dir: PathBuf) -> AppResult<String> {
+fn load_gallery_from_save(
+    save_path: PathBuf,
+    output_dir: PathBuf,
+    palette: PaletteId,
+) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
     let save = std::fs::read(&save_path)?;
     let info = GbxCartInfo {
@@ -248,7 +294,7 @@ fn load_gallery_from_save(save_path: PathBuf, output_dir: PathBuf) -> AppResult<
         cfw_ver: 0,
         name: Some("Cached save".to_string()),
     };
-    gallery_json(&save, &output_dir, &save_path, &info)
+    gallery_json(&save, &output_dir, &save_path, &info, palette)
 }
 
 fn dump_from_fd(
@@ -312,6 +358,7 @@ fn gallery_json(
     output_dir: &Path,
     save_path: &Path,
     info: &GbxCartInfo,
+    palette: PaletteId,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let photos = extract_photos(save)?;
     let mut json = String::new();
@@ -321,6 +368,10 @@ fn gallery_json(
     json.push_str(&json_escape(&save_path.to_string_lossy()));
     json.push_str("\",\"outputDir\":\"");
     json.push_str(&json_escape(&output_dir.to_string_lossy()));
+    json.push_str("\",\"paletteIndex\":");
+    json.push_str(&palette.index().to_string());
+    json.push_str(",\"paletteName\":\"");
+    json.push_str(&json_escape(palette.label()));
     json.push_str("\",\"photos\":[");
 
     let mut first = true;
@@ -329,7 +380,7 @@ fn gallery_json(
         .filter(|photo| photo.kind == PhotoKind::Album && !photo.deleted)
     {
         let path = output_dir.join(&photo.name);
-        write_png(&path, &photo.pixels_gray8)?;
+        write_palette_png(&path, &photo.pixels_indexed, palette)?;
         if !first {
             json.push(',');
         }
@@ -351,6 +402,10 @@ fn gallery_json(
 
     json.push_str("]}");
     Ok(json)
+}
+
+fn palette_from_jint(index: jint) -> PaletteId {
+    PaletteId::from_index(index.max(0) as usize)
 }
 
 fn connected_label(info: &GbxCartInfo) -> String {

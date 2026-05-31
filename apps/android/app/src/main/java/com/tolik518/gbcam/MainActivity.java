@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
@@ -18,6 +19,8 @@ import java.io.File;
 public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
     private static final String TAG = "GbcamApp";
     private static final String ACTION_USB_PERMISSION = "com.tolik518.gbcam.USB_PERMISSION";
+    private static final String PREFS = "gbxcam-viewer";
+    private static final String KEY_PALETTE_INDEX = "palette-index";
 
     private UsbManager usbManager;
     private UsbDevice selectedDevice;
@@ -25,6 +28,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private MainScreen screen;
     private GbcamOperationRunner operationRunner;
     private boolean autoLoadAttempted;
+    private int paletteIndex;
 
     private enum PendingOperation {
         NONE,
@@ -61,7 +65,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         super.onCreate(savedInstanceState);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         operationRunner = new GbcamOperationRunner();
-        screen = new MainScreen(this, this);
+        int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
+        String[] paletteLabels = paletteLabels();
+        paletteIndex = prefs().getInt(KEY_PALETTE_INDEX, defaultPaletteIndex);
+        paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
+        screen = new MainScreen(this, this, paletteLabels, defaultPaletteIndex);
+        screen.setPaletteIndex(paletteIndex);
         setContentView(screen.view());
 
         registerUsbReceiver();
@@ -130,6 +139,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
+    public void onPaletteChanged(int paletteIndex) {
+        this.paletteIndex = paletteIndex;
+        prefs().edit().putInt(KEY_PALETTE_INDEX, paletteIndex).apply();
+        if (screen != null) {
+            recolorCachedGallery();
+        }
+    }
+
+    @Override
     public void onLog(String message) {
         Log.i(TAG, message);
         screen.appendLog(message);
@@ -187,12 +205,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private void runOperation(PendingOperation operation) {
         switch (operation) {
             case LOAD:
-                operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), this);
+                operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this);
                 break;
             case DELETE:
                 GalleryState gallery = screen.gallery();
                 if (gallery != null) {
-                    operationRunner.deletePhotos(usbManager, selectedDevice, gallery, dumpsDir(), this);
+                    operationRunner.deletePhotos(usbManager, selectedDevice, gallery, dumpsDir(), paletteIndex, this);
                 }
                 break;
             case NONE:
@@ -213,12 +231,44 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         try {
             GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
                     save.getAbsolutePath(),
-                    dumpsDir().getAbsolutePath()));
+                    dumpsDir().getAbsolutePath(),
+                    paletteIndex));
             screen.showGallery(gallery);
             onLog("Loaded cached gallery from:\n" + save.getAbsolutePath());
         } catch (Exception e) {
             onLog("Cached gallery load failed: " + e.getMessage());
         }
+    }
+
+    private void recolorCachedGallery() {
+        GalleryState previous = screen.gallery();
+        if (previous == null) {
+            return;
+        }
+
+        try {
+            GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
+                    previous.savePath,
+                    previous.outputDir,
+                    paletteIndex));
+            gallery.copySelectionFrom(previous);
+            screen.showGallery(gallery);
+            onLog("Palette changed: " + gallery.paletteName);
+        } catch (Exception e) {
+            onLog("Palette change failed: " + e.getMessage());
+        }
+    }
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE);
+    }
+
+    private static String[] paletteLabels() {
+        String labels = NativeGbcam.paletteLabels();
+        if (labels == null || labels.isEmpty()) {
+            return new String[] { "Grayscale" };
+        }
+        return labels.split("\\n");
     }
 
     private void registerUsbReceiver() {

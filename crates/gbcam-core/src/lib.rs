@@ -25,6 +25,148 @@ pub const TILES_X: usize = 16;
 pub const TILES_Y: usize = 14;
 pub const LAST_SEEN_TILES_Y: usize = 16;
 pub const PALETTE: [u8; 4] = [255, 176, 104, 0];
+pub const DEFAULT_PALETTE_INDEX: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PalettePreset {
+    pub label: &'static str,
+    pub colors: [[u8; 3]; 4],
+}
+
+pub const PALETTE_PRESETS: &[PalettePreset] = &[
+    PalettePreset {
+        label: "Grayscale",
+        colors: [[255, 255, 255], [176, 176, 176], [104, 104, 104], [0, 0, 0]],
+    },
+    PalettePreset {
+        label: "Original Game Boy",
+        colors: [[208, 217, 60], [120, 164, 106], [84, 88, 84], [36, 70, 36]],
+    },
+    PalettePreset {
+        label: "Super Game Boy",
+        colors: [[255, 255, 255], [181, 179, 189], [84, 83, 103], [9, 7, 19]],
+    },
+    PalettePreset {
+        label: "Game Boy Color (Pocket Camera)",
+        colors: [
+            [240, 240, 240],
+            [218, 196, 106],
+            [112, 88, 52],
+            [30, 30, 30],
+        ],
+    },
+    PalettePreset {
+        label: "Game Boy Color (Game Boy Camera Gold)",
+        colors: [
+            [240, 240, 240],
+            [220, 160, 160],
+            [136, 78, 78],
+            [30, 30, 30],
+        ],
+    },
+    PalettePreset {
+        label: "Game Boy Color (Game Boy Camera)",
+        colors: [
+            [240, 240, 240],
+            [134, 200, 100],
+            [58, 96, 132],
+            [30, 30, 30],
+        ],
+    },
+    PalettePreset {
+        label: "DMG Green",
+        colors: [[155, 188, 15], [139, 172, 15], [48, 98, 48], [15, 56, 15]],
+    },
+    PalettePreset {
+        label: "GB Studio Green",
+        colors: [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]],
+    },
+    PalettePreset {
+        label: "Game Boy Pocket",
+        colors: [[248, 248, 248], [168, 168, 168], [80, 80, 80], [8, 8, 8]],
+    },
+    PalettePreset {
+        label: "Game Boy Light",
+        colors: [
+            [240, 255, 216],
+            [168, 208, 128],
+            [88, 128, 80],
+            [24, 48, 40],
+        ],
+    },
+    PalettePreset {
+        label: "GBC Boot: Brown",
+        colors: [[255, 255, 198], [222, 156, 66], [148, 74, 0], [74, 33, 0]],
+    },
+    PalettePreset {
+        label: "GBC Boot: Blue",
+        colors: [[222, 255, 255], [99, 206, 255], [49, 99, 206], [0, 0, 66]],
+    },
+    PalettePreset {
+        label: "GBC Boot: Inverted",
+        colors: [[0, 0, 0], [104, 104, 104], [176, 176, 176], [255, 255, 255]],
+    },
+    PalettePreset {
+        label: "GBC Boot: Yellow",
+        colors: [[255, 255, 165], [255, 198, 66], [206, 99, 0], [66, 33, 0]],
+    },
+    PalettePreset {
+        label: "GBC Boot: Red",
+        colors: [[255, 231, 231], [255, 132, 132], [132, 33, 33], [33, 0, 0]],
+    },
+    PalettePreset {
+        label: "Amber CRT",
+        colors: [[255, 244, 214], [255, 183, 77], [181, 92, 18], [50, 22, 5]],
+    },
+    PalettePreset {
+        label: "Cyanotype",
+        colors: [[230, 250, 255], [118, 196, 219], [36, 91, 130], [4, 24, 45]],
+    },
+    PalettePreset {
+        label: "Sakura",
+        colors: [
+            [255, 247, 250],
+            [245, 179, 197],
+            [139, 82, 115],
+            [35, 24, 45],
+        ],
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaletteId {
+    index: usize,
+}
+
+impl PaletteId {
+    pub const DEFAULT: Self = Self {
+        index: DEFAULT_PALETTE_INDEX,
+    };
+
+    pub fn from_index(index: usize) -> Self {
+        if index < PALETTE_PRESETS.len() {
+            Self { index }
+        } else {
+            Self { index: 0 }
+        }
+    }
+
+    pub fn index(self) -> usize {
+        self.index
+    }
+
+    pub fn label(self) -> &'static str {
+        PALETTE_PRESETS[self.index].label
+    }
+
+    pub fn colors(self) -> [[u8; 3]; 4] {
+        PALETTE_PRESETS[self.index].colors
+    }
+}
+
+pub fn palette_labels() -> impl Iterator<Item = &'static str> {
+    PALETTE_PRESETS.iter().map(|palette| palette.label)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhotoKind {
@@ -67,6 +209,7 @@ pub struct Photo {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub pixels_indexed: Vec<u8>,
     pub pixels_gray8: Vec<u8>,
     pub kind: PhotoKind,
     pub display_index: Option<usize>,
@@ -145,14 +288,22 @@ pub fn decode_tile(tile: &[u8]) -> [[u8; 8]; 8] {
 }
 
 pub fn decode_image(data: &[u8]) -> Vec<u8> {
-    decode_tiled_image(data, TILES_Y, IMG_H)
+    indexed_to_gray8(&decode_image_indices(data))
 }
 
 pub fn decode_last_seen_image(data: &[u8]) -> Vec<u8> {
-    decode_tiled_image(data, LAST_SEEN_TILES_Y, LAST_SEEN_H)
+    indexed_to_gray8(&decode_last_seen_image_indices(data))
 }
 
-fn decode_tiled_image(data: &[u8], tile_rows: usize, output_height: usize) -> Vec<u8> {
+pub fn decode_image_indices(data: &[u8]) -> Vec<u8> {
+    decode_tiled_image_indices(data, TILES_Y, IMG_H)
+}
+
+pub fn decode_last_seen_image_indices(data: &[u8]) -> Vec<u8> {
+    decode_tiled_image_indices(data, LAST_SEEN_TILES_Y, LAST_SEEN_H)
+}
+
+fn decode_tiled_image_indices(data: &[u8], tile_rows: usize, output_height: usize) -> Vec<u8> {
     let mut img = vec![0u8; IMG_W * output_height];
     for ty in 0..tile_rows {
         for tx in 0..TILES_X {
@@ -164,12 +315,28 @@ fn decode_tiled_image(data: &[u8], tile_rows: usize, output_height: usize) -> Ve
                     continue;
                 }
                 for col in 0..8 {
-                    img[y * IMG_W + (tx * 8 + col)] = PALETTE[px[row][col] as usize];
+                    img[y * IMG_W + (tx * 8 + col)] = px[row][col];
                 }
             }
         }
     }
     img
+}
+
+pub fn indexed_to_gray8(pixels_indexed: &[u8]) -> Vec<u8> {
+    pixels_indexed
+        .iter()
+        .map(|&px| PALETTE[px as usize])
+        .collect()
+}
+
+pub fn indexed_to_rgb8(pixels_indexed: &[u8], palette: PaletteId) -> Vec<u8> {
+    let colors = palette.colors();
+    let mut rgb = Vec::with_capacity(pixels_indexed.len() * 3);
+    for &px in pixels_indexed {
+        rgb.extend_from_slice(&colors[px as usize]);
+    }
+    rgb
 }
 
 pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
@@ -207,11 +374,14 @@ pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
         if off + PHOTO_IMAGE_SIZE > save.len() {
             continue;
         }
+        let pixels_indexed = decode_image_indices(&save[off..off + PHOTO_IMAGE_SIZE]);
+        let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
         photos.push(Photo {
             name: format!("IMG_PC{:02}.png", index + 1),
             width: IMG_W as u32,
             height: IMG_H as u32,
-            pixels_gray8: decode_image(&save[off..off + PHOTO_IMAGE_SIZE]),
+            pixels_indexed,
+            pixels_gray8,
             kind: PhotoKind::Album,
             display_index: Some(index),
             physical_slot: Some(*slot),
@@ -219,23 +389,29 @@ pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
         });
     }
 
+    let pixels_indexed =
+        decode_image_indices(&save[GAME_FACE_OFFSET..GAME_FACE_OFFSET + TILE_BLOCK_SIZE]);
+    let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
     photos.push(Photo {
         name: "IMG_PC31.png".to_string(),
         width: IMG_W as u32,
         height: IMG_H as u32,
-        pixels_gray8: decode_image(&save[GAME_FACE_OFFSET..GAME_FACE_OFFSET + TILE_BLOCK_SIZE]),
+        pixels_indexed,
+        pixels_gray8,
         kind: PhotoKind::GameFace,
         display_index: None,
         physical_slot: None,
         deleted: false,
     });
+    let pixels_indexed =
+        decode_last_seen_image_indices(&save[LAST_SEEN_OFFSET..LAST_SEEN_OFFSET + TILE_BLOCK_SIZE]);
+    let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
     photos.push(Photo {
         name: "IMG_PC32.png".to_string(),
         width: IMG_W as u32,
         height: LAST_SEEN_H as u32,
-        pixels_gray8: decode_last_seen_image(
-            &save[LAST_SEEN_OFFSET..LAST_SEEN_OFFSET + TILE_BLOCK_SIZE],
-        ),
+        pixels_indexed,
+        pixels_gray8,
         kind: PhotoKind::LastSeen,
         display_index: None,
         physical_slot: None,
@@ -297,12 +473,42 @@ pub fn write_png(path: &Path, pixels: &[u8]) -> Result<(), GbcamCoreError> {
     Ok(())
 }
 
+pub fn write_palette_png(
+    path: &Path,
+    pixels_indexed: &[u8],
+    palette: PaletteId,
+) -> Result<(), GbcamCoreError> {
+    let file = fs::File::create(path)?;
+    let height = (pixels_indexed.len() / IMG_W) as u32;
+    let mut enc = png::Encoder::new(file, IMG_W as u32, height);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()?
+        .write_image_data(&indexed_to_rgb8(pixels_indexed, palette))?;
+    Ok(())
+}
+
 pub fn write_photos_to_dir(save: &[u8], dir: &Path) -> Result<Vec<String>, GbcamCoreError> {
     let photos = extract_photos(save)?;
     let mut written = Vec::with_capacity(photos.len());
     for photo in photos {
         let path = dir.join(&photo.name);
         write_png(&path, &photo.pixels_gray8)?;
+        written.push(photo.name);
+    }
+    Ok(written)
+}
+
+pub fn write_photos_to_dir_with_palette(
+    save: &[u8],
+    dir: &Path,
+    palette: PaletteId,
+) -> Result<Vec<String>, GbcamCoreError> {
+    let photos = extract_photos(save)?;
+    let mut written = Vec::with_capacity(photos.len());
+    for photo in photos {
+        let path = dir.join(&photo.name);
+        write_palette_png(&path, &photo.pixels_indexed, palette)?;
         written.push(photo.name);
     }
     Ok(written)
@@ -431,9 +637,57 @@ mod tests {
         data[1] = 0b1100_1100;
 
         let image = decode_image(&data);
+        let indexed = decode_image_indices(&data);
 
+        assert_eq!(&indexed[0..8], &[3, 2, 1, 0, 3, 2, 1, 0]);
         assert_eq!(&image[0..8], &[0, 104, 176, 255, 0, 104, 176, 255]);
         assert_eq!(image.len(), IMG_W * IMG_H);
+    }
+
+    #[test]
+    fn palette_presets_match_flashgbx_order() {
+        assert_eq!(PaletteId::DEFAULT.index(), DEFAULT_PALETTE_INDEX);
+        assert_eq!(PaletteId::from_index(0).label(), "Grayscale");
+        assert_eq!(PaletteId::from_index(1).label(), "Original Game Boy");
+        assert_eq!(PaletteId::from_index(2).label(), "Super Game Boy");
+        assert_eq!(
+            PaletteId::from_index(3).label(),
+            "Game Boy Color (Pocket Camera)"
+        );
+        assert_eq!(
+            PaletteId::from_index(4).label(),
+            "Game Boy Color (Game Boy Camera Gold)"
+        );
+        assert_eq!(
+            PaletteId::from_index(5).label(),
+            "Game Boy Color (Game Boy Camera)"
+        );
+    }
+
+    #[test]
+    fn palette_catalog_contains_added_presets() {
+        let labels = palette_labels().collect::<Vec<_>>();
+
+        assert!(labels.contains(&"DMG Green"));
+        assert!(labels.contains(&"GB Studio Green"));
+        assert!(labels.contains(&"Game Boy Pocket"));
+        assert!(labels.contains(&"Game Boy Light"));
+        assert!(labels.contains(&"GBC Boot: Brown"));
+        assert!(labels.contains(&"GBC Boot: Blue"));
+        assert!(labels.contains(&"GBC Boot: Inverted"));
+        assert!(labels.contains(&"Amber CRT"));
+    }
+
+    #[test]
+    fn indexed_pixels_render_to_selected_rgb_palette() {
+        let pixels = [0, 1, 2, 3];
+
+        let rgb = indexed_to_rgb8(&pixels, PaletteId::from_index(1));
+
+        assert_eq!(
+            rgb,
+            vec![208, 217, 60, 120, 164, 106, 84, 88, 84, 36, 70, 36]
+        );
     }
 
     #[test]

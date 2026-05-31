@@ -2,12 +2,14 @@ package com.tolik518.gbcam;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.GridLayout;
@@ -15,6 +17,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.io.File;
@@ -32,10 +35,13 @@ final class MainScreen {
         void onDeleteSelectedRequested();
 
         void onPhotoSelectionChanged(GalleryPhoto photo, boolean selected);
+
+        void onPaletteChanged(int paletteIndex);
     }
 
     private final Context context;
     private final Listener listener;
+    private final String[] paletteLabels;
     private final Palette colors;
     private final LinearLayout root;
     private final TextView subtitle;
@@ -47,6 +53,7 @@ final class MainScreen {
     private final GridLayout grid;
     private final LinearLayout loadingRow;
     private final ScrollView logScroll;
+    private final Spinner paletteSpinner;
     private final Button loadButton;
     private final Button selectAllButton;
     private final Button deselectAllButton;
@@ -56,10 +63,12 @@ final class MainScreen {
     private GalleryState gallery;
     private boolean busy;
     private boolean logsVisible;
+    private boolean suppressPaletteCallback;
 
-    MainScreen(Context context, Listener listener) {
+    MainScreen(Context context, Listener listener, String[] paletteLabels, int defaultPaletteIndex) {
         this.context = context;
         this.listener = listener;
+        this.paletteLabels = paletteLabels.length == 0 ? new String[] { "Grayscale" } : paletteLabels;
         this.colors = Palette.from(context);
 
         root = new LinearLayout(context);
@@ -105,6 +114,42 @@ final class MainScreen {
         loadingText.setPadding(16, 0, 0, 0);
         loadingRow.addView(loadingText);
         root.addView(loadingRow, matchWidthWrapContent());
+
+        LinearLayout paletteRow = row();
+        paletteRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView paletteLabel = new TextView(context);
+        paletteLabel.setText("Palette");
+        paletteLabel.setTextColor(colors.textSecondary);
+        paletteLabel.setTextSize(13);
+        paletteLabel.setPadding(0, 0, 16, 0);
+        paletteRow.addView(paletteLabel);
+        paletteSpinner = new Spinner(context);
+        suppressPaletteCallback = true;
+        ArrayAdapter<String> paletteAdapter = new ArrayAdapter<>(
+                context,
+                android.R.layout.simple_spinner_item,
+                this.paletteLabels);
+        paletteAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        paletteSpinner.setAdapter(paletteAdapter);
+        paletteSpinner.setSelection(safePaletteIndex(defaultPaletteIndex));
+        paletteSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (!suppressPaletteCallback) {
+                    listener.onPaletteChanged(position);
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        suppressPaletteCallback = false;
+        paletteRow.addView(paletteSpinner, new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1));
+        root.addView(paletteRow, matchWidthWrapContent());
 
         LinearLayout actions = row();
         selectAllButton = smallButton("Select all", v -> listener.onSelectAllRequested());
@@ -178,6 +223,7 @@ final class MainScreen {
 
     void showGallery(GalleryState gallery) {
         this.gallery = gallery;
+        setPaletteIndex(gallery.paletteIndex);
         grid.removeAllViews();
         for (GalleryPhoto photo : gallery.photos) {
             grid.addView(photoTile(photo), tileParams());
@@ -205,6 +251,16 @@ final class MainScreen {
         } else {
             logs.setText(current + "\n" + message);
         }
+    }
+
+    void setPaletteIndex(int paletteIndex) {
+        suppressPaletteCallback = true;
+        paletteSpinner.setSelection(safePaletteIndex(paletteIndex));
+        suppressPaletteCallback = false;
+    }
+
+    private int safePaletteIndex(int paletteIndex) {
+        return Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
     }
 
     private void toggleLogs() {
@@ -242,6 +298,7 @@ final class MainScreen {
         deselectAllButton.setEnabled(!busy && selected > 0);
         saveButton.setEnabled(!busy && selected > 0);
         deleteButton.setEnabled(!busy && selected > 0);
+        paletteSpinner.setEnabled(!busy);
         if (!busy && selected > 0) {
             deleteButton.setTextColor(Color.WHITE);
             deleteButton.setBackgroundColor(colors.danger);
@@ -263,7 +320,7 @@ final class MainScreen {
         });
 
         ImageView image = new ImageView(context);
-        image.setImageURI(Uri.fromFile(new File(photo.path)));
+        image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
         image.setBackgroundColor(colors.photoBackground);

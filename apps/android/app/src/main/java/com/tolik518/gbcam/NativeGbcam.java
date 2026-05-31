@@ -14,16 +14,21 @@ final class NativeGbcam {
 
     static native String version();
 
-    static native String loadGalleryFromFd(int fd, String outputDir, Progress progress);
+    static native int defaultPaletteIndex();
+
+    static native String paletteLabels();
+
+    static native String loadGalleryFromFd(int fd, String outputDir, int paletteIndex, Progress progress);
 
     static native String deletePhotosFromFd(
             int fd,
             String savePath,
             String outputDir,
             String physicalSlotsCsv,
+            int paletteIndex,
             Progress progress);
 
-    static native String loadGalleryFromSave(String savePath, String outputDir);
+    static native String loadGalleryFromSave(String savePath, String outputDir, int paletteIndex);
 
     static native String dumpFromFd(int fd, String outputDir, boolean eraseAfter);
 }

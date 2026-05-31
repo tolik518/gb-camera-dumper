@@ -11,12 +11,22 @@ final class GalleryState {
     final String connected;
     final String savePath;
     final String outputDir;
+    final int paletteIndex;
+    final String paletteName;
     final List<GalleryPhoto> photos;
 
-    GalleryState(String connected, String savePath, String outputDir, List<GalleryPhoto> photos) {
+    GalleryState(
+            String connected,
+            String savePath,
+            String outputDir,
+            int paletteIndex,
+            String paletteName,
+            List<GalleryPhoto> photos) {
         this.connected = connected;
         this.savePath = savePath;
         this.outputDir = outputDir;
+        this.paletteIndex = paletteIndex;
+        this.paletteName = paletteName;
         this.photos = photos;
     }
 
@@ -38,6 +48,8 @@ final class GalleryState {
                 root.getString("connected"),
                 root.getString("savePath"),
                 root.getString("outputDir"),
+                root.optInt("paletteIndex", 0),
+                root.optString("paletteName", "Grayscale"),
                 photos);
     }
 
@@ -63,5 +75,16 @@ final class GalleryState {
             csv.append(photo.physicalSlot);
         }
         return csv.toString();
+    }
+
+    void copySelectionFrom(GalleryState previous) {
+        for (GalleryPhoto photo : photos) {
+            for (GalleryPhoto old : previous.photos) {
+                if (photo.physicalSlot == old.physicalSlot) {
+                    photo.selected = old.selected;
+                    break;
+                }
+            }
+        }
     }
 }
