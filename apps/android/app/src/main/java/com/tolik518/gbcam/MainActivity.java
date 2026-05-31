@@ -24,6 +24,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private PendingOperation pendingOperation = PendingOperation.NONE;
     private MainScreen screen;
     private GbcamOperationRunner operationRunner;
+    private boolean autoLoadAttempted;
 
     private enum PendingOperation {
         NONE,
@@ -65,7 +66,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         registerUsbReceiver();
         onLog("Rust core loaded: " + NativeGbcam.version());
-        refreshDevice();
+        if (refreshDevice()) {
+            autoLoadCamera();
+        } else {
+            loadCachedGallery();
+        }
     }
 
     @Override
@@ -141,17 +146,27 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         onLog("Loaded " + gallery.photos.size() + " camera photo(s).");
     }
 
-    private void refreshDevice() {
+    private boolean refreshDevice() {
         selectedDevice = GbxCartDevices.find(usbManager);
         if (selectedDevice == null) {
             onLog("GBxCart RW not found. Connect it, then tap Load Camera.");
-            return;
+            return false;
         }
 
         onLog(String.format(
                 "GBxCart RW found: VID 0x%04X, PID 0x%04X",
                 selectedDevice.getVendorId(),
                 selectedDevice.getProductId()));
+        return true;
+    }
+
+    private void autoLoadCamera() {
+        if (autoLoadAttempted || screen.gallery() != null) {
+            return;
+        }
+        autoLoadAttempted = true;
+        onLog("Loading camera automatically...");
+        startOperation(PendingOperation.LOAD);
     }
 
     private void startOperation(PendingOperation operation) {
@@ -190,6 +205,23 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     private File dumpsDir() {
         return new File(getExternalFilesDir(null), "dumps");
+    }
+
+    private void loadCachedGallery() {
+        File save = new File(dumpsDir(), "GAMEBOYCAMERA.sav");
+        if (!save.isFile()) {
+            return;
+        }
+
+        try {
+            GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
+                    save.getAbsolutePath(),
+                    dumpsDir().getAbsolutePath()));
+            screen.showGallery(gallery);
+            onLog("Loaded cached gallery from:\n" + save.getAbsolutePath());
+        } catch (Exception e) {
+            onLog("Cached gallery load failed: " + e.getMessage());
+        }
     }
 
     private void registerUsbReceiver() {

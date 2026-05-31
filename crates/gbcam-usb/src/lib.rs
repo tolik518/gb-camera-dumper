@@ -38,7 +38,7 @@ pub enum GbcamUsbError {
     #[error("{0}")]
     Protocol(String),
     #[error("core error: {0}")]
-    Core(#[from] gbcam_core::GbcamCoreError),
+    Core(#[from] gbxcam_core::GbcamCoreError),
 }
 
 pub type Result<T> = std::result::Result<T, GbcamUsbError>;
@@ -91,6 +91,9 @@ const BULK_TIMEOUT: u32 = 3000;
 const CTRL_TIMEOUT: u32 = 1000;
 
 const CMD_NULL: u8 = 0x30;
+const CMD_OFW_DONE_LED_ON: u8 = 0x3D;
+const CMD_OFW_ERROR_LED_ON: u8 = 0x3F;
+const CMD_OFW_CART_MODE: u8 = 0x43;
 const CMD_OFW_PCB_VER: u8 = 0x68;
 const CMD_OFW_FW_VER: u8 = 0x56;
 const CMD_QUERY_FW_INFO: u8 = 0xA1;
@@ -103,6 +106,7 @@ const CMD_DMG_CART_WRITE_SRAM: u8 = 0xB3;
 const CMD_DMG_MBC_RESET: u8 = 0xB4;
 const CMD_QUERY_CART_PWR: u8 = 0xF4;
 const CMD_CART_PWR_ON: u8 = 0xF2;
+const CMD_CART_PWR_OFF: u8 = 0xF3;
 
 const VAR_ADDRESS: (u8, u8) = (32, 0x00);
 const VAR_TRANSFER_SIZE: (u8, u8) = (16, 0x00);
@@ -153,10 +157,8 @@ impl UsbDev {
         dev.drain_input(20, 16)?;
         std::thread::sleep(Duration::from_millis(60));
 
-        dev.bulk_write(&[CMD_OFW_PCB_VER])?;
-        let pcb_ver = dev.read_u8()?;
-        dev.bulk_write(&[CMD_OFW_FW_VER])?;
-        let ofw_ver = dev.read_u8()?;
+        let pcb_ver = dev.query_u8_command(CMD_OFW_PCB_VER, "OFW_PCB_VER")?;
+        let ofw_ver = dev.query_u8_command(CMD_OFW_FW_VER, "OFW_FW_VER")?;
 
         if pcb_ver == 0 {
             return Err(GbcamUsbError::Protocol(
@@ -166,8 +168,7 @@ impl UsbDev {
 
         let mut name = None;
         if pcb_ver >= 5 && ofw_ver > 0 {
-            dev.bulk_write(&[CMD_QUERY_FW_INFO])?;
-            let size = dev.read_u8()? as usize;
+            let size = dev.query_u8_command(CMD_QUERY_FW_INFO, "QUERY_FW_INFO length")? as usize;
             let mut info = vec![0u8; size];
             dev.bulk_read(&mut info)?;
             if size >= 3 {
@@ -186,6 +187,14 @@ impl UsbDev {
                 let _boot = dev.read_u8()?;
             }
         }
+
+        progress.message(&format!(
+            "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} cart_power_query_supported={}",
+            dev.fw_ver, dev.has_cart_power
+        ));
+        dev.debug_cart_power(progress, "connect: after firmware query, before LED reset");
+        dev.reset_status_leds(progress, "connect: reset status/mode LEDs");
+        dev.debug_cart_power(progress, "connect: after LED reset");
 
         let info = GbxCartInfo {
             pcb_ver,
@@ -349,6 +358,27 @@ impl UsbDev {
         Ok(b[0])
     }
 
+    fn query_u8_command(&self, cmd: u8, ctx: &'static str) -> Result<u8> {
+        for attempt in 1..=3 {
+            self.clear_local_rx();
+            self.bulk_write(&[cmd])?;
+            match self.read_u8() {
+                Ok(value) => return Ok(value),
+                Err(e) if is_usb_timeout(&e) && attempt < 3 => {
+                    self.clear_local_rx();
+                    self.flush_endpoints();
+                    let _ = self.drain_input(20, 16);
+                    std::thread::sleep(Duration::from_millis(80));
+                }
+                Err(e) => {
+                    return Err(GbcamUsbError::Protocol(format!("{ctx}: {e}")));
+                }
+            }
+        }
+
+        Err(GbcamUsbError::Protocol(format!("{ctx}: no response")))
+    }
+
     fn ack_byte(&self) -> Result<u8> {
         self.read_u8()
     }
@@ -399,6 +429,198 @@ impl UsbDev {
         }
 
         Ok(())
+    }
+
+    fn debug_result(progress: &mut impl Progress, label: &str, result: Result<()>) -> bool {
+        match result {
+            Ok(()) => {
+                progress.message(&format!("[debug][gbxcart] OK: {label}"));
+                true
+            }
+            Err(e) => {
+                progress.message(&format!("[debug][gbxcart] ERROR: {label}: {e}"));
+                false
+            }
+        }
+    }
+
+    fn required_step(
+        &self,
+        progress: &mut impl Progress,
+        label: &str,
+        result: Result<()>,
+    ) -> Result<()> {
+        match result {
+            Ok(()) => {
+                progress.message(&format!("[debug][gbxcart] OK: {label}"));
+                Ok(())
+            }
+            Err(e) => {
+                progress.message(&format!("[debug][gbxcart] ERROR: {label}: {e}"));
+                Err(e)
+            }
+        }
+    }
+
+    fn debug_cart_power(&self, progress: &mut impl Progress, label: &str) {
+        if !self.has_cart_power {
+            progress.message(&format!(
+                "[debug][power] {label}: CART_PWR query unsupported by this firmware path"
+            ));
+            return;
+        }
+
+        self.clear_local_rx();
+        match self.bulk_write(&[CMD_QUERY_CART_PWR]) {
+            Ok(()) => match self.raw_bulk_read_once(400) {
+                Ok(raw) if raw.is_empty() => {
+                    progress.message(&format!(
+                        "[debug][power] {label}: CART_PWR query returned empty packet"
+                    ));
+                }
+                Ok(raw) => {
+                    let (value, source) =
+                        if raw.len() > 1 && Self::ack_ok(raw[0]) && (raw[1] == 0 || raw[1] == 1) {
+                            (raw[1], "raw[1] after leading ACK-like byte")
+                        } else {
+                            (raw[0], "raw[0]")
+                        };
+                    let meaning = match value {
+                        0 => "OFF",
+                        1 => "ON",
+                        _ => "unknown",
+                    };
+                    progress.message(&format!(
+                        "[debug][power] {label}: CART_PWR=0x{value:02X} ({meaning}) from {source}; raw={raw:02X?}"
+                    ));
+                }
+                Err(e) => {
+                    progress.message(&format!(
+                        "[debug][power] {label}: CART_PWR query read failed: {e}"
+                    ));
+                }
+            },
+            Err(e) => {
+                progress.message(&format!(
+                    "[debug][power] {label}: CART_PWR query write failed: {e}"
+                ));
+            }
+        }
+        self.clear_local_rx();
+    }
+
+    fn raw_led_command(&self, progress: &mut impl Progress, label: &str, cmd: u8, expected: &str) {
+        progress.message(&format!(
+            "[debug][led] SEND 0x{cmd:02X}: {label}; expected LED effect: {expected}"
+        ));
+        match self.bulk_write(&[cmd]) {
+            Ok(()) => {
+                progress.message(&format!(
+                    "[debug][led] OK: {label} sent; not requiring ACK for LED-only command"
+                ));
+                match self.raw_bulk_read_once(50) {
+                    Ok(raw) if raw.is_empty() => {}
+                    Ok(raw) => {
+                        progress.message(&format!(
+                            "[debug][led] {label}: drained optional response raw={raw:02X?}"
+                        ));
+                    }
+                    Err(e) if is_usb_timeout(&e) => {}
+                    Err(e) => {
+                        progress.message(&format!(
+                            "[debug][led] {label}: optional response drain failed: {e}"
+                        ));
+                    }
+                }
+                self.clear_local_rx();
+            }
+            Err(e) => {
+                progress.message(&format!("[debug][led] ERROR: {label}: {e}"));
+            }
+        }
+    }
+
+    fn reset_status_leds(&self, progress: &mut impl Progress, label: &str) {
+        self.raw_led_command(
+            progress,
+            label,
+            CMD_OFW_CART_MODE,
+            "reset Mode/Error and Done/Status LEDs according to FlashGBX notes",
+        );
+    }
+
+    fn power_off_cart(&self, progress: &mut impl Progress, label: &str) {
+        if self.has_cart_power {
+            progress.message(&format!(
+                "[debug][power] SEND 0x{CMD_CART_PWR_OFF:02X}: {label}; expected LED effect: Power LED off"
+            ));
+            if self.fw_ver >= 10 {
+                let result = self.write_wait_retry(&[CMD_CART_PWR_OFF], label, 3);
+                Self::debug_result(progress, &format!("{label} acknowledged"), result);
+            } else {
+                Self::debug_result(progress, label, self.bulk_write(&[CMD_CART_PWR_OFF]));
+            }
+            Self::debug_result(
+                progress,
+                "power-off cleanup: drain input after CART_PWR_OFF",
+                self.drain_input(20, 8),
+            );
+            self.debug_cart_power(progress, "after CART_PWR_OFF");
+        } else {
+            progress.message(&format!(
+                "[debug][power] SKIP {label}: cart power control unsupported"
+            ));
+        }
+    }
+
+    pub fn finish_session(&self, progress: &mut impl Progress) {
+        progress.message("[debug][session] finish: begin cleanup. Firmware cannot report actual LED pin states; log shows commands sent plus CART_PWR query.");
+        self.debug_cart_power(progress, "finish: entry");
+        Self::debug_result(
+            progress,
+            "finish: drain stale input before cleanup",
+            self.drain_input(20, 32),
+        );
+        Self::debug_result(
+            progress,
+            "finish: SET_VARIABLE DMG_READ_CS_PULSE=0",
+            self.set_var(VAR_DMG_READ_CS_PULSE, 0),
+        );
+        Self::debug_result(
+            progress,
+            "finish: SET_VARIABLE DMG_WRITE_CS_PULSE=0",
+            self.set_var(VAR_DMG_WRITE_CS_PULSE, 0),
+        );
+        Self::debug_result(
+            progress,
+            "finish: cart_write 0x0000=0x00 (disable cartridge RAM)",
+            self.cart_write(0x0000, 0x00),
+        );
+        self.debug_cart_power(progress, "finish: before LED reset");
+        self.reset_status_leds(progress, "finish: reset status/mode LEDs");
+        self.debug_cart_power(progress, "finish: after LED reset, before power off");
+        self.power_off_cart(progress, "finish: power off cartridge slot");
+        self.clear_local_rx();
+        self.flush_endpoints();
+        progress.message("[debug][session] finish: endpoint buffers reset locally");
+    }
+
+    pub fn mark_session_error(&self, progress: &mut impl Progress) {
+        self.raw_led_command(
+            progress,
+            "session result: mark failure/error",
+            CMD_OFW_ERROR_LED_ON,
+            "Mode/Error LED red",
+        );
+    }
+
+    pub fn mark_session_done(&self, progress: &mut impl Progress) {
+        self.raw_led_command(
+            progress,
+            "session result: mark success/done",
+            CMD_OFW_DONE_LED_ON,
+            "Done/Status LED green",
+        );
     }
 
     fn write_wait_retry(&self, data: &[u8], ctx: &str, retries: usize) -> Result<()> {
@@ -525,6 +747,50 @@ impl UsbDev {
         Ok(())
     }
 
+    fn sram_write_byte(&self, gb_addr: u32, value: u8, progress: &mut impl Progress) -> Result<()> {
+        // Match FlashGBX's _cart_write(..., sram=True) ordering exactly. The
+        // firmware path for single-byte SRAM writes is not the same as bulk
+        // WriteRAM(): it does not set DMG_ACCESS_MODE before issuing 0xB3.
+        self.required_step(
+            progress,
+            "byte-write: SET_VARIABLE DMG_WRITE_CS_PULSE=1",
+            self.set_var(VAR_DMG_WRITE_CS_PULSE, 1),
+        )?;
+        self.required_step(
+            progress,
+            &format!("byte-write: SET_VARIABLE ADDRESS=0x{gb_addr:04X}"),
+            self.set_var(VAR_ADDRESS, gb_addr),
+        )?;
+        self.required_step(
+            progress,
+            "byte-write: SET_VARIABLE TRANSFER_SIZE=1",
+            self.set_var(VAR_TRANSFER_SIZE, 1),
+        )?;
+
+        progress.message(&format!(
+            "[debug][byte-write] SEND 0x{CMD_DMG_CART_WRITE_SRAM:02X} DMG_CART_WRITE_SRAM for 0x{gb_addr:04X}=0x{value:02X}"
+        ));
+        self.required_step(
+            progress,
+            "byte-write: send DMG_CART_WRITE_SRAM command",
+            self.bulk_write(&[CMD_DMG_CART_WRITE_SRAM]),
+        )?;
+
+        progress.message(&format!("[debug][byte-write] SEND data byte 0x{value:02X}"));
+        self.required_step(
+            progress,
+            "byte-write: send data byte",
+            self.bulk_write(&[value]),
+        )?;
+
+        progress.message("[debug][byte-write] waiting for byte write ACK");
+        self.required_step(
+            progress,
+            "byte-write: DMG_CART_WRITE_SRAM byte ACK",
+            self.expect_ack("DMG_CART_WRITE_SRAM byte"),
+        )
+    }
+
     pub fn read_cartridge_header(&self) -> Result<Vec<u8>> {
         self.set_var(VAR_TRANSFER_SIZE, READ_CHUNK as u32)?;
         self.set_var(VAR_DMG_ACCESS_MODE, 1)?;
@@ -551,12 +817,20 @@ impl UsbDev {
         self.set_var(VAR_ADDRESS, gb_addr)?;
         self.set_var(VAR_DMG_ACCESS_MODE, 3)?;
         self.set_var(VAR_DMG_READ_CS_PULSE, 1)?;
-        for sub in (0..out.len()).step_by(READ_CHUNK) {
-            self.bulk_write(&[CMD_DMG_CART_READ])?;
-            self.bulk_read(&mut out[sub..sub + READ_CHUNK])?;
+        let read_result = (|| {
+            for sub in (0..out.len()).step_by(READ_CHUNK) {
+                self.bulk_write(&[CMD_DMG_CART_READ])?;
+                self.bulk_read(&mut out[sub..sub + READ_CHUNK])?;
+            }
+            Ok(())
+        })();
+        let clear_result = self.set_var(VAR_DMG_READ_CS_PULSE, 0);
+
+        match (read_result, clear_result) {
+            (Err(e), _) => Err(e),
+            (Ok(_), Err(e)) => Err(e),
+            (Ok(_), Ok(_)) => Ok(()),
         }
-        self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
-        Ok(())
     }
 
     fn read_sram_window_verified(&self, gb_addr: u32, len: usize) -> Result<Vec<u8>> {
@@ -581,7 +855,7 @@ impl UsbDev {
     }
 
     pub fn dump_save(&self, progress: &mut impl Progress) -> Result<Vec<u8>> {
-        self.prepare_dmg_cart()?;
+        self.prepare_dmg_cart(progress)?;
 
         progress.message("Reading cartridge header using A15...");
         self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
@@ -611,6 +885,7 @@ impl UsbDev {
         for bank in 0..SRAM_BANKS {
             self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
             self.cart_write(0x4000, bank as u8)?;
+            std::thread::sleep(Duration::from_millis(3));
 
             for buf_offset in (0..BANK_SIZE).step_by(SRAM_VERIFY_WINDOW) {
                 let chunk =
@@ -627,7 +902,8 @@ impl UsbDev {
     }
 
     pub fn read_cartridge_report(&self) -> Result<CartridgeReport> {
-        self.prepare_dmg_cart()?;
+        let mut progress = NoProgress;
+        self.prepare_dmg_cart(&mut progress)?;
         self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
         self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
         let header = self.read_cartridge_header()?;
@@ -637,13 +913,14 @@ impl UsbDev {
 
     pub fn erase_save(&self, save_backup: &[u8], progress: &mut impl Progress) -> Result<()> {
         if save_backup.len() != SAVE_SIZE {
-            return Err(gbcam_core::GbcamCoreError::InvalidBackupSize {
+            return Err(gbxcam_core::GbcamCoreError::InvalidBackupSize {
                 actual: save_backup.len(),
                 expected: SAVE_SIZE,
             }
             .into());
         }
 
+        self.prepare_dmg_cart(progress)?;
         progress.message("Erasing SRAM...");
         self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
         self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
@@ -677,13 +954,9 @@ impl UsbDev {
     ) -> Result<[u8; ORDER_COUNT]> {
         let order = album_order_after_delete(save_backup, physical_slots)?;
 
+        self.prepare_dmg_cart(progress)?;
         progress.message("Deleting selected photos from camera album...");
-        self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
-        self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
-        self.cart_write(0x0000, 0x0A)?;
-        self.cart_write(0x4000, (ORDER_OFFSET / BANK_SIZE) as u8)?;
-        std::thread::sleep(Duration::from_millis(20));
-        self.sram_write_chunk(0xA000 + (ORDER_OFFSET % BANK_SIZE) as u32, &order)?;
+        self.write_album_order_verified(save_backup, &order, progress)?;
         self.cart_write(0x0000, 0x00)?;
         self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
         self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
@@ -691,29 +964,184 @@ impl UsbDev {
         Ok(order)
     }
 
-    fn prepare_dmg_cart(&self) -> Result<()> {
-        self.cmd_ack(CMD_SET_MODE_DMG)?;
-        self.cmd_ack(CMD_SET_VOLTAGE_5V)?;
-        self.set_var(VAR_DMG_READ_METHOD, DMG_READ_METHOD_A15)?;
-        self.set_var(VAR_CART_MODE, 1)?;
-        self.set_var(VAR_ADDRESS, 0)?;
+    fn write_album_order_verified(
+        &self,
+        save_backup: &[u8],
+        order: &[u8; ORDER_COUNT],
+        progress: &mut impl Progress,
+    ) -> Result<()> {
+        let bank = ORDER_OFFSET / BANK_SIZE;
+        let bank_off = ORDER_OFFSET % BANK_SIZE;
+        let aligned_off = bank_off & !(WRITE_CHUNK - 1);
+        let chunk_abs = bank * BANK_SIZE + aligned_off;
+        let order_in_chunk = bank_off - aligned_off;
+
+        let mut chunk = save_backup[chunk_abs..chunk_abs + WRITE_CHUNK].to_vec();
+        chunk[order_in_chunk..order_in_chunk + ORDER_COUNT].copy_from_slice(order);
+
+        progress.message(&format!(
+            "[debug][delete] order write plan: order_offset=0x{ORDER_OFFSET:05X}, bank={bank}, bank_off=0x{bank_off:04X}, aligned_off=0x{aligned_off:04X}, chunk_len={}, order_in_chunk=0x{order_in_chunk:02X}",
+            chunk.len()
+        ));
+        progress.message(&format!(
+            "[debug][delete] desired order bytes: {:02X?}",
+            &order[..]
+        ));
+
+        for attempt in 1..=3 {
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: enter SRAM firmware byte-write mode"
+            ));
+            self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
+            self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
+            self.set_var(VAR_DMG_ACCESS_MODE, 4)?;
+            self.cart_write(0x0000, 0x0A)?;
+            self.cart_write(0x4000, bank as u8)?;
+            std::thread::sleep(Duration::from_millis(20));
+
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: writing {} order bytes with DMG_CART_WRITE_SRAM transfer_size=1",
+                ORDER_COUNT
+            ));
+            for (i, value) in order.iter().enumerate() {
+                let address = 0xA000 + bank_off as u32 + i as u32;
+                if i < 4 || i >= ORDER_COUNT - 4 {
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: sram_write_byte 0x{address:04X}=0x{value:02X}"
+                    ));
+                } else if i == 4 {
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: suppressing middle order-byte write logs"
+                    ));
+                }
+                self.sram_write_byte(address, *value, progress)?;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+
+            progress.message(
+                "[debug][delete] firmware order-byte writes sent; waiting 250 ms before verification",
+            );
+            std::thread::sleep(Duration::from_millis(250));
+
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: read back 0x{WRITE_CHUNK:04X} byte chunk for verification"
+            ));
+            match self.read_sram_window_verified(0xA000 + aligned_off as u32, WRITE_CHUNK) {
+                Ok(verify) if verify[order_in_chunk..order_in_chunk + ORDER_COUNT] == order[..] => {
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: verification OK; order bytes persisted"
+                    ));
+                    return Ok(());
+                }
+                Ok(verify) => {
+                    let got = &verify[order_in_chunk..order_in_chunk + ORDER_COUNT];
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: verification mismatch; expected {:02X?}; got {:02X?}",
+                        &order[..],
+                        got
+                    ));
+                }
+                Err(e) if attempt < 3 => {
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: verification read failed, retrying write: {e}"
+                    ));
+                }
+                Err(e) => {
+                    progress.message(&format!(
+                        "[debug][delete] attempt {attempt}/3: verification read failed: {e}"
+                    ));
+                    return Err(e);
+                }
+            }
+
+            self.clear_local_rx();
+            std::thread::sleep(Duration::from_millis(80 * attempt as u64));
+        }
+
+        Err(GbcamUsbError::Protocol(
+            "delete verification failed: cartridge order table did not match the written data"
+                .to_string(),
+        ))
+    }
+
+    fn prepare_dmg_cart(&self, progress: &mut impl Progress) -> Result<()> {
+        progress.message("[debug][prepare] begin DMG cartridge preparation");
+        self.debug_cart_power(progress, "prepare: entry");
+        self.required_step(
+            progress,
+            "prepare: SET_MODE_DMG 0xA3",
+            self.cmd_ack(CMD_SET_MODE_DMG),
+        )?;
+        self.required_step(
+            progress,
+            "prepare: SET_VOLTAGE_5V 0xA5",
+            self.cmd_ack(CMD_SET_VOLTAGE_5V),
+        )?;
+        self.required_step(
+            progress,
+            "prepare: SET_VARIABLE DMG_READ_METHOD=A15",
+            self.set_var(VAR_DMG_READ_METHOD, DMG_READ_METHOD_A15),
+        )?;
+        self.required_step(
+            progress,
+            "prepare: SET_VARIABLE CART_MODE=DMG",
+            self.set_var(VAR_CART_MODE, 1),
+        )?;
+        self.required_step(
+            progress,
+            "prepare: SET_VARIABLE ADDRESS=0",
+            self.set_var(VAR_ADDRESS, 0),
+        )?;
 
         if self.has_cart_power {
+            self.debug_cart_power(progress, "prepare: before mandatory power cycle");
             self.bulk_write(&[CMD_QUERY_CART_PWR])?;
             let powered = self.read_u8()?;
-            if powered == 0 {
-                self.cmd_ack(CMD_SET_MODE_DMG)?;
-                self.bulk_write(&[CMD_CART_PWR_ON])?;
-                std::thread::sleep(Duration::from_millis(200));
-                self.expect_ack("CART_PWR_ON")?;
-                self.bulk_write(&[CMD_QUERY_CART_PWR])?;
-                let _ = self.read_u8()?;
-                self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET after cart power on")?;
+            progress.message(&format!(
+                "[debug][power] prepare: CART_PWR raw before power cycle = 0x{powered:02X}"
+            ));
+            if powered != 0 {
+                self.power_off_cart(
+                    progress,
+                    "prepare: power cycle existing cartridge power off",
+                );
+                std::thread::sleep(Duration::from_millis(150));
             }
+
+            self.required_step(
+                progress,
+                "prepare: SET_MODE_DMG before CART_PWR_ON",
+                self.cmd_ack(CMD_SET_MODE_DMG),
+            )?;
+            progress.message(&format!(
+                "[debug][power] SEND 0x{CMD_CART_PWR_ON:02X}: prepare: power on cartridge slot; expected LED effect: Power LED red"
+            ));
+            self.bulk_write(&[CMD_CART_PWR_ON])?;
+            std::thread::sleep(Duration::from_millis(200));
+            self.required_step(
+                progress,
+                "prepare: CART_PWR_ON ack",
+                self.expect_ack("CART_PWR_ON"),
+            )?;
+            self.bulk_write(&[CMD_QUERY_CART_PWR])?;
+            let powered_after = self.read_u8()?;
+            progress.message(&format!(
+                "[debug][power] prepare: CART_PWR raw after power on = 0x{powered_after:02X}"
+            ));
+            self.required_step(
+                progress,
+                "prepare: DMG_MBC_RESET after cart power on",
+                self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET after cart power on"),
+            )?;
         } else {
-            self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET")?;
+            self.required_step(
+                progress,
+                "prepare: DMG_MBC_RESET",
+                self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET"),
+            )?;
         }
         std::thread::sleep(Duration::from_millis(100));
+        self.debug_cart_power(progress, "prepare: complete");
         Ok(())
     }
 
@@ -830,6 +1258,15 @@ mod tests {
         assert!(UsbDev::ack_ok(0x03));
         assert!(!UsbDev::ack_ok(0x02));
         assert!(!UsbDev::ack_ok(0x19));
+    }
+
+    #[test]
+    fn lifecycle_command_constants_match_flashgbx_docs() {
+        assert_eq!(CMD_OFW_DONE_LED_ON, 0x3D);
+        assert_eq!(CMD_OFW_ERROR_LED_ON, 0x3F);
+        assert_eq!(CMD_OFW_CART_MODE, 0x43);
+        assert_eq!(CMD_CART_PWR_ON, 0xF2);
+        assert_eq!(CMD_CART_PWR_OFF, 0xF3);
     }
 
     #[test]

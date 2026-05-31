@@ -23,9 +23,9 @@ extract-sav save="dump/GAMEBOYCAMERA.sav" output="extracted":
     output_path="$repo/{{output}}"
     test -f "$save_path" || { echo "Save file not found: $save_path" >&2; exit 1; }
     mkdir -p "$output_path"
-    cargo build -q -p gbcam-cli --bin gbcam-rip
+    cargo build -q -p gbxcam-cli --bin gbxcam
     cd "$output_path"
-    "$repo/target/debug/gbcam-rip" "$save_path"
+    "$repo/target/debug/gbxcam" "$save_path"
     echo "Extracted to: $output_path"
 
 _android-ndk-home api=android-api:
@@ -178,23 +178,23 @@ android-cli api=android-api: (android-toolchain api)
     set -euo pipefail
     ndk="$(just --quiet _android-ndk-home {{api}})"
     CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ndk/toolchains/llvm/prebuilt/{{android-host}}/bin/aarch64-linux-android{{api}}-clang" \
-        cargo build --release -p gbcam-cli --bin gbcam-rip --target {{android-target}}
-    echo "Built: target/{{android-target}}/release/gbcam-rip"
+        cargo build --release -p gbxcam-cli --bin gbxcam --target {{android-target}}
+    echo "Built: target/{{android-target}}/release/gbxcam"
 
 android-ffi api=android-api: (android-toolchain api)
     #!/usr/bin/env bash
     set -euo pipefail
     ndk="$(just --quiet _android-ndk-home {{api}})"
     CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ndk/toolchains/llvm/prebuilt/{{android-host}}/bin/aarch64-linux-android{{api}}-clang" \
-        cargo build --release -p gbcam-ffi --target {{android-target}}
-    echo "Built: target/{{android-target}}/release/libgbcam_ffi.so"
+        cargo build --release -p gbxcam-ffi --target {{android-target}}
+    echo "Built: target/{{android-target}}/release/libgbxcam_ffi.so"
 
 android-all api=android-api: (android-cli api) (android-ffi api)
 
 android-app-libs api=android-api: (android-ffi api)
     mkdir -p apps/android/app/src/main/jniLibs/arm64-v8a
-    cp target/{{android-target}}/release/libgbcam_ffi.so apps/android/app/src/main/jniLibs/arm64-v8a/libgbcam_ffi.so
-    echo "Copied: apps/android/app/src/main/jniLibs/arm64-v8a/libgbcam_ffi.so"
+    cp target/{{android-target}}/release/libgbxcam_ffi.so apps/android/app/src/main/jniLibs/arm64-v8a/libgbxcam_ffi.so
+    echo "Copied: apps/android/app/src/main/jniLibs/arm64-v8a/libgbxcam_ffi.so"
 
 android-apk api=android-api: (android-app-libs api)
     #!/usr/bin/env bash
@@ -227,13 +227,17 @@ android-pull-dumps output="gbcam-dumps":
     mkdir -p "{{output}}"
     adb pull /sdcard/Android/data/com.tolik518.gbcam/files/dumps "{{output}}"
 
+android-push-save save="dump2/GAMEBOYCAMERA.sav":
+    adb shell mkdir -p /sdcard/Android/data/com.tolik518.gbcam/files/dumps
+    adb push "{{save}}" /sdcard/Android/data/com.tolik518.gbcam/files/dumps/GAMEBOYCAMERA.sav
+
 android-cli-push api=android-api: (android-cli api)
     #!/usr/bin/env bash
     set -euo pipefail
     command -v adb >/dev/null || { echo "adb not found. Install Android platform-tools."; exit 1; }
     adb get-state >/dev/null
-    adb push "target/{{android-target}}/release/gbcam-rip" "/sdcard/Download/gbcam-rip"
+    adb push "target/{{android-target}}/release/gbxcam" "/sdcard/Download/gbxcam"
     echo
     echo "On Termux, run:"
-    echo "  cp /sdcard/Download/gbcam-rip ~/gbcam-rip"
-    echo "  chmod +x ~/gbcam-rip"
+    echo "  cp /sdcard/Download/gbxcam ~/gbxcam"
+    echo "  chmod +x ~/gbxcam"

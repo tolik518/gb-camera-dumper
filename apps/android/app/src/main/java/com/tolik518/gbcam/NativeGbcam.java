@@ -23,5 +23,7 @@ final class NativeGbcam {
             String physicalSlotsCsv,
             Progress progress);
 
+    static native String loadGalleryFromSave(String savePath, String outputDir);
+
     static native String dumpFromFd(int fd, String outputDir, boolean eraseAfter);
 }

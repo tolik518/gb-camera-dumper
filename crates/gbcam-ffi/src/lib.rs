@@ -6,6 +6,7 @@ use jni::JNIEnv;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[no_mangle]
 pub extern "C" fn gbcam_version() -> *mut c_char {
@@ -86,6 +87,29 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_deletePhotosFromFd<'l
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromSave<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    save_path: JString<'local>,
+    output_dir: JString<'local>,
+) -> jstring {
+    let save_path = match java_path(&mut env, save_path) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+    let output_dir = match java_path(&mut env, output_dir) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+
+    java_result(
+        &mut env,
+        load_gallery_from_save(save_path, output_dir),
+        "GB Camera cached gallery load failed",
+    )
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_dumpFromFd(
     mut env: JNIEnv,
     _class: JClass,
@@ -139,7 +163,7 @@ impl Progress for JniProgress<'_, '_> {
         self.emit(message);
     }
 
-    fn cartridge_header(&mut self, report: &gbcam_core::CartridgeReport) {
+    fn cartridge_header(&mut self, report: &gbxcam_core::CartridgeReport) {
         self.emit(&format!(
             "Cartridge: {} mapper 0x{:02X}",
             report.title, report.mapper
@@ -169,7 +193,16 @@ fn load_gallery_from_fd(
     progress.message("Connecting to GBxCart RW...");
     let (dev, info) = UsbDev::connect(fd, progress)?;
     progress.message("Connected. Dumping camera save...");
-    let save = dev.dump_save(progress)?;
+    let save = match dev.dump_save(progress) {
+        Ok(save) => {
+            finish_usb_session(&dev, true, progress);
+            save
+        }
+        Err(e) => {
+            finish_usb_session(&dev, false, progress);
+            return Err(e.into());
+        }
+    };
 
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
@@ -195,15 +228,40 @@ fn delete_photos_from_fd(
     progress.message("Connecting to GBxCart RW...");
     let (dev, info) = UsbDev::connect(fd, progress)?;
     let save = std::fs::read(&save_path)?;
-    dev.delete_album_photos(&save, &slots, progress)?;
+    let backup_path = timestamped_backup_path(&output_dir, "GAMEBOYCAMERA-before-delete")?;
+    std::fs::create_dir_all(&output_dir)?;
+    std::fs::write(&backup_path, &save)?;
+    progress.message(&format!(
+        "Pre-delete backup saved: {}",
+        backup_path.display()
+    ));
+    if let Err(e) = dev.delete_album_photos(&save, &slots, progress) {
+        finish_usb_session(&dev, false, progress);
+        return Err(e.into());
+    }
+    finish_usb_session(&dev, true, progress);
 
     let updated = apply_album_delete(&save, &slots)?;
-    std::fs::create_dir_all(&output_dir)?;
     std::fs::write(&save_path, &updated)?;
     write_photos_to_dir(&updated, &output_dir)?;
     progress.message("Gallery updated after delete.");
 
     Ok(gallery_json(&updated, &output_dir, &save_path, &info)?)
+}
+
+fn load_gallery_from_save(
+    save_path: PathBuf,
+    output_dir: PathBuf,
+) -> Result<String, Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(&output_dir)?;
+    let save = std::fs::read(&save_path)?;
+    let info = GbxCartInfo {
+        pcb_ver: 0,
+        ofw_ver: 0,
+        cfw_ver: 0,
+        name: Some("Cached save".to_string()),
+    };
+    gallery_json(&save, &output_dir, &save_path, &info)
 }
 
 fn dump_from_fd(
@@ -215,15 +273,25 @@ fn dump_from_fd(
     std::fs::create_dir_all(&output_dir)?;
 
     let (dev, info) = UsbDev::connect(fd, progress)?;
-    let save = dev.dump_save(progress)?;
+    let save = match dev.dump_save(progress) {
+        Ok(save) => save,
+        Err(e) => {
+            finish_usb_session(&dev, false, progress);
+            return Err(e.into());
+        }
+    };
 
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
     let photo_names = write_photos_to_dir(&save, &output_dir)?;
 
     if erase_after {
-        dev.erase_save(&save, progress)?;
+        if let Err(e) = dev.erase_save(&save, progress) {
+            finish_usb_session(&dev, false, progress);
+            return Err(e.into());
+        }
     }
+    finish_usb_session(&dev, true, progress);
 
     let image_list = photo_names
         .iter()
@@ -243,6 +311,15 @@ fn dump_from_fd(
             ""
         }
     ))
+}
+
+fn finish_usb_session(dev: &UsbDev, success: bool, progress: &mut impl Progress) {
+    if success {
+        dev.mark_session_done(progress);
+    } else {
+        progress.message("[debug][session] failure path: skipping OFW_ERROR_LED_ON so diagnostics do not intentionally leave Mode/Error LED red");
+    }
+    dev.finish_session(progress);
 }
 
 fn gallery_json(
@@ -297,6 +374,7 @@ fn connected_label(info: &GbxCartInfo) -> String {
             "{} (PCB v{}, OFW R{}, CFW L{})",
             name, info.pcb_ver, info.ofw_ver, info.cfw_ver
         ),
+        (Some(name), _) => name.clone(),
         (_, cfw) if cfw > 0 => format!(
             "GBxCart RW v{} (OFW R{}, CFW L{})",
             info.pcb_ver, info.ofw_ver, info.cfw_ver
@@ -313,7 +391,7 @@ fn parse_physical_slots(csv: &str) -> Result<Vec<usize>, Box<dyn std::error::Err
         .filter(|part| !part.is_empty())
     {
         let slot = part.parse::<usize>()?;
-        if slot >= gbcam_core::ORDER_COUNT {
+        if slot >= gbxcam_core::ORDER_COUNT {
             return Err(format!("invalid physical slot {slot}").into());
         }
         if !slots.contains(&slot) {
@@ -321,6 +399,14 @@ fn parse_physical_slots(csv: &str) -> Result<Vec<usize>, Box<dyn std::error::Err
         }
     }
     Ok(slots)
+}
+
+fn timestamped_backup_path(
+    output_dir: &Path,
+    prefix: &str,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    Ok(output_dir.join(format!("{prefix}-{seconds}.sav")))
 }
 
 fn java_path(env: &mut JNIEnv, value: JString) -> Result<PathBuf, String> {
