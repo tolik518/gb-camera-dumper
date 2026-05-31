@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "gbxcam-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gbxcam-core",
  "gbxcam-usb",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "gbxcam-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "png",
  "thiserror 2.0.18",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "gbxcam-ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gbxcam-core",
  "gbxcam-usb",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "gbxcam-usb"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gbxcam-core",
  "libc",

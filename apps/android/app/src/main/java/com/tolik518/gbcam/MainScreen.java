@@ -1,6 +1,7 @@
 package com.tolik518.gbcam;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -35,14 +36,17 @@ final class MainScreen {
 
     private final Context context;
     private final Listener listener;
+    private final Palette colors;
     private final LinearLayout root;
     private final TextView subtitle;
     private final TextView selection;
     private final TextView empty;
     private final TextView logs;
+    private final TextView logTitle;
     private final ProgressBar progress;
     private final GridLayout grid;
     private final LinearLayout loadingRow;
+    private final ScrollView logScroll;
     private final Button loadButton;
     private final Button selectAllButton;
     private final Button deselectAllButton;
@@ -51,15 +55,17 @@ final class MainScreen {
 
     private GalleryState gallery;
     private boolean busy;
+    private boolean logsVisible;
 
     MainScreen(Context context, Listener listener) {
         this.context = context;
         this.listener = listener;
+        this.colors = Palette.from(context);
 
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(28, 28, 28, 20);
-        root.setBackgroundColor(Color.rgb(248, 250, 252));
+        root.setBackgroundColor(colors.background);
 
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -69,11 +75,15 @@ final class MainScreen {
         title.setText("GBxCAM Viewer");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.rgb(15, 23, 42));
+        title.setTextColor(colors.textPrimary);
+        title.setContentDescription("Toggle logs");
+        title.setOnClickListener(v -> toggleLogs());
+        titleBlock.setOnClickListener(v -> toggleLogs());
+        titleBlock.setClickable(true);
         subtitle = new TextView(context);
         subtitle.setText("Load the camera to view photos.");
         subtitle.setTextSize(14);
-        subtitle.setTextColor(Color.rgb(71, 85, 105));
+        subtitle.setTextColor(colors.textSecondary);
         titleBlock.addView(title);
         titleBlock.addView(subtitle);
         header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
@@ -91,7 +101,7 @@ final class MainScreen {
         loadingRow.addView(progress);
         TextView loadingText = new TextView(context);
         loadingText.setText("Working with GBxCart RW...");
-        loadingText.setTextColor(Color.rgb(71, 85, 105));
+        loadingText.setTextColor(colors.textSecondary);
         loadingText.setPadding(16, 0, 0, 0);
         loadingRow.addView(loadingText);
         root.addView(loadingRow, matchWidthWrapContent());
@@ -102,7 +112,7 @@ final class MainScreen {
         saveButton = smallButton("Save selected", v -> listener.onSaveSelectedRequested());
         deleteButton = smallButton("Delete selected", v -> listener.onDeleteSelectedRequested());
         deleteButton.setTextColor(Color.WHITE);
-        deleteButton.setBackgroundColor(Color.rgb(185, 28, 28));
+        deleteButton.setBackgroundColor(colors.danger);
         actions.addView(selectAllButton);
         actions.addView(deselectAllButton);
         actions.addView(saveButton);
@@ -111,7 +121,7 @@ final class MainScreen {
 
         selection = new TextView(context);
         selection.setTextSize(13);
-        selection.setTextColor(Color.rgb(71, 85, 105));
+        selection.setTextColor(colors.textSecondary);
         selection.setPadding(0, 8, 0, 8);
         root.addView(selection, matchWidthWrapContent());
 
@@ -123,7 +133,7 @@ final class MainScreen {
         empty = new TextView(context);
         empty.setText("No camera photos loaded yet.");
         empty.setGravity(Gravity.CENTER);
-        empty.setTextColor(Color.rgb(100, 116, 139));
+        empty.setTextColor(colors.textMuted);
         empty.setPadding(0, 80, 0, 80);
 
         LinearLayout galleryContainer = new LinearLayout(context);
@@ -138,24 +148,25 @@ final class MainScreen {
                 0,
                 1));
 
-        TextView logTitle = new TextView(context);
+        logTitle = new TextView(context);
         logTitle.setText("Logs");
         logTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        logTitle.setTextColor(Color.rgb(51, 65, 85));
+        logTitle.setTextColor(colors.textPrimary);
         logTitle.setPadding(0, 8, 0, 4);
         root.addView(logTitle, matchWidthWrapContent());
 
         logs = new TextView(context);
         logs.setTextSize(12);
-        logs.setTextColor(Color.rgb(39, 39, 42));
+        logs.setTextColor(colors.logText);
         logs.setTextIsSelectable(true);
         logs.setPadding(12, 12, 12, 12);
-        logs.setBackgroundColor(Color.WHITE);
-        ScrollView logScroll = new ScrollView(context);
+        logs.setBackgroundColor(colors.logBackground);
+        logScroll = new ScrollView(context);
         logScroll.addView(logs);
         root.addView(logScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(120)));
+        setLogsVisible(false);
 
         setBusy(false, null);
         updateActions();
@@ -196,6 +207,17 @@ final class MainScreen {
         }
     }
 
+    private void toggleLogs() {
+        setLogsVisible(!logsVisible);
+    }
+
+    private void setLogsVisible(boolean visible) {
+        logsVisible = visible;
+        int visibility = visible ? View.VISIBLE : View.GONE;
+        logTitle.setVisibility(visibility);
+        logScroll.setVisibility(visibility);
+    }
+
     GalleryState gallery() {
         return gallery;
     }
@@ -222,10 +244,10 @@ final class MainScreen {
         deleteButton.setEnabled(!busy && selected > 0);
         if (!busy && selected > 0) {
             deleteButton.setTextColor(Color.WHITE);
-            deleteButton.setBackgroundColor(Color.rgb(185, 28, 28));
+            deleteButton.setBackgroundColor(colors.danger);
         } else {
-            deleteButton.setTextColor(Color.rgb(148, 163, 184));
-            deleteButton.setBackgroundColor(Color.rgb(241, 245, 249));
+            deleteButton.setTextColor(colors.disabledText);
+            deleteButton.setBackgroundColor(colors.disabledBackground);
         }
     }
 
@@ -244,7 +266,7 @@ final class MainScreen {
         image.setImageURI(Uri.fromFile(new File(photo.path)));
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
-        image.setBackgroundColor(Color.WHITE);
+        image.setBackgroundColor(colors.photoBackground);
         tile.addView(image, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(106)));
@@ -261,7 +283,7 @@ final class MainScreen {
         row.addView(check);
         TextView label = new TextView(context);
         label.setText("Photo " + String.format("%02d", photo.displayIndex + 1));
-        label.setTextColor(Color.rgb(30, 41, 59));
+        label.setTextColor(colors.textPrimary);
         label.setTextSize(12);
         row.addView(label);
         tile.addView(row, matchWidthWrapContent());
@@ -271,8 +293,8 @@ final class MainScreen {
 
     private GradientDrawable tileBackground(boolean selected) {
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(selected ? Color.rgb(219, 234, 254) : Color.WHITE);
-        bg.setStroke(dp(1), selected ? Color.rgb(37, 99, 235) : Color.rgb(226, 232, 240));
+        bg.setColor(selected ? colors.selectedBackground : colors.surface);
+        bg.setStroke(dp(1), selected ? colors.selectedBorder : colors.border);
         bg.setCornerRadius(dp(8));
         return bg;
     }
@@ -309,5 +331,90 @@ final class MainScreen {
 
     private int dp(int value) {
         return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private static final class Palette {
+        final int background;
+        final int surface;
+        final int logBackground;
+        final int photoBackground;
+        final int textPrimary;
+        final int textSecondary;
+        final int textMuted;
+        final int logText;
+        final int border;
+        final int selectedBackground;
+        final int selectedBorder;
+        final int danger;
+        final int disabledText;
+        final int disabledBackground;
+
+        private Palette(
+                int background,
+                int surface,
+                int logBackground,
+                int photoBackground,
+                int textPrimary,
+                int textSecondary,
+                int textMuted,
+                int logText,
+                int border,
+                int selectedBackground,
+                int selectedBorder,
+                int danger,
+                int disabledText,
+                int disabledBackground) {
+            this.background = background;
+            this.surface = surface;
+            this.logBackground = logBackground;
+            this.photoBackground = photoBackground;
+            this.textPrimary = textPrimary;
+            this.textSecondary = textSecondary;
+            this.textMuted = textMuted;
+            this.logText = logText;
+            this.border = border;
+            this.selectedBackground = selectedBackground;
+            this.selectedBorder = selectedBorder;
+            this.danger = danger;
+            this.disabledText = disabledText;
+            this.disabledBackground = disabledBackground;
+        }
+
+        static Palette from(Context context) {
+            int nightMode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+            if (nightMode == Configuration.UI_MODE_NIGHT_YES) {
+                return new Palette(
+                        Color.rgb(15, 23, 42),
+                        Color.rgb(30, 41, 59),
+                        Color.rgb(2, 6, 23),
+                        Color.rgb(15, 23, 42),
+                        Color.rgb(241, 245, 249),
+                        Color.rgb(203, 213, 225),
+                        Color.rgb(148, 163, 184),
+                        Color.rgb(226, 232, 240),
+                        Color.rgb(51, 65, 85),
+                        Color.rgb(30, 58, 138),
+                        Color.rgb(96, 165, 250),
+                        Color.rgb(220, 38, 38),
+                        Color.rgb(100, 116, 139),
+                        Color.rgb(30, 41, 59));
+            }
+
+            return new Palette(
+                    Color.rgb(248, 250, 252),
+                    Color.WHITE,
+                    Color.WHITE,
+                    Color.WHITE,
+                    Color.rgb(15, 23, 42),
+                    Color.rgb(71, 85, 105),
+                    Color.rgb(100, 116, 139),
+                    Color.rgb(39, 39, 42),
+                    Color.rgb(226, 232, 240),
+                    Color.rgb(219, 234, 254),
+                    Color.rgb(37, 99, 235),
+                    Color.rgb(185, 28, 28),
+                    Color.rgb(148, 163, 184),
+                    Color.rgb(241, 245, 249));
+        }
     }
 }

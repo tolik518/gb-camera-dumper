@@ -78,14 +78,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (dev, info) = UsbDev::connect(usb_fd, &mut progress)?;
     print_connected(&info);
 
-    let save = dev.dump_save(&mut progress)?;
+    let save = match dev.dump_save(&mut progress) {
+        Ok(save) => save,
+        Err(e) => {
+            dev.finish_operation(false, &mut progress);
+            return Err(e.into());
+        }
+    };
     match fs::write("GAMEBOYCAMERA.sav", &save) {
         Ok(()) => println!("Saved raw dump: GAMEBOYCAMERA.sav"),
         Err(e) => eprintln!("Warning: could not write .sav: {}", e),
     }
-
-    println!("\nExtracting photos...");
-    extract_photos(&save)?;
 
     if erase {
         println!();
@@ -95,13 +98,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             WRITE_CHUNK
         );
         println!("Preserving Game Boy Camera calibration ranges from the just-created backup.");
-        dev.erase_save(&save, &mut progress)?;
+        if let Err(e) = dev.erase_save(&save, &mut progress) {
+            dev.finish_operation(false, &mut progress);
+            return Err(e.into());
+        }
         println!("Erase complete - camera memory should be ready to shoot again.");
     } else {
         println!(
             "\nTip: run with --erase to wipe camera memory after extracting. Calibration ranges are preserved."
         );
     }
+    dev.finish_operation(true, &mut progress);
+
+    println!("\nExtracting photos...");
+    extract_photos(&save)?;
 
     Ok(())
 }

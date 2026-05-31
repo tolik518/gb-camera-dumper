@@ -1,6 +1,6 @@
 [package]
 name = "gbxcam-usb"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license.workspace = true
 
@@ -8,4 +8,3 @@ license.workspace = true
 gbxcam-core = { path = "../gbcam-core" }
 libc = "0.2"
 thiserror = "2"
-

@@ -11,7 +11,7 @@ Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewe
 
 ## Screenshots
 
-![GBxCAM Viewer screenshot](.github/screenshot.jpg)
+![GBxCAM Viewer screenshot](.github/screenshot-dark.jpg)
 
 ## License
 

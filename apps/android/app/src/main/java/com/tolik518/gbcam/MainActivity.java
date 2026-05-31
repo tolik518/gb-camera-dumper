@@ -170,10 +170,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void startOperation(PendingOperation operation) {
-        if (selectedDevice == null) {
-            refreshDevice();
-        }
-        if (selectedDevice == null) {
+        if (!refreshDevice()) {
             return;
         }
 

@@ -8,6 +8,8 @@ use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 #[no_mangle]
 pub extern "C" fn gbcam_version() -> *mut c_char {
     CString::new(env!("CARGO_PKG_VERSION"))
@@ -187,22 +189,13 @@ fn load_gallery_from_fd(
     fd: jint,
     output_dir: PathBuf,
     progress: &mut impl Progress,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
 
-    progress.message("Connecting to GBxCart RW...");
-    let (dev, info) = UsbDev::connect(fd, progress)?;
-    progress.message("Connected. Dumping camera save...");
-    let save = match dev.dump_save(progress) {
-        Ok(save) => {
-            finish_usb_session(&dev, true, progress);
-            save
-        }
-        Err(e) => {
-            finish_usb_session(&dev, false, progress);
-            return Err(e.into());
-        }
-    };
+    let (info, save) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+        progress.message("Connected. Dumping camera save...");
+        Ok(dev.dump_save(progress)?)
+    })?;
 
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
@@ -219,14 +212,12 @@ fn delete_photos_from_fd(
     output_dir: PathBuf,
     physical_slots_csv: &str,
     progress: &mut impl Progress,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> AppResult<String> {
     let slots = parse_physical_slots(physical_slots_csv)?;
     if slots.is_empty() {
         return Err("No photos selected.".into());
     }
 
-    progress.message("Connecting to GBxCart RW...");
-    let (dev, info) = UsbDev::connect(fd, progress)?;
     let save = std::fs::read(&save_path)?;
     let backup_path = timestamped_backup_path(&output_dir, "GAMEBOYCAMERA-before-delete")?;
     std::fs::create_dir_all(&output_dir)?;
@@ -235,11 +226,10 @@ fn delete_photos_from_fd(
         "Pre-delete backup saved: {}",
         backup_path.display()
     ));
-    if let Err(e) = dev.delete_album_photos(&save, &slots, progress) {
-        finish_usb_session(&dev, false, progress);
-        return Err(e.into());
-    }
-    finish_usb_session(&dev, true, progress);
+
+    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+        Ok(dev.delete_album_photos(&save, &slots, progress)?)
+    })?;
 
     let updated = apply_album_delete(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
@@ -249,10 +239,7 @@ fn delete_photos_from_fd(
     Ok(gallery_json(&updated, &output_dir, &save_path, &info)?)
 }
 
-fn load_gallery_from_save(
-    save_path: PathBuf,
-    output_dir: PathBuf,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn load_gallery_from_save(save_path: PathBuf, output_dir: PathBuf) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
     let save = std::fs::read(&save_path)?;
     let info = GbxCartInfo {
@@ -269,29 +256,20 @@ fn dump_from_fd(
     output_dir: PathBuf,
     erase_after: bool,
     progress: &mut impl Progress,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
 
-    let (dev, info) = UsbDev::connect(fd, progress)?;
-    let save = match dev.dump_save(progress) {
-        Ok(save) => save,
-        Err(e) => {
-            finish_usb_session(&dev, false, progress);
-            return Err(e.into());
+    let (info, save) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+        let save = dev.dump_save(progress)?;
+        if erase_after {
+            dev.erase_save(&save, progress)?;
         }
-    };
+        Ok(save)
+    })?;
 
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
     let photo_names = write_photos_to_dir(&save, &output_dir)?;
-
-    if erase_after {
-        if let Err(e) = dev.erase_save(&save, progress) {
-            finish_usb_session(&dev, false, progress);
-            return Err(e.into());
-        }
-    }
-    finish_usb_session(&dev, true, progress);
 
     let image_list = photo_names
         .iter()
@@ -313,13 +291,20 @@ fn dump_from_fd(
     ))
 }
 
-fn finish_usb_session(dev: &UsbDev, success: bool, progress: &mut impl Progress) {
-    if success {
-        dev.mark_session_done(progress);
-    } else {
-        progress.message("[debug][session] failure path: skipping OFW_ERROR_LED_ON so diagnostics do not intentionally leave Mode/Error LED red");
-    }
-    dev.finish_session(progress);
+fn with_gbxcart_session<T, P, F>(
+    fd: jint,
+    progress: &mut P,
+    operation: F,
+) -> AppResult<(GbxCartInfo, T)>
+where
+    P: Progress,
+    F: FnOnce(&UsbDev, &GbxCartInfo, &mut P) -> AppResult<T>,
+{
+    progress.message("Connecting to GBxCart RW...");
+    let (dev, info) = UsbDev::connect(fd, progress)?;
+    let result = operation(&dev, &info, progress);
+    dev.finish_operation(result.is_ok(), progress);
+    result.map(|value| (info, value))
 }
 
 fn gallery_json(

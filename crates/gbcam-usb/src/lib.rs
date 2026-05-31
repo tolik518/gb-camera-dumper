@@ -605,6 +605,15 @@ impl UsbDev {
         progress.message("[debug][session] finish: endpoint buffers reset locally");
     }
 
+    pub fn finish_operation(&self, success: bool, progress: &mut impl Progress) {
+        if success {
+            self.mark_session_done(progress);
+        } else {
+            progress.message("[debug][session] failure path: skipping OFW_ERROR_LED_ON so diagnostics do not intentionally leave Mode/Error LED red");
+        }
+        self.finish_session(progress);
+    }
+
     pub fn mark_session_error(&self, progress: &mut impl Progress) {
         self.raw_led_command(
             progress,
