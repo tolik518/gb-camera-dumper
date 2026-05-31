@@ -6,7 +6,7 @@ final class NativeGbcam {
     }
 
     static {
-        System.loadLibrary("gbcam_ffi");
+        System.loadLibrary("gbxcam_ffi");
     }
 
     private NativeGbcam() {

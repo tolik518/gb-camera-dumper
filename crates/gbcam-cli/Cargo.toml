@@ -1,15 +1,15 @@
 [package]
-name = "gbcam-cli"
+name = "gbxcam-cli"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
 
 [[bin]]
-name = "gbcam-rip"
+name = "gbxcam"
 path = "src/main.rs"
 
 [dependencies]
-gbcam-core = { path = "../gbcam-core" }
-gbcam-usb = { path = "../gbcam-usb" }
+gbxcam-core = { path = "../gbcam-core" }
+gbxcam-usb = { path = "../gbcam-usb" }
 libc = "0.2"
 

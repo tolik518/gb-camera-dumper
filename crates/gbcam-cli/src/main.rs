@@ -1,13 +1,13 @@
-//! gbcam-rip: Dump and extract all Game Boy Camera photos via GBxCart RW.
+//! gbxcam: Dump and extract all Game Boy Camera photos via GBxCart RW.
 //!
 //! USAGE:
 //!   termux-usb -l
-//!   termux-usb -r -e ./gbcam-rip /dev/bus/usb/001/002
-//!   termux-usb -r -e "./gbcam-rip --erase" /dev/bus/usb/001/002
-//!   gbcam-rip GAMEBOYCAMERA.sav
+//!   termux-usb -r -e ./gbxcam /dev/bus/usb/001/002
+//!   termux-usb -r -e "./gbxcam --erase" /dev/bus/usb/001/002
+//!   gbxcam GAMEBOYCAMERA.sav
 
-use gbcam_core::{write_photos_to_dir, CartridgeReport, MAPPER_MAC_GBD, SAVE_SIZE, WRITE_CHUNK};
-use gbcam_usb::{GbxCartInfo, Progress, UsbDev};
+use gbxcam_core::{write_photos_to_dir, CartridgeReport, MAPPER_MAC_GBD, SAVE_SIZE, WRITE_CHUNK};
+use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -149,7 +149,7 @@ fn resolve_usb_fd(args: &[String]) -> Result<RawFd, Box<dyn std::error::Error>> 
         println!("Opening {} directly...", path);
         return try_open_direct(path).ok_or_else(|| {
             format!(
-                "Permission denied opening {}.\n\nUse termux-usb to get permission:\n  termux-usb -r -e ./gbcam-rip {}",
+                "Permission denied opening {}.\n\nUse termux-usb to get permission:\n  termux-usb -r -e ./gbxcam {}",
                 path, path
             )
             .into()
@@ -161,14 +161,14 @@ fn resolve_usb_fd(args: &[String]) -> Result<RawFd, Box<dyn std::error::Error>> 
         println!("Found: {}", path);
         return try_open_direct(&path).ok_or_else(|| {
             format!(
-                "Permission denied. Use termux-usb:\n  termux-usb -r -e ./gbcam-rip {}",
+                "Permission denied. Use termux-usb:\n  termux-usb -r -e ./gbxcam {}",
                 path
             )
             .into()
         });
     }
 
-    Err("No device found. Check USB OTG connection.\n\nUsage:\n  termux-usb -l\n  termux-usb -r -e ./gbcam-rip /dev/bus/usb/002/002\n  termux-usb -r -e \"./gbcam-rip --erase\" /dev/bus/usb/002/002\n\nOr from an existing save file:\n  ./gbcam-rip GAMEBOYCAMERA.sav".into())
+    Err("No device found. Check USB OTG connection.\n\nUsage:\n  termux-usb -l\n  termux-usb -r -e ./gbxcam /dev/bus/usb/002/002\n  termux-usb -r -e \"./gbxcam --erase\" /dev/bus/usb/002/002\n\nOr from an existing save file:\n  ./gbxcam GAMEBOYCAMERA.sav".into())
 }
 
 fn try_open_direct(path: &str) -> Option<RawFd> {

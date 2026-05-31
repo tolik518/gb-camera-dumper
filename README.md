@@ -1,6 +1,5 @@
-# GB camera dumper
-
-An Android app to dump photos from the GB Camera to your Android Device.
+#  ![](.github/gbcam.png) GBxCAM Viewer
+An Android app to view and transfer photos from the Game Boy Camera to your Android device.
 
 ## Prequisites
 

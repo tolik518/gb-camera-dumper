@@ -28,7 +28,7 @@ final class PhotoExporter {
         }
 
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        String album = "GB Camera/" + stamp;
+        String album = "GBxCAM Viewer/" + stamp;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             exportImagesToMediaStore(context, gallery, album);
         } else {
@@ -91,7 +91,7 @@ final class PhotoExporter {
 
     private static File appExportDir(Context context, String stamp) throws IOException {
         File root = new File(context.getExternalFilesDir(null), "exports");
-        File out = new File(root, "gbcam-" + stamp);
+        File out = new File(root, "gbxcam-" + stamp);
         if (!out.mkdirs() && !out.isDirectory()) {
             throw new IOException("Could not create backup directory: " + out);
         }

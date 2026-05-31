@@ -1,5 +1,5 @@
 [package]
-name = "gbcam-ffi"
+name = "gbxcam-ffi"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-gbcam-core = { path = "../gbcam-core" }
-gbcam-usb = { path = "../gbcam-usb" }
+gbxcam-core = { path = "../gbcam-core" }
+gbxcam-usb = { path = "../gbcam-usb" }
 jni = "0.21"
 

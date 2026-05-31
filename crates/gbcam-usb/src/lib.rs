@@ -1,4 +1,4 @@
-use gbcam_core::{
+use gbxcam_core::{
     album_order_after_delete, cartridge_report_from_header, make_erase_chunk, shifted_header_hint,
     title_from_header, CartridgeReport, BANK_SIZE, DMG_READ_METHOD_A15, DMG_READ_METHOD_SLOW_A15,
     MAPPER_MAC_GBD, ORDER_COUNT, ORDER_OFFSET, READ_CHUNK, SAVE_SIZE, SRAM_BANKS, WRITE_CHUNK,

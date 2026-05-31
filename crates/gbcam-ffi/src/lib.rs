@@ -1,5 +1,5 @@
-use gbcam_core::{apply_album_delete, extract_photos, write_photos_to_dir, write_png, PhotoKind};
-use gbcam_usb::{GbxCartInfo, Progress, UsbDev};
+use gbxcam_core::{apply_album_delete, extract_photos, write_photos_to_dir, write_png, PhotoKind};
+use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jint, jstring};
 use jni::JNIEnv;

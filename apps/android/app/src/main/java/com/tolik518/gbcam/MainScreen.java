@@ -66,7 +66,7 @@ final class MainScreen {
         LinearLayout titleBlock = new LinearLayout(context);
         titleBlock.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(context);
-        title.setText("GB Camera");
+        title.setText("GBxCAM Viewer");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(Color.rgb(15, 23, 42));
