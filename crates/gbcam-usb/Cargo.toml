@@ -1,0 +1,10 @@
+[package]
+name = "gbcam-usb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gbcam-core = { path = "../gbcam-core" }
+libc = "0.2"
+thiserror = "2"
+

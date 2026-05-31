@@ -1,0 +1,12 @@
+/target/
+/legacy/
+/dump/
+/dump2/
+/.gradle-local/
+/.gradle-home/
+/.gradle-tmp/
+/.android-sdk/
+/apps/android/.gradle/
+/apps/android/app/build/
+/apps/android/build/
+/.android-sdk/

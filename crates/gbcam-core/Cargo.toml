@@ -1,0 +1,9 @@
+[package]
+name = "gbcam-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+png = "0.17"
+thiserror = "2"
+
