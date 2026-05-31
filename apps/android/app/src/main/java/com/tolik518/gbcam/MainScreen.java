@@ -106,7 +106,7 @@ final class MainScreen {
         actions.addView(selectAllButton);
         actions.addView(deselectAllButton);
         actions.addView(saveButton);
-        actions.addView(deleteButton);
+        //actions.addView(deleteButton);
         root.addView(actions, matchWidthWrapContent());
 
         selection = new TextView(context);
