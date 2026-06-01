@@ -714,7 +714,11 @@ impl UsbDev {
         buf[0] = CMD_DMG_CART_WRITE;
         buf[1..5].copy_from_slice(&(address as u32).to_be_bytes());
         buf[5] = value;
-        self.bulk_write(&buf)
+        if self.fw_ver >= 12 {
+            self.write_wait_retry(&buf, "DMG_CART_WRITE", 5)
+        } else {
+            self.bulk_write(&buf)
+        }
     }
 
     fn sram_write_chunk(&self, gb_addr: u32, data: &[u8]) -> Result<()> {
@@ -1173,6 +1177,14 @@ impl UsbDev {
         self.cart_write(0x4000, 0x00)?;
 
         self.cart_write(0x0000, 0x0A)?;
+
+        // Warm-up: the MAC-GBD chip can return stale data on the very first SRAM
+        // access after a fresh SRAM enable. Read and discard one chunk so the
+        // verified dump loop always sees stable data. This mirrors the calibration
+        // read that FlashGBX performs in ReadInfo() before calling BackupRAM().
+        let mut warmup = [0u8; READ_CHUNK];
+        let _ = self.read_sram_window(0xA000, &mut warmup);
+
         Ok(())
     }
 }
