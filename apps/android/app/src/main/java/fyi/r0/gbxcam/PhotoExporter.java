@@ -14,6 +14,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
 
@@ -21,34 +22,73 @@ final class PhotoExporter {
     private PhotoExporter() {
     }
 
-    static String exportSelected(Context context, GalleryState gallery) throws IOException {
-        int selected = gallery.selectedCount();
-        if (selected == 0) {
+    static final class ExportResult {
+        final String imageLocation;
+        final String backupLocation;
+        final ArrayList<Uri> imageUris;
+
+        ExportResult(String imageLocation, String backupLocation, ArrayList<Uri> imageUris) {
+            this.imageLocation = imageLocation;
+            this.backupLocation = backupLocation;
+            this.imageUris = imageUris;
+        }
+
+        String summary() {
+            return imageLocation + "\nBackup save: " + backupLocation;
+        }
+    }
+
+    static ExportResult exportSelected(Context context, GalleryState gallery) throws IOException {
+        return exportPhotos(context, gallery, true);
+    }
+
+    static ExportResult exportAll(Context context, GalleryState gallery) throws IOException {
+        return exportPhotos(context, gallery, false);
+    }
+
+    static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly) throws IOException {
+        int count = selectedOnly ? gallery.selectedCount() : gallery.photos.size();
+        if (count == 0) {
             throw new IOException("No photos selected.");
         }
 
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        String album = "GBxCAM Viewer/" + stamp;
+        String album = "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
         String imageLocation;
+        ArrayList<Uri> imageUris;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            exportImagesToMediaStore(context, gallery, album);
+            imageUris = exportImagesToMediaStore(context, gallery, album, selectedOnly);
             imageLocation = "Pictures/" + album;
         } else {
-            imageLocation = exportImagesToAppFolder(context, gallery, album).getAbsolutePath();
+            File output = exportImagesToAppFolder(context, gallery, album, selectedOnly);
+            imageUris = new ArrayList<>();
+            imageLocation = output.getAbsolutePath();
         }
 
         File backupDir = appExportDir(context, stamp);
         copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
-        return imageLocation + "\nBackup save: " + backupDir.getAbsolutePath();
+        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris);
     }
 
-    private static void exportImagesToMediaStore(
+    static void copyToStream(File source, OutputStream out) throws IOException {
+        byte[] buffer = new byte[8192];
+        try (FileInputStream in = new FileInputStream(source)) {
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+        }
+    }
+
+    private static ArrayList<Uri> exportImagesToMediaStore(
             Context context,
             GalleryState gallery,
-            String album) throws IOException {
+            String album,
+            boolean selectedOnly) throws IOException {
         ContentResolver resolver = context.getContentResolver();
+        ArrayList<Uri> uris = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (!photo.selected) {
+            if (selectedOnly && !photo.selected) {
                 continue;
             }
 
@@ -74,23 +114,26 @@ final class PhotoExporter {
                 values.clear();
                 values.put(MediaStore.Images.Media.IS_PENDING, 0);
                 resolver.update(uri, values, null, null);
+                uris.add(uri);
             } catch (IOException | RuntimeException e) {
                 resolver.delete(uri, null, null);
                 throw e;
             }
         }
+        return uris;
     }
 
     private static File exportImagesToAppFolder(
             Context context,
             GalleryState gallery,
-            String album) throws IOException {
+            String album,
+            boolean selectedOnly) throws IOException {
         File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
         if (!out.mkdirs() && !out.isDirectory()) {
             throw new IOException("Could not create export directory: " + out);
         }
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected) {
+            if (!selectedOnly || photo.selected) {
                 copy(new File(photo.path), new File(out, photo.name));
             }
         }
@@ -123,13 +166,7 @@ final class PhotoExporter {
         }
     }
 
-    private static void copyToStream(File source, OutputStream out) throws IOException {
-        byte[] buffer = new byte[8192];
-        try (FileInputStream in = new FileInputStream(source)) {
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-        }
+    private static String safeFolderName(String label) {
+        return label.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
     }
 }

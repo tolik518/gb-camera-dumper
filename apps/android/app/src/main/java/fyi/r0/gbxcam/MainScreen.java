@@ -10,10 +10,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -33,17 +35,35 @@ final class MainScreen {
 
         void onSaveSelectedRequested();
 
+        void onShareSelectedRequested();
+
+        void onBackupsRequested();
+
+        void onImportSaveRequested();
+
+        void onExportSaveRequested();
+
         void onDeleteSelectedRequested();
 
         void onPhotoSelectionChanged(GalleryPhoto photo, boolean selected);
 
+        void onPhotoOpenRequested(GalleryPhoto photo);
+
+        void onPalettePreview(int paletteIndex);
+
+        void onPalettePreviewCanceled(int paletteIndex);
+
         void onPaletteChanged(int paletteIndex);
+
+        void onPaletteFavoriteToggled(int paletteIndex);
     }
 
     private final Context context;
     private final Listener listener;
     private final String[] paletteLabels;
     private final int[][] paletteColors;
+    private final boolean[] paletteFavorites;
+    private int[] recentPalettes;
     private final Palette colors;
     private final LinearLayout root;
     private final TextView subtitle;
@@ -62,22 +82,29 @@ final class MainScreen {
     private final Button selectAllButton;
     private final Button deselectAllButton;
     private final Button saveButton;
+    private final Button shareButton;
+    private final Button backupsButton;
+    private final Button importSaveButton;
+    private final Button exportSaveButton;
     private final Button deleteButton;
 
     private GalleryState gallery;
     private boolean busy;
     private boolean logsVisible;
     private int paletteIndex;
+    private int previewPaletteIndex = -1;
     private int accent;
     private int accentPressed;
     private int accentSurface;
     private int accentText;
 
-    MainScreen(Context context, Listener listener, String[] paletteLabels, int[][] paletteColors, int defaultPaletteIndex) {
+    MainScreen(Context context, Listener listener, String[] paletteLabels, int[][] paletteColors, boolean[] paletteFavorites, int[] recentPalettes, int defaultPaletteIndex) {
         this.context = context;
         this.listener = listener;
         this.paletteLabels = paletteLabels.length == 0 ? new String[] { "Monochrome - Grayscale" } : paletteLabels;
         this.paletteColors = paletteColors.length == 0 ? new int[][] { fallbackPaletteColors() } : paletteColors;
+        this.paletteFavorites = paletteFavorites.length == this.paletteLabels.length ? paletteFavorites : new boolean[this.paletteLabels.length];
+        this.recentPalettes = recentPalettes;
         this.colors = Palette.from(context);
 
         root = new LinearLayout(context);
@@ -189,12 +216,14 @@ final class MainScreen {
         selectAllButton = smallButton("Select all", v -> listener.onSelectAllRequested());
         deselectAllButton = smallButton("Deselect", v -> listener.onDeselectAllRequested());
         saveButton = smallButton("Save selected", v -> listener.onSaveSelectedRequested());
+        shareButton = smallButton("Share", v -> listener.onShareSelectedRequested());
         deleteButton = smallButton("Delete selected", v -> listener.onDeleteSelectedRequested());
         deleteButton.setTextColor(Color.WHITE);
         deleteButton.setBackgroundColor(colors.danger);
         addActionButton(actions, selectAllButton);
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
+        addActionButton(actions, shareButton);
         //actions.addView(deleteButton);
         selection = new TextView(context);
         selection.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
@@ -205,7 +234,17 @@ final class MainScreen {
                 0,
                 dp(34),
                 1));
-        root.addView(actions, matchWidthWrapContent());
+        root.addView(wrapHorizontal(actions), matchWidthWrapContent());
+
+        LinearLayout fileActions = row();
+        fileActions.setGravity(Gravity.CENTER_VERTICAL);
+        backupsButton = smallButton("Backups", v -> listener.onBackupsRequested());
+        importSaveButton = smallButton("Import save", v -> listener.onImportSaveRequested());
+        exportSaveButton = smallButton("Export save", v -> listener.onExportSaveRequested());
+        addActionButton(fileActions, backupsButton);
+        addActionButton(fileActions, importSaveButton);
+        addActionButton(fileActions, exportSaveButton);
+        root.addView(wrapHorizontal(fileActions), matchWidthWrapContent());
 
         LinearLayout libraryHeader = row();
         libraryHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -313,10 +352,33 @@ final class MainScreen {
 
     void setPaletteIndex(int paletteIndex) {
         this.paletteIndex = safePaletteIndex(paletteIndex);
-        setAccentForPalette(this.paletteIndex);
-        paletteValue.setText(paletteLabels[this.paletteIndex]);
-        setSwatchColors(paletteSwatch, paletteColorsForIndex(this.paletteIndex));
+        this.previewPaletteIndex = -1;
+        applyPaletteIndex(this.paletteIndex);
+    }
+
+    void previewPaletteIndex(int paletteIndex) {
+        int index = safePaletteIndex(paletteIndex);
+        if (index == previewPaletteIndex) {
+            return;
+        }
+        previewPaletteIndex = index;
+        applyPaletteIndex(index);
+    }
+
+    private void applyPaletteIndex(int paletteIndex) {
+        setAccentForPalette(paletteIndex);
+        paletteValue.setText(paletteLabels[paletteIndex]);
+        setSwatchColors(paletteSwatch, paletteColorsForIndex(paletteIndex));
         updatePaletteAccent();
+    }
+
+    void setRecentPalettes(int[] recentPalettes) {
+        this.recentPalettes = recentPalettes;
+    }
+
+    void setPaletteFavorite(int paletteIndex, boolean favorite) {
+        int index = safePaletteIndex(paletteIndex);
+        paletteFavorites[index] = favorite;
     }
 
     private int safePaletteIndex(int paletteIndex) {
@@ -336,6 +398,10 @@ final class MainScreen {
 
     GalleryState gallery() {
         return gallery;
+    }
+
+    int accentColor() {
+        return accent;
     }
 
     void selectAll(boolean selected) {
@@ -360,6 +426,11 @@ final class MainScreen {
         deselectAllButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
         saveButton.setEnabled(!busy && selected > 0);
         saveButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
+        shareButton.setEnabled(!busy && selected > 0);
+        shareButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
+        backupsButton.setEnabled(!busy);
+        importSaveButton.setEnabled(!busy);
+        exportSaveButton.setEnabled(!busy && gallery != null);
         deleteButton.setEnabled(!busy && selected > 0);
         paletteField.setEnabled(!busy);
         paletteField.setAlpha(busy ? 0.42f : 1.0f);
@@ -367,6 +438,10 @@ final class MainScreen {
         setButtonAvailability(selectAllButton, !busy && total > 0 && selected < total);
         setButtonAvailability(deselectAllButton, !busy && selected > 0);
         setButtonAvailability(saveButton, !busy && selected > 0);
+        setButtonAvailability(shareButton, !busy && selected > 0);
+        setButtonAvailability(backupsButton, !busy);
+        setButtonAvailability(importSaveButton, !busy);
+        setButtonAvailability(exportSaveButton, !busy && gallery != null);
         if (!busy && selected > 0) {
             deleteButton.setTextColor(Color.WHITE);
             deleteButton.setBackgroundColor(colors.danger);
@@ -383,13 +458,20 @@ final class MainScreen {
         tile.setBackground(tileBackground(photo.selected));
         tile.setContentDescription("Photo " + String.format("%02d", photo.displayIndex + 1)
                 + (photo.selected ? ", selected" : ", not selected"));
-        tile.setOnClickListener(v -> {
-            photo.selected = !photo.selected;
-            listener.onPhotoSelectionChanged(photo, photo.selected);
-            showGallery(gallery);
+        tile.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
+        tile.setOnLongClickListener(v -> {
+            togglePhotoSelection(photo);
+            return true;
         });
 
+        View.OnClickListener toggleSelection = v -> togglePhotoSelection(photo);
+
         FrameLayout imageFrame = new CameraImageFrame(context);
+        imageFrame.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
+        imageFrame.setOnLongClickListener(v -> {
+            togglePhotoSelection(photo);
+            return true;
+        });
         ImageView image = new ImageView(context);
         image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -407,12 +489,8 @@ final class MainScreen {
         selectionMarker.setGravity(Gravity.CENTER);
         selectionMarker.setBackground(checkBackground(photo.selected));
         selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
-        selectionMarker.setVisibility(photo.selected ? View.VISIBLE : View.GONE);
-        selectionMarker.setOnClickListener(v -> {
-            photo.selected = !photo.selected;
-            listener.onPhotoSelectionChanged(photo, photo.selected);
-            showGallery(gallery);
-        });
+        selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+        selectionMarker.setOnClickListener(toggleSelection);
         FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(26), dp(26));
         checkParams.gravity = Gravity.TOP | Gravity.START;
         checkParams.setMargins(dp(6), dp(6), 0, 0);
@@ -424,6 +502,7 @@ final class MainScreen {
         LinearLayout row = row();
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(4), dp(6), dp(4), 0);
+        row.setOnClickListener(toggleSelection);
         TextView label = new TextView(context);
         label.setText("Photo " + String.format("%02d", photo.displayIndex + 1));
         label.setTextColor(colors.textPrimary);
@@ -432,6 +511,15 @@ final class MainScreen {
         tile.addView(row, matchWidthWrapContent());
 
         return tile;
+    }
+
+    private void togglePhotoSelection(GalleryPhoto photo) {
+        if (gallery == null) {
+            return;
+        }
+        photo.selected = !photo.selected;
+        listener.onPhotoSelectionChanged(photo, photo.selected);
+        showGallery(gallery);
     }
 
     private GradientDrawable tileBackground(boolean selected) {
@@ -473,6 +561,8 @@ final class MainScreen {
             return;
         }
 
+        int originalIndex = paletteIndex;
+        boolean[] committed = new boolean[] { false };
         int popupWidth = Math.min(dp(340), root.getWidth() - dp(72));
         LinearLayout menu = new LinearLayout(context);
         menu.setOrientation(LinearLayout.VERTICAL);
@@ -489,24 +579,20 @@ final class MainScreen {
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setElevation(dp(8));
+        popup.setOnDismissListener(() -> {
+            if (!committed[0]) {
+                listener.onPalettePreviewCanceled(originalIndex);
+            }
+        });
 
-        for (int i = 0; i < paletteLabels.length; i++) {
-            int index = i;
-            View item = paletteMenuItem(index);
-            item.setOnClickListener(v -> {
-                popup.dismiss();
-                if (index != paletteIndex) {
-                    setPaletteIndex(index);
-                    listener.onPaletteChanged(index);
-                }
-            });
-            menu.addView(item);
+        for (int index : paletteMenuOrder()) {
+            menu.addView(paletteMenuItem(index, originalIndex, popup, committed));
         }
 
         popup.showAsDropDown(paletteField, paletteField.getWidth() - popupWidth, dp(6));
     }
 
-    private View paletteMenuItem(int index) {
+    private View paletteMenuItem(int index, int originalIndex, PopupWindow popup, boolean[] committed) {
         boolean selected = index == paletteIndex;
         LinearLayout item = row();
         item.setGravity(Gravity.CENTER_VERTICAL);
@@ -534,7 +620,70 @@ final class MainScreen {
                 1);
         labelParams.setMargins(dp(10), 0, 0, 0);
         item.addView(label, labelParams);
+
+        TextView star = new TextView(context);
+        star.setText(paletteFavorites[index] ? "★" : "☆");
+        star.setTextSize(22);
+        star.setGravity(Gravity.CENTER);
+        star.setMinWidth(dp(56));
+        star.setMinHeight(dp(48));
+        star.setPadding(dp(8), 0, dp(8), 0);
+        star.setTextColor(paletteFavorites[index] ? accent : colors.textSecondary);
+        star.setContentDescription((paletteFavorites[index] ? "Remove favorite: " : "Add favorite: ") + paletteLabels[index]);
+        star.setOnClickListener(v -> {
+            listener.onPaletteFavoriteToggled(index);
+            star.setText(paletteFavorites[index] ? "★" : "☆");
+            star.setTextColor(paletteFavorites[index] ? accent : colors.textSecondary);
+            star.setContentDescription((paletteFavorites[index] ? "Remove favorite: " : "Add favorite: ") + paletteLabels[index]);
+        });
+        item.addView(star, new LinearLayout.LayoutParams(dp(64), LinearLayout.LayoutParams.MATCH_PARENT));
+
+        item.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN && index != paletteIndex) {
+                listener.onPalettePreview(index);
+            }
+            return false;
+        });
+        item.setOnClickListener(v -> {
+            committed[0] = true;
+            popup.dismiss();
+            setPaletteIndex(index);
+            if (index != originalIndex) {
+                listener.onPaletteChanged(index);
+            }
+        });
         return item;
+    }
+
+    private int[] paletteMenuOrder() {
+        int[] order = new int[paletteLabels.length];
+        boolean[] added = new boolean[paletteLabels.length];
+        int count = 0;
+
+        for (int i = 0; i < paletteFavorites.length; i++) {
+            if (paletteFavorites[i]) {
+                order[count++] = i;
+                added[i] = true;
+            }
+        }
+
+        if (recentPalettes != null) {
+            for (int recent : recentPalettes) {
+                int index = safePaletteIndex(recent);
+                if (!added[index]) {
+                    order[count++] = index;
+                    added[index] = true;
+                }
+            }
+        }
+
+        for (int i = 0; i < paletteLabels.length; i++) {
+            if (!added[i]) {
+                order[count++] = i;
+            }
+        }
+
+        return order;
     }
 
     private LinearLayout paletteSwatch(int width, int height) {
@@ -610,6 +759,14 @@ final class MainScreen {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         params.setMargins(0, 0, dp(8), 0);
         row.addView(button, params);
+    }
+
+    private HorizontalScrollView wrapHorizontal(LinearLayout row) {
+        HorizontalScrollView scroll = new HorizontalScrollView(context);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setFillViewport(true);
+        scroll.addView(row, matchWidthWrapContent());
+        return scroll;
     }
 
     private void setButtonAvailability(Button button, boolean enabled) {
