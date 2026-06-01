@@ -767,14 +767,18 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         int panel = Color.rgb(15, 23, 42);
         int panelRaised = Color.rgb(30, 41, 59);
+        int panelSoft = Color.rgb(22, 33, 52);
         int border = Color.rgb(71, 85, 105);
+        int borderSoft = Color.rgb(51, 65, 85);
         int textPrimary = Color.rgb(248, 250, 252);
         int textSecondary = Color.rgb(203, 213, 225);
+        int textMuted = Color.rgb(148, 163, 184);
+        int danger = Color.rgb(220, 38, 38);
         int accent = screen.accentColor();
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(14), dp(16), dp(14));
+        content.setPadding(dp(16), dp(14), dp(16), dp(16));
         content.setBackground(rounded(panel, border, 14, 1));
 
         LinearLayout header = new LinearLayout(this);
@@ -785,45 +789,79 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         titleBlock.setOrientation(LinearLayout.VERTICAL);
 
         TextView title = new TextView(this);
-        title.setText(photo.name);
+        title.setText((photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1));
         title.setTextColor(textPrimary);
-        title.setTextSize(18);
+        title.setTextSize(21);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setSingleLine(true);
         titleBlock.addView(title);
 
-        TextView meta = new TextView(this);
-        meta.setText("Album " + String.format("%02d", photo.displayIndex + 1)
-                + " · Slot " + photo.physicalSlot
-                + " · " + photo.width + "x" + photo.height
-                + " · Border " + photo.border
-                + (photo.copy ? " · Copy" : " · Original")
-                + " · Metadata " + (photo.metadataValid ? "OK" : "check")
-                + (photo.ownerUserId.isEmpty() ? "" : " · Owner " + photo.ownerUserId));
-        meta.setTextColor(textSecondary);
-        meta.setTextSize(12);
-        titleBlock.addView(meta);
+        TextView fileName = new TextView(this);
+        fileName.setText(photo.name);
+        fileName.setTextColor(textSecondary);
+        fileName.setTextSize(12);
+        fileName.setSingleLine(true);
+        titleBlock.addView(fileName);
 
         header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-        Button close = previewButton("Close", textSecondary, panelRaised, border);
+        Button close = previewButton("×", textSecondary, panelRaised, border);
+        close.setTextSize(22);
         close.setOnClickListener(v -> dialog.dismiss());
-        header.addView(close, new LinearLayout.LayoutParams(dp(82), dp(42)));
+        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(42)));
         content.addView(header, matchWidthWrapContent());
 
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        statusParams.setMargins(0, dp(12), 0, 0);
+        statusRow.addView(detailChip(photo.deleted ? "Deleted" : "Original", photo.deleted ? danger : accent, panelSoft, photo.deleted ? danger : accent));
+        statusRow.addView(detailChip(photo.copy ? "Copy" : "Camera photo", textSecondary, panelSoft, borderSoft));
+        statusRow.addView(detailChip(photo.metadataValid ? "Metadata OK" : "Check metadata", photo.metadataValid ? textSecondary : danger, panelSoft, photo.metadataValid ? borderSoft : danger));
+        content.addView(statusRow, statusParams);
+
+        LinearLayout infoRow = new LinearLayout(this);
+        infoRow.setOrientation(LinearLayout.HORIZONTAL);
+        infoRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        infoParams.setMargins(0, dp(8), 0, 0);
+        infoRow.addView(detailChip("Album " + String.format("%02d", photo.displayIndex + 1), textMuted, panel, borderSoft));
+        infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
+        infoRow.addView(detailChip(photo.width + "×" + photo.height, textMuted, panel, borderSoft));
+        infoRow.addView(detailChip("Border " + photo.border, textMuted, panel, borderSoft));
+        content.addView(infoRow, infoParams);
+
+        if (!photo.ownerUserId.isEmpty()) {
+            LinearLayout ownerRow = new LinearLayout(this);
+            ownerRow.setOrientation(LinearLayout.HORIZONTAL);
+            ownerRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams ownerParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            ownerParams.setMargins(0, dp(8), 0, 0);
+            ownerRow.addView(detailChip("Owner " + photo.ownerUserId, textMuted, panel, borderSoft));
+            content.addView(ownerRow, ownerParams);
+        }
+
         FrameLayout imageMat = new FrameLayout(this);
-        imageMat.setPadding(dp(10), dp(10), dp(10), dp(10));
-        imageMat.setBackground(rounded(Color.rgb(2, 6, 23), border, 10, 1));
+        imageMat.setPadding(dp(8), dp(8), dp(8), dp(8));
+        imageMat.setBackground(rounded(Color.rgb(2, 6, 23), border, 12, 1));
         LinearLayout.LayoutParams matParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(390));
-        matParams.setMargins(0, dp(14), 0, dp(12));
+                dp(456));
+        matParams.setMargins(0, dp(12), 0, dp(14));
 
         ImageView image = new ImageView(this);
         image.setImageURI(Uri.fromFile(new File(photo.path)));
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        image.setBackgroundColor(Color.rgb(24, 24, 27));
+        image.setAlpha(photo.deleted ? 0.86f : 1.0f);
+        image.setBackgroundColor(Color.rgb(10, 10, 14));
         imageMat.addView(image, new android.widget.FrameLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT));
@@ -884,6 +922,25 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             gallery.photos.get(i).selected = previousSelection[i];
         }
         screen.showGallery(gallery);
+    }
+
+    private TextView detailChip(String text, int textColor, int fillColor, int strokeColor) {
+        TextView chip = new TextView(this);
+        chip.setText(text);
+        chip.setTextColor(textColor);
+        chip.setTextSize(11);
+        chip.setTypeface(Typeface.DEFAULT_BOLD);
+        chip.setGravity(Gravity.CENTER);
+        chip.setIncludeFontPadding(false);
+        chip.setSingleLine(true);
+        chip.setPadding(dp(10), 0, dp(10), 0);
+        chip.setBackground(rounded(fillColor, strokeColor, 999, 1));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(28));
+        params.setMargins(0, 0, dp(8), 0);
+        chip.setLayoutParams(params);
+        return chip;
     }
 
     private Button previewButton(String text, int textColor, int fillColor, int strokeColor) {
