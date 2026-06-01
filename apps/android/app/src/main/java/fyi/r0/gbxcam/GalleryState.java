@@ -1,4 +1,4 @@
-package com.tolik518.gbcam;
+package fyi.r0.gbxcam;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -49,7 +49,7 @@ final class GalleryState {
                 root.getString("savePath"),
                 root.getString("outputDir"),
                 root.optInt("paletteIndex", 0),
-                root.optString("paletteName", "Grayscale"),
+                root.optString("paletteName", "Monochrome - Grayscale"),
                 photos);
     }
 

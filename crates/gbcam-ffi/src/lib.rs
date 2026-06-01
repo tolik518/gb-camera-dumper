@@ -1,6 +1,7 @@
 use gbxcam_core::{
-    apply_album_delete, extract_photos, palette_labels, write_palette_png, write_photos_to_dir,
-    write_photos_to_dir_with_palette, PaletteId, PhotoKind, DEFAULT_PALETTE_INDEX,
+    apply_album_delete, extract_photos, palette_colors, palette_labels, write_palette_png,
+    write_photos_to_dir, write_photos_to_dir_with_palette, PaletteId, PhotoKind,
+    DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
@@ -32,7 +33,7 @@ pub unsafe extern "C" fn gbcam_string_free(ptr: *mut c_char) {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_version(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_version(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -40,7 +41,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_version(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_defaultPaletteIndex(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_defaultPaletteIndex(
     _env: JNIEnv,
     _class: JClass,
 ) -> jint {
@@ -48,7 +49,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_defaultPaletteIndex(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_paletteLabels(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_paletteLabels(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jstring {
@@ -56,7 +57,25 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_paletteLabels(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromFd<'local>(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_paletteColors(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let colors = palette_colors()
+        .map(|palette| {
+            palette
+                .iter()
+                .map(|color| format!("{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    java_string_or_throw(&mut env, colors)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromFd<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     fd: jint,
@@ -82,7 +101,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromFd<'lo
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_deletePhotosFromFd<'local>(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     fd: jint,
@@ -120,7 +139,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_deletePhotosFromFd<'l
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromSave<'local>(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromSave<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     save_path: JString<'local>,
@@ -144,7 +163,7 @@ pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_loadGalleryFromSave<'
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_tolik518_gbcam_NativeGbcam_dumpFromFd(
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_dumpFromFd(
     mut env: JNIEnv,
     _class: JClass,
     fd: jint,

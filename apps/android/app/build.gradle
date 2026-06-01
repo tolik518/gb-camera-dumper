@@ -3,15 +3,15 @@ plugins {
 }
 
 android {
-    namespace "com.tolik518.gbcam"
+    namespace "fyi.r0.gbxcam"
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.tolik518.gbcam"
+        applicationId "fyi.r0.gbxcam"
         minSdk 23
         targetSdk 35
-        versionCode 2
-        versionName "0.1.1"
+        versionCode 3
+        versionName "0.2.0"
     }
 
     compileOptions {

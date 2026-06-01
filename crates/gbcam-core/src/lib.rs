@@ -35,37 +35,11 @@ pub struct PalettePreset {
 
 pub const PALETTE_PRESETS: &[PalettePreset] = &[
     PalettePreset {
-        label: "Grayscale",
-        colors: [[255, 255, 255], [176, 176, 176], [104, 104, 104], [0, 0, 0]],
+        label: "CRT - Amber",
+        colors: [[255, 244, 214], [255, 183, 77], [181, 92, 18], [50, 22, 5]],
     },
     PalettePreset {
-        label: "Original Game Boy",
-        colors: [[208, 217, 60], [120, 164, 106], [84, 88, 84], [36, 70, 36]],
-    },
-    PalettePreset {
-        label: "Super Game Boy",
-        colors: [[255, 255, 255], [181, 179, 189], [84, 83, 103], [9, 7, 19]],
-    },
-    PalettePreset {
-        label: "Game Boy Color (Pocket Camera)",
-        colors: [
-            [240, 240, 240],
-            [218, 196, 106],
-            [112, 88, 52],
-            [30, 30, 30],
-        ],
-    },
-    PalettePreset {
-        label: "Game Boy Color (Game Boy Camera Gold)",
-        colors: [
-            [240, 240, 240],
-            [220, 160, 160],
-            [136, 78, 78],
-            [30, 30, 30],
-        ],
-    },
-    PalettePreset {
-        label: "Game Boy Color (Game Boy Camera)",
+        label: "Game Boy Color - Camera",
         colors: [
             [240, 240, 240],
             [134, 200, 100],
@@ -74,19 +48,53 @@ pub const PALETTE_PRESETS: &[PalettePreset] = &[
         ],
     },
     PalettePreset {
-        label: "DMG Green",
+        label: "Game Boy Color - Camera Gold",
+        colors: [
+            [240, 240, 240],
+            [220, 160, 160],
+            [136, 78, 78],
+            [30, 30, 30],
+        ],
+    },
+    PalettePreset {
+        label: "Game Boy Color - Pocket Camera",
+        colors: [
+            [240, 240, 240],
+            [218, 196, 106],
+            [112, 88, 52],
+            [30, 30, 30],
+        ],
+    },
+    PalettePreset {
+        label: "Game Boy Color Boot - Blue",
+        colors: [[222, 255, 255], [99, 206, 255], [49, 99, 206], [0, 0, 66]],
+    },
+    PalettePreset {
+        label: "Game Boy Color Boot - Brown",
+        colors: [[255, 255, 198], [222, 156, 66], [148, 74, 0], [74, 33, 0]],
+    },
+    PalettePreset {
+        label: "Game Boy Color Boot - Inverted",
+        colors: [[0, 0, 0], [104, 104, 104], [176, 176, 176], [255, 255, 255]],
+    },
+    PalettePreset {
+        label: "Game Boy Color Boot - Red",
+        colors: [[255, 231, 231], [255, 132, 132], [132, 33, 33], [33, 0, 0]],
+    },
+    PalettePreset {
+        label: "Game Boy Color Boot - Yellow",
+        colors: [[255, 255, 165], [255, 198, 66], [206, 99, 0], [66, 33, 0]],
+    },
+    PalettePreset {
+        label: "Game Boy DMG - Classic Green",
         colors: [[155, 188, 15], [139, 172, 15], [48, 98, 48], [15, 56, 15]],
     },
     PalettePreset {
-        label: "GB Studio Green",
-        colors: [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]],
+        label: "Game Boy DMG - Original LCD",
+        colors: [[208, 217, 60], [120, 164, 106], [84, 88, 84], [36, 70, 36]],
     },
     PalettePreset {
-        label: "Game Boy Pocket",
-        colors: [[248, 248, 248], [168, 168, 168], [80, 80, 80], [8, 8, 8]],
-    },
-    PalettePreset {
-        label: "Game Boy Light",
+        label: "Game Boy Light - Green",
         colors: [
             [240, 255, 216],
             [168, 208, 128],
@@ -95,35 +103,23 @@ pub const PALETTE_PRESETS: &[PalettePreset] = &[
         ],
     },
     PalettePreset {
-        label: "GBC Boot: Brown",
-        colors: [[255, 255, 198], [222, 156, 66], [148, 74, 0], [74, 33, 0]],
+        label: "Game Boy Pocket - Monochrome",
+        colors: [[248, 248, 248], [168, 168, 168], [80, 80, 80], [8, 8, 8]],
     },
     PalettePreset {
-        label: "GBC Boot: Blue",
-        colors: [[222, 255, 255], [99, 206, 255], [49, 99, 206], [0, 0, 66]],
+        label: "GB Studio - Green",
+        colors: [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]],
     },
     PalettePreset {
-        label: "GBC Boot: Inverted",
-        colors: [[0, 0, 0], [104, 104, 104], [176, 176, 176], [255, 255, 255]],
+        label: "Monochrome - Grayscale",
+        colors: [[255, 255, 255], [176, 176, 176], [104, 104, 104], [0, 0, 0]],
     },
     PalettePreset {
-        label: "GBC Boot: Yellow",
-        colors: [[255, 255, 165], [255, 198, 66], [206, 99, 0], [66, 33, 0]],
-    },
-    PalettePreset {
-        label: "GBC Boot: Red",
-        colors: [[255, 231, 231], [255, 132, 132], [132, 33, 33], [33, 0, 0]],
-    },
-    PalettePreset {
-        label: "Amber CRT",
-        colors: [[255, 244, 214], [255, 183, 77], [181, 92, 18], [50, 22, 5]],
-    },
-    PalettePreset {
-        label: "Cyanotype",
+        label: "Print - Cyanotype",
         colors: [[230, 250, 255], [118, 196, 219], [36, 91, 130], [4, 24, 45]],
     },
     PalettePreset {
-        label: "Sakura",
+        label: "Print - Sakura",
         colors: [
             [255, 247, 250],
             [245, 179, 197],
@@ -166,6 +162,10 @@ impl PaletteId {
 
 pub fn palette_labels() -> impl Iterator<Item = &'static str> {
     PALETTE_PRESETS.iter().map(|palette| palette.label)
+}
+
+pub fn palette_colors() -> impl Iterator<Item = [[u8; 3]; 4]> {
+    PALETTE_PRESETS.iter().map(|palette| palette.colors)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -667,44 +667,42 @@ mod tests {
     }
 
     #[test]
-    fn palette_presets_match_flashgbx_order() {
+    fn palette_presets_are_sorted_by_label() {
         assert_eq!(PaletteId::DEFAULT.index(), DEFAULT_PALETTE_INDEX);
-        assert_eq!(PaletteId::from_index(0).label(), "Grayscale");
-        assert_eq!(PaletteId::from_index(1).label(), "Original Game Boy");
-        assert_eq!(PaletteId::from_index(2).label(), "Super Game Boy");
-        assert_eq!(
-            PaletteId::from_index(3).label(),
-            "Game Boy Color (Pocket Camera)"
-        );
-        assert_eq!(
-            PaletteId::from_index(4).label(),
-            "Game Boy Color (Game Boy Camera Gold)"
-        );
-        assert_eq!(
-            PaletteId::from_index(5).label(),
-            "Game Boy Color (Game Boy Camera)"
-        );
+        assert_eq!(PaletteId::DEFAULT.label(), "Game Boy Color - Pocket Camera");
+
+        let labels = palette_labels().collect::<Vec<_>>();
+        let mut sorted = labels.clone();
+        sorted.sort_unstable_by_key(|label| palette_sort_key(label));
+
+        assert_eq!(labels, sorted);
+    }
+
+    fn palette_sort_key(label: &str) -> String {
+        label
+            .replace("GB Studio", "Game Boy Studio")
+            .to_ascii_lowercase()
     }
 
     #[test]
     fn palette_catalog_contains_added_presets() {
         let labels = palette_labels().collect::<Vec<_>>();
 
-        assert!(labels.contains(&"DMG Green"));
-        assert!(labels.contains(&"GB Studio Green"));
-        assert!(labels.contains(&"Game Boy Pocket"));
-        assert!(labels.contains(&"Game Boy Light"));
-        assert!(labels.contains(&"GBC Boot: Brown"));
-        assert!(labels.contains(&"GBC Boot: Blue"));
-        assert!(labels.contains(&"GBC Boot: Inverted"));
-        assert!(labels.contains(&"Amber CRT"));
+        assert!(labels.contains(&"Game Boy DMG - Classic Green"));
+        assert!(labels.contains(&"GB Studio - Green"));
+        assert!(labels.contains(&"Game Boy Pocket - Monochrome"));
+        assert!(labels.contains(&"Game Boy Light - Green"));
+        assert!(labels.contains(&"Game Boy Color Boot - Brown"));
+        assert!(labels.contains(&"Game Boy Color Boot - Blue"));
+        assert!(labels.contains(&"Game Boy Color Boot - Inverted"));
+        assert!(labels.contains(&"CRT - Amber"));
     }
 
     #[test]
     fn indexed_pixels_render_to_selected_rgb_palette() {
         let pixels = [0, 1, 2, 3];
 
-        let rgb = indexed_to_rgb8(&pixels, PaletteId::from_index(1));
+        let rgb = indexed_to_rgb8(&pixels, palette_by_label("Game Boy DMG - Original LCD"));
 
         assert_eq!(
             rgb,
@@ -716,9 +714,16 @@ mod tests {
     fn invalid_indexed_pixels_render_as_palette_zero() {
         assert_eq!(indexed_to_gray8(&[4]), vec![255]);
         assert_eq!(
-            indexed_to_rgb8(&[4], PaletteId::from_index(1)),
+            indexed_to_rgb8(&[4], palette_by_label("Game Boy DMG - Original LCD")),
             vec![208, 217, 60]
         );
+    }
+
+    fn palette_by_label(label: &str) -> PaletteId {
+        let index = palette_labels()
+            .position(|candidate| candidate == label)
+            .expect("palette exists");
+        PaletteId::from_index(index)
     }
 
     #[test]

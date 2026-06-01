@@ -1,4 +1,4 @@
-package com.tolik518.gbcam;
+package fyi.r0.gbxcam;
 
 final class GalleryPhoto {
     final String name;

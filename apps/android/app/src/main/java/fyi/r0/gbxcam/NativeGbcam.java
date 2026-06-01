@@ -1,4 +1,4 @@
-package com.tolik518.gbcam;
+package fyi.r0.gbxcam;
 
 final class NativeGbcam {
     interface Progress {
@@ -17,6 +17,8 @@ final class NativeGbcam {
     static native int defaultPaletteIndex();
 
     static native String paletteLabels();
+
+    static native String paletteColors();
 
     static native String loadGalleryFromFd(int fd, String outputDir, int paletteIndex, Progress progress);
 

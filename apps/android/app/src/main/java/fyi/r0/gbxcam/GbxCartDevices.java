@@ -1,4 +1,4 @@
-package com.tolik518.gbcam;
+package fyi.r0.gbxcam;
 
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;

@@ -217,7 +217,7 @@ android-apk-install api=android-api: (android-apk api)
     adb install --no-streaming -r -t apps/android/app/build/outputs/apk/debug/app-debug.apk
 
 android-app-start:
-    adb shell am start -n com.tolik518.gbcam/.MainActivity
+    adb shell am start -n fyi.r0.gbxcam/.MainActivity
 
 android-app-logs:
     adb logcat -c
@@ -225,11 +225,11 @@ android-app-logs:
 
 android-pull-dumps output="gbcam-dumps":
     mkdir -p "{{output}}"
-    adb pull /sdcard/Android/data/com.tolik518.gbcam/files/dumps "{{output}}"
+    adb pull /sdcard/Android/data/fyi.r0.gbxcam/files/dumps "{{output}}"
 
 android-push-save save="dump2/GAMEBOYCAMERA.sav":
-    adb shell mkdir -p /sdcard/Android/data/com.tolik518.gbcam/files/dumps
-    adb push "{{save}}" /sdcard/Android/data/com.tolik518.gbcam/files/dumps/GAMEBOYCAMERA.sav
+    adb shell mkdir -p /sdcard/Android/data/fyi.r0.gbxcam/files/dumps
+    adb push "{{save}}" /sdcard/Android/data/fyi.r0.gbxcam/files/dumps/GAMEBOYCAMERA.sav
 
 android-cli-push api=android-api: (android-cli api)
     #!/usr/bin/env bash

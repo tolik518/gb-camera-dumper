@@ -1,4 +1,4 @@
-package com.tolik518.gbcam;
+package fyi.r0.gbxcam;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -18,7 +18,7 @@ import java.io.File;
 
 public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
     private static final String TAG = "GbcamApp";
-    private static final String ACTION_USB_PERMISSION = "com.tolik518.gbcam.USB_PERMISSION";
+    private static final String ACTION_USB_PERMISSION = "fyi.r0.gbxcam.USB_PERMISSION";
     private static final String PREFS = "gbxcam-viewer";
     private static final String KEY_PALETTE_INDEX = "palette-index";
 
@@ -67,9 +67,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         operationRunner = new GbcamOperationRunner();
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
         String[] paletteLabels = paletteLabels();
+        int[][] paletteColors = paletteColors(paletteLabels.length);
         paletteIndex = prefs().getInt(KEY_PALETTE_INDEX, defaultPaletteIndex);
         paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
-        screen = new MainScreen(this, this, paletteLabels, defaultPaletteIndex);
+        screen = new MainScreen(this, this, paletteLabels, paletteColors, defaultPaletteIndex);
         screen.setPaletteIndex(paletteIndex);
         setContentView(screen.view());
 
@@ -277,9 +278,53 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private static String[] paletteLabels() {
         String labels = NativeGbcam.paletteLabels();
         if (labels == null || labels.isEmpty()) {
-            return new String[] { "Grayscale" };
+            return new String[] { "Monochrome - Grayscale" };
         }
         return labels.split("\\n");
+    }
+
+    private static int[][] paletteColors(int expectedCount) {
+        String colors = NativeGbcam.paletteColors();
+        if (colors == null || colors.isEmpty()) {
+            return fallbackPaletteColors(expectedCount);
+        }
+
+        String[] rows = colors.split("\\n");
+        int[][] parsed = new int[expectedCount][];
+        for (int i = 0; i < expectedCount; i++) {
+            parsed[i] = i < rows.length ? parsePaletteRow(rows[i]) : fallbackPaletteColors(1)[0];
+        }
+        return parsed;
+    }
+
+    private static int[] parsePaletteRow(String row) {
+        String[] parts = row.split(",");
+        int[] colors = new int[] {
+                0xFFFFFFFF,
+                0xFFB0B0B0,
+                0xFF686868,
+                0xFF000000
+        };
+        for (int i = 0; i < Math.min(parts.length, colors.length); i++) {
+            try {
+                colors[i] = (int) (0xFF000000L | Long.parseLong(parts[i], 16));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return colors;
+    }
+
+    private static int[][] fallbackPaletteColors(int count) {
+        int[][] colors = new int[Math.max(1, count)][];
+        for (int i = 0; i < colors.length; i++) {
+            colors[i] = new int[] {
+                    0xFFFFFFFF,
+                    0xFFB0B0B0,
+                    0xFF686868,
+                    0xFF000000
+            };
+        }
+        return colors;
     }
 
     private void registerUsbReceiver() {
