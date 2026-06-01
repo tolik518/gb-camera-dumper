@@ -1,7 +1,9 @@
 use gbxcam_core::{
-    album_order_after_delete, cartridge_report_from_header, make_erase_chunk, shifted_header_hint,
+    album_order_after_delete, apply_album_recover, apply_album_reorder,
+    cartridge_report_from_header, make_erase_chunk, order_table_checksum, shifted_header_hint,
     title_from_header, CartridgeReport, BANK_SIZE, DMG_READ_METHOD_A15, DMG_READ_METHOD_SLOW_A15,
-    MAPPER_MAC_GBD, ORDER_COUNT, ORDER_OFFSET, READ_CHUNK, SAVE_SIZE, SRAM_BANKS, WRITE_CHUNK,
+    MAPPER_MAC_GBD, ORDER_CHECKSUM_OFFSET, ORDER_COUNT, ORDER_ECHO_CHECKSUM_OFFSET, ORDER_OFFSET,
+    ORDER_OFFSET_PRIMARY, READ_CHUNK, SAVE_SIZE, SRAM_BANKS, WRITE_CHUNK,
 };
 use std::cell::RefCell;
 use std::io;
@@ -968,8 +970,9 @@ impl UsbDev {
         let order = album_order_after_delete(save_backup, physical_slots)?;
 
         self.prepare_dmg_cart(progress)?;
+        self.verify_cached_album_state(save_backup, progress)?;
         progress.message("Deleting selected photos from camera album...");
-        self.write_album_order_verified(save_backup, &order, progress)?;
+        self.write_album_order_verified(&order, progress)?;
         self.cart_write(0x0000, 0x00)?;
         self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
         self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
@@ -977,33 +980,130 @@ impl UsbDev {
         Ok(order)
     }
 
-    fn write_album_order_verified(
+    pub fn recover_album_photos(
         &self,
         save_backup: &[u8],
+        physical_slots: &[usize],
+        progress: &mut impl Progress,
+    ) -> Result<[u8; ORDER_COUNT]> {
+        let updated = apply_album_recover(save_backup, physical_slots)?;
+        let mut order = [0u8; ORDER_COUNT];
+        order.copy_from_slice(&updated[ORDER_OFFSET_PRIMARY..ORDER_OFFSET_PRIMARY + ORDER_COUNT]);
+
+        self.prepare_dmg_cart(progress)?;
+        self.verify_cached_album_state(save_backup, progress)?;
+        progress.message("Recovering selected deleted photos into camera album...");
+        self.write_album_order_verified(&order, progress)?;
+        self.cart_write(0x0000, 0x00)?;
+        self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
+        self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
+        progress.message("Selected deleted photos recovered into album order.");
+        Ok(order)
+    }
+
+    pub fn reorder_album_photos(
+        &self,
+        save_backup: &[u8],
+        physical_slots_in_display_order: &[usize],
+        progress: &mut impl Progress,
+    ) -> Result<[u8; ORDER_COUNT]> {
+        let updated = apply_album_reorder(save_backup, physical_slots_in_display_order)?;
+        let mut order = [0u8; ORDER_COUNT];
+        order.copy_from_slice(&updated[ORDER_OFFSET_PRIMARY..ORDER_OFFSET_PRIMARY + ORDER_COUNT]);
+
+        self.prepare_dmg_cart(progress)?;
+        self.verify_cached_album_state(save_backup, progress)?;
+        progress.message("Rewriting camera album order...");
+        self.write_album_order_verified(&order, progress)?;
+        self.cart_write(0x0000, 0x00)?;
+        self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
+        self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
+        progress.message("Camera album order updated.");
+        Ok(order)
+    }
+
+    fn verify_cached_album_state(
+        &self,
+        save_backup: &[u8],
+        progress: &mut impl Progress,
+    ) -> Result<()> {
+        let bank = ORDER_OFFSET_PRIMARY / BANK_SIZE;
+        let primary_off = ORDER_OFFSET_PRIMARY % BANK_SIZE;
+        let cs_off = ORDER_CHECKSUM_OFFSET % BANK_SIZE;
+        let echo_off = ORDER_OFFSET % BANK_SIZE;
+        let echo_cs_off = ORDER_ECHO_CHECKSUM_OFFSET % BANK_SIZE;
+        let aligned_off = echo_off & !(WRITE_CHUNK - 1);
+        let primary_in_chunk = primary_off - aligned_off;
+        let cs_in_chunk = cs_off - aligned_off;
+        let echo_in_chunk = echo_off - aligned_off;
+        let echo_cs_in_chunk = echo_cs_off - aligned_off;
+
+        self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
+        self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
+        self.set_var(VAR_DMG_ACCESS_MODE, 3)?;
+        self.cart_write(0x0000, 0x0A)?;
+        self.cart_write(0x4000, bank as u8)?;
+        std::thread::sleep(Duration::from_millis(20));
+
+        progress.message("[debug][delete] verifying cached album state against cartridge...");
+        let current = self.read_sram_window_verified(0xA000 + aligned_off as u32, WRITE_CHUNK)?;
+        let expected_primary =
+            &save_backup[ORDER_OFFSET_PRIMARY..ORDER_OFFSET_PRIMARY + ORDER_COUNT];
+        let expected_cs = &save_backup[ORDER_CHECKSUM_OFFSET..ORDER_CHECKSUM_OFFSET + 2];
+        let expected_echo = &save_backup[ORDER_OFFSET..ORDER_OFFSET + ORDER_COUNT];
+        let expected_echo_cs =
+            &save_backup[ORDER_ECHO_CHECKSUM_OFFSET..ORDER_ECHO_CHECKSUM_OFFSET + 2];
+
+        if current[primary_in_chunk..primary_in_chunk + ORDER_COUNT] == *expected_primary
+            && current[cs_in_chunk..cs_in_chunk + 2] == *expected_cs
+            && current[echo_in_chunk..echo_in_chunk + ORDER_COUNT] == *expected_echo
+            && current[echo_cs_in_chunk..echo_cs_in_chunk + 2] == *expected_echo_cs
+        {
+            return Ok(());
+        }
+
+        Err(GbcamUsbError::Protocol(
+            "camera album state changed since this gallery was loaded; reload before deleting"
+                .to_string(),
+        ))
+    }
+
+    fn write_album_order_verified(
+        &self,
         order: &[u8; ORDER_COUNT],
         progress: &mut impl Progress,
     ) -> Result<()> {
-        let bank = ORDER_OFFSET / BANK_SIZE;
-        let bank_off = ORDER_OFFSET % BANK_SIZE;
-        let aligned_off = bank_off & !(WRITE_CHUNK - 1);
-        let chunk_abs = bank * BANK_SIZE + aligned_off;
-        let order_in_chunk = bank_off - aligned_off;
+        // All four regions are in bank 0 and fit within one 256-byte aligned window.
+        let bank = ORDER_OFFSET_PRIMARY / BANK_SIZE;
+        let primary_off = ORDER_OFFSET_PRIMARY % BANK_SIZE; // 0x11B2
+        let cs_off = ORDER_CHECKSUM_OFFSET % BANK_SIZE; // 0x11D5
+        let echo_off = ORDER_OFFSET % BANK_SIZE; // 0x11D7
+        let echo_cs_off = ORDER_ECHO_CHECKSUM_OFFSET % BANK_SIZE; // 0x11FA
+        let aligned_off = echo_off & !(WRITE_CHUNK - 1); // 0x1100
 
-        let mut chunk = save_backup[chunk_abs..chunk_abs + WRITE_CHUNK].to_vec();
-        chunk[order_in_chunk..order_in_chunk + ORDER_COUNT].copy_from_slice(order);
+        // Offsets within the 256-byte verification window
+        let primary_in_chunk = primary_off - aligned_off; // 0xB2
+        let cs_in_chunk = cs_off - aligned_off; // 0xD5
+        let echo_in_chunk = echo_off - aligned_off; // 0xD7
+        let echo_cs_in_chunk = echo_cs_off - aligned_off; // 0xFA
+
+        let checksum = order_table_checksum(order);
 
         progress.message(&format!(
-            "[debug][delete] order write plan: order_offset=0x{ORDER_OFFSET:05X}, bank={bank}, bank_off=0x{bank_off:04X}, aligned_off=0x{aligned_off:04X}, chunk_len={}, order_in_chunk=0x{order_in_chunk:02X}",
-            chunk.len()
+            "[debug][delete] order write plan: primary=0x{ORDER_OFFSET_PRIMARY:05X}, checksum=0x{ORDER_CHECKSUM_OFFSET:05X}, echo=0x{ORDER_OFFSET:05X}, echo_cs=0x{ORDER_ECHO_CHECKSUM_OFFSET:05X}, bank={bank}, aligned_off=0x{aligned_off:04X}"
         ));
         progress.message(&format!(
             "[debug][delete] desired order bytes: {:02X?}",
             &order[..]
         ));
+        progress.message(&format!(
+            "[debug][delete] desired checksum: {:02X?}",
+            &checksum
+        ));
 
         for attempt in 1..=3 {
             progress.message(&format!(
-                "[debug][delete] attempt {attempt}/3: enter SRAM firmware byte-write mode"
+                "[debug][delete] attempt {attempt}/3: enable SRAM bank {bank}"
             ));
             self.set_var(VAR_DMG_READ_CS_PULSE, 0)?;
             self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
@@ -1012,56 +1112,85 @@ impl UsbDev {
             self.cart_write(0x4000, bank as u8)?;
             std::thread::sleep(Duration::from_millis(20));
 
+            // Write primary order table (30 bytes at 0x11B2)
             progress.message(&format!(
-                "[debug][delete] attempt {attempt}/3: writing {} order bytes with DMG_CART_WRITE_SRAM transfer_size=1",
-                ORDER_COUNT
+                "[debug][delete] attempt {attempt}/3: writing primary order at 0x{ORDER_OFFSET_PRIMARY:05X}"
             ));
-            for (i, value) in order.iter().enumerate() {
-                let address = 0xA000 + bank_off as u32 + i as u32;
-                if !(4..ORDER_COUNT - 4).contains(&i) {
-                    progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: sram_write_byte 0x{address:04X}=0x{value:02X}"
-                    ));
-                } else if i == 4 {
-                    progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: suppressing middle order-byte write logs"
-                    ));
-                }
-                self.sram_write_byte(address, *value, progress)?;
+            for (i, &value) in order.iter().enumerate() {
+                let address = 0xA000 + primary_off as u32 + i as u32;
+                self.sram_write_byte(address, value, progress)?;
                 std::thread::sleep(Duration::from_millis(2));
             }
 
-            progress.message(
-                "[debug][delete] firmware order-byte writes sent; waiting 250 ms before verification",
-            );
+            // Write primary checksum (2 bytes at 0x11D5)
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: writing primary checksum {:02X?} at 0x{ORDER_CHECKSUM_OFFSET:05X}",
+                &checksum
+            ));
+            self.sram_write_byte(0xA000 + cs_off as u32, checksum[0], progress)?;
+            std::thread::sleep(Duration::from_millis(2));
+            self.sram_write_byte(0xA000 + cs_off as u32 + 1, checksum[1], progress)?;
+            std::thread::sleep(Duration::from_millis(2));
+
+            // Write echo order table (30 bytes at 0x11D7)
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: writing echo order at 0x{ORDER_OFFSET:05X}"
+            ));
+            for (i, &value) in order.iter().enumerate() {
+                let address = 0xA000 + echo_off as u32 + i as u32;
+                self.sram_write_byte(address, value, progress)?;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+
+            // Write echo checksum (2 bytes at 0x11FA)
+            progress.message(&format!(
+                "[debug][delete] attempt {attempt}/3: writing echo checksum {:02X?} at 0x{ORDER_ECHO_CHECKSUM_OFFSET:05X}",
+                &checksum
+            ));
+            self.sram_write_byte(0xA000 + echo_cs_off as u32, checksum[0], progress)?;
+            std::thread::sleep(Duration::from_millis(2));
+            self.sram_write_byte(0xA000 + echo_cs_off as u32 + 1, checksum[1], progress)?;
+            std::thread::sleep(Duration::from_millis(2));
+
+            progress.message("[debug][delete] all writes sent; waiting 250 ms before verification");
             std::thread::sleep(Duration::from_millis(250));
 
+            // Clear WRITE_CS_PULSE before reading: sram_write_byte leaves it at 1,
+            // and read_sram_window asserts READ_CS_PULSE=1 without touching WRITE_CS_PULSE.
+            self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
+
             progress.message(&format!(
-                "[debug][delete] attempt {attempt}/3: read back 0x{WRITE_CHUNK:04X} byte chunk for verification"
+                "[debug][delete] attempt {attempt}/3: verifying 0x{WRITE_CHUNK:03X} byte window at 0xA000+0x{aligned_off:04X}"
             ));
             match self.read_sram_window_verified(0xA000 + aligned_off as u32, WRITE_CHUNK) {
-                Ok(verify) if verify[order_in_chunk..order_in_chunk + ORDER_COUNT] == order[..] => {
+                Ok(verify)
+                    if verify[primary_in_chunk..primary_in_chunk + ORDER_COUNT] == order[..]
+                        && verify[cs_in_chunk..cs_in_chunk + 2] == checksum
+                        && verify[echo_in_chunk..echo_in_chunk + ORDER_COUNT] == order[..]
+                        && verify[echo_cs_in_chunk..echo_cs_in_chunk + 2] == checksum =>
+                {
                     progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: verification OK; order bytes persisted"
+                        "[debug][delete] attempt {attempt}/3: verification OK"
                     ));
                     return Ok(());
                 }
                 Ok(verify) => {
-                    let got = &verify[order_in_chunk..order_in_chunk + ORDER_COUNT];
                     progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: verification mismatch; expected {:02X?}; got {:02X?}",
-                        &order[..],
-                        got
+                        "[debug][delete] attempt {attempt}/3: mismatch — primary={:02X?} cs={:02X?} echo={:02X?} echo_cs={:02X?}",
+                        &verify[primary_in_chunk..primary_in_chunk + ORDER_COUNT],
+                        &verify[cs_in_chunk..cs_in_chunk + 2],
+                        &verify[echo_in_chunk..echo_in_chunk + ORDER_COUNT],
+                        &verify[echo_cs_in_chunk..echo_cs_in_chunk + 2],
                     ));
                 }
                 Err(e) if attempt < 3 => {
                     progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: verification read failed, retrying write: {e}"
+                        "[debug][delete] attempt {attempt}/3: verify read failed, retrying: {e}"
                     ));
                 }
                 Err(e) => {
                     progress.message(&format!(
-                        "[debug][delete] attempt {attempt}/3: verification read failed: {e}"
+                        "[debug][delete] attempt {attempt}/3: verify read failed: {e}"
                     ));
                     return Err(e);
                 }
@@ -1072,8 +1201,7 @@ impl UsbDev {
         }
 
         Err(GbcamUsbError::Protocol(
-            "delete verification failed: cartridge order table did not match the written data"
-                .to_string(),
+            "delete verification failed: order table did not match written data".to_string(),
         ))
     }
 

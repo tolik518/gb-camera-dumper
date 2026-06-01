@@ -1,7 +1,7 @@
 use gbxcam_core::{
-    apply_album_delete, extract_photos, palette_colors, palette_labels, write_palette_png,
-    write_photos_to_dir, write_photos_to_dir_with_palette, PaletteId, PhotoKind,
-    DEFAULT_PALETTE_INDEX,
+    apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, palette_colors,
+    palette_labels, write_palette_png, write_photos_to_dir, write_photos_to_dir_with_palette,
+    GbcamSave, PaletteId, PhotoKind, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
@@ -136,6 +136,82 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>
         )
     };
     java_result(&mut env, result, "GB Camera delete failed")
+}
+
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    fd: jint,
+    save_path: JString<'local>,
+    output_dir: JString<'local>,
+    physical_slots_csv: JString<'local>,
+    palette_index: jint,
+    progress: JObject<'local>,
+) -> jstring {
+    let save_path = match java_path(&mut env, save_path) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+    let output_dir = match java_path(&mut env, output_dir) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+    let physical_slots_csv = match java_string(&mut env, physical_slots_csv) {
+        Ok(value) => value,
+        Err(e) => return throw(&mut env, e),
+    };
+
+    let result = {
+        let mut progress = JniProgress::new(&mut env, progress);
+        recover_photos_from_fd(
+            fd,
+            save_path,
+            output_dir,
+            &physical_slots_csv,
+            palette_from_jint(palette_index),
+            &mut progress,
+        )
+    };
+    java_result(&mut env, result, "GB Camera recover failed")
+}
+
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    fd: jint,
+    save_path: JString<'local>,
+    output_dir: JString<'local>,
+    physical_slots_csv: JString<'local>,
+    palette_index: jint,
+    progress: JObject<'local>,
+) -> jstring {
+    let save_path = match java_path(&mut env, save_path) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+    let output_dir = match java_path(&mut env, output_dir) {
+        Ok(path) => path,
+        Err(e) => return throw(&mut env, e),
+    };
+    let physical_slots_csv = match java_string(&mut env, physical_slots_csv) {
+        Ok(value) => value,
+        Err(e) => return throw(&mut env, e),
+    };
+
+    let result = {
+        let mut progress = JniProgress::new(&mut env, progress);
+        reorder_photos_from_fd(
+            fd,
+            save_path,
+            output_dir,
+            &physical_slots_csv,
+            palette_from_jint(palette_index),
+            &mut progress,
+        )
+    };
+    java_result(&mut env, result, "GB Camera reorder failed")
 }
 
 #[no_mangle]
@@ -292,6 +368,71 @@ fn delete_photos_from_fd(
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
+fn recover_photos_from_fd(
+    fd: jint,
+    save_path: PathBuf,
+    output_dir: PathBuf,
+    physical_slots_csv: &str,
+    palette: PaletteId,
+    progress: &mut impl Progress,
+) -> AppResult<String> {
+    let slots = parse_physical_slots(physical_slots_csv)?;
+    if slots.is_empty() {
+        return Err("No deleted photos selected.".into());
+    }
+
+    let save = std::fs::read(&save_path)?;
+    let backup_path = timestamped_backup_path(&output_dir, "GAMEBOYCAMERA-before-recover")?;
+    std::fs::create_dir_all(&output_dir)?;
+    std::fs::write(&backup_path, &save)?;
+    progress.message(&format!(
+        "Pre-recover backup saved: {}",
+        backup_path.display()
+    ));
+
+    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+        Ok(dev.recover_album_photos(&save, &slots, progress)?)
+    })?;
+
+    let updated = apply_album_recover(&save, &slots)?;
+    std::fs::write(&save_path, &updated)?;
+    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
+    progress.message("Gallery updated after recover.");
+
+    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+}
+
+fn reorder_photos_from_fd(
+    fd: jint,
+    save_path: PathBuf,
+    output_dir: PathBuf,
+    physical_slots_csv: &str,
+    palette: PaletteId,
+    progress: &mut impl Progress,
+) -> AppResult<String> {
+    let slots = parse_physical_slots(physical_slots_csv)?;
+
+    let save = std::fs::read(&save_path)?;
+    let backup_path = timestamped_backup_path(&output_dir, "GAMEBOYCAMERA-before-reorder")?;
+    std::fs::create_dir_all(&output_dir)?;
+    std::fs::write(&backup_path, &save)?;
+    progress.message(&format!(
+        "Pre-reorder backup saved: {}",
+        backup_path.display()
+    ));
+
+    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+        Ok(dev.reorder_album_photos(&save, &slots, progress)?)
+    })?;
+
+    let updated = apply_album_reorder(&save, &slots)?;
+    std::fs::write(&save_path, &updated)?;
+    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
+    progress.message("Gallery updated after reorder.");
+
+    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+}
+
 fn load_gallery_from_save(
     save_path: PathBuf,
     output_dir: PathBuf,
@@ -372,6 +513,7 @@ fn gallery_json(
     palette: PaletteId,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let photos = extract_photos(save)?;
+    let save_view = GbcamSave::new(save)?;
     let mut json = String::new();
     json.push_str("{\"connected\":\"");
     json.push_str(&json_escape(&connected_label(info)));
@@ -383,13 +525,25 @@ fn gallery_json(
     json.push_str(&palette.index().to_string());
     json.push_str(",\"paletteName\":\"");
     json.push_str(&json_escape(palette.label()));
-    json.push_str("\",\"photos\":[");
+    let validation = save_view.validate();
+    let validation_errors = validation
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == ValidationSeverity::Error)
+        .count();
+    let validation_warnings = validation
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == ValidationSeverity::Warning)
+        .count();
+    json.push_str("\",\"validationErrors\":");
+    json.push_str(&validation_errors.to_string());
+    json.push_str(",\"validationWarnings\":");
+    json.push_str(&validation_warnings.to_string());
+    json.push_str(",\"photos\":[");
 
     let mut first = true;
-    for photo in photos
-        .iter()
-        .filter(|photo| photo.kind == PhotoKind::Album && !photo.deleted)
-    {
+    for photo in photos.iter().filter(|photo| photo.kind == PhotoKind::Album) {
         let path = output_dir.join(&photo.name);
         write_palette_png(&path, &photo.pixels_indexed, palette)?;
         if !first {
@@ -408,11 +562,37 @@ fn gallery_json(
         json.push_str(&photo.width.to_string());
         json.push_str(",\"height\":");
         json.push_str(&photo.height.to_string());
+        json.push_str(",\"deleted\":");
+        json.push_str(if photo.deleted { "true" } else { "false" });
+        if let Some(slot) = photo.physical_slot {
+            let metadata = save_view.metadata_for_slot(slot)?;
+            json.push_str(",\"border\":");
+            json.push_str(&metadata.border.to_string());
+            json.push_str(",\"copy\":");
+            json.push_str(if metadata.copy { "true" } else { "false" });
+            json.push_str(",\"metadataValid\":");
+            json.push_str(if metadata.owner_checksum.valid() {
+                "true"
+            } else {
+                "false"
+            });
+            json.push_str(",\"ownerUserId\":\"");
+            json.push_str(&hex_bytes(&metadata.image_owner.user_id));
+            json.push('"');
+        }
         json.push('}');
     }
 
     json.push_str("]}");
     Ok(json)
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn palette_from_jint(index: jint) -> PaletteId {

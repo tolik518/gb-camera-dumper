@@ -45,6 +45,14 @@ final class MainScreen {
 
         void onDeleteSelectedRequested();
 
+        void onRecoverSelectedRequested();
+
+        void onMoveSelectedFirstRequested();
+
+        void onCompactAlbumRequested();
+
+        void onClearAlbumRequested();
+
         void onPhotoSelectionChanged(GalleryPhoto photo, boolean selected);
 
         void onPhotoOpenRequested(GalleryPhoto photo);
@@ -87,6 +95,10 @@ final class MainScreen {
     private final Button importSaveButton;
     private final Button exportSaveButton;
     private final Button deleteButton;
+    private final Button recoverButton;
+    private final Button moveFirstButton;
+    private final Button compactButton;
+    private final Button clearAlbumButton;
 
     private GalleryState gallery;
     private boolean busy;
@@ -211,33 +223,50 @@ final class MainScreen {
         root.addView(paletteRow, matchWidthWrapContent());
         setPaletteIndex(defaultPaletteIndex);
 
-        LinearLayout actions = row();
-        actions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout actions = toolbarRow("Selection");
+        selection = new TextView(context);
+        selection.setGravity(Gravity.CENTER);
+        selection.setTextSize(12);
+        selection.setTextColor(colors.textSecondary);
+        selection.setSingleLine(true);
+        selection.setIncludeFontPadding(false);
+        selection.setPadding(dp(10), 0, dp(10), 0);
+        selection.setBackground(rounded(colors.surface, colors.border, 6, 1));
+        LinearLayout.LayoutParams selectionParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(36));
+        selectionParams.setMargins(0, 0, dp(8), 0);
+        actions.addView(selection, selectionParams);
         selectAllButton = smallButton("Select all", v -> listener.onSelectAllRequested());
         deselectAllButton = smallButton("Deselect", v -> listener.onDeselectAllRequested());
-        saveButton = smallButton("Save selected", v -> listener.onSaveSelectedRequested());
+        saveButton = smallButton("Save", v -> listener.onSaveSelectedRequested());
         shareButton = smallButton("Share", v -> listener.onShareSelectedRequested());
-        deleteButton = smallButton("Delete selected", v -> listener.onDeleteSelectedRequested());
-        deleteButton.setTextColor(Color.WHITE);
-        deleteButton.setBackgroundColor(colors.danger);
         addActionButton(actions, selectAllButton);
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
         addActionButton(actions, shareButton);
-        //actions.addView(deleteButton);
-        selection = new TextView(context);
-        selection.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        selection.setTextSize(12);
-        selection.setTextColor(colors.textSecondary);
-        selection.setPadding(dp(6), 0, 0, 0);
-        actions.addView(selection, new LinearLayout.LayoutParams(
-                0,
-                dp(34),
-                1));
         root.addView(wrapHorizontal(actions), matchWidthWrapContent());
 
-        LinearLayout fileActions = row();
-        fileActions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout albumActions = toolbarRow("Album tools");
+        moveFirstButton = smallButton("Move first", v -> listener.onMoveSelectedFirstRequested());
+        recoverButton = smallButton("Recover deleted", v -> listener.onRecoverSelectedRequested());
+        recoverButton.setTextColor(accent);
+        recoverButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
+        deleteButton = smallButton("Delete", v -> listener.onDeleteSelectedRequested());
+        deleteButton.setTextColor(Color.WHITE);
+        deleteButton.setBackground(dangerButtonBackground());
+        compactButton = smallButton("Compact gaps", v -> listener.onCompactAlbumRequested());
+        clearAlbumButton = smallButton("Clear album", v -> listener.onClearAlbumRequested());
+        clearAlbumButton.setTextColor(colors.danger);
+        clearAlbumButton.setBackground(buttonBackground(colors.surfaceRaised, blend(colors.danger, colors.background, 0.82f), colors.disabledBackground, colors.danger));
+        addActionButton(albumActions, moveFirstButton);
+        addActionButton(albumActions, recoverButton);
+        addActionButton(albumActions, deleteButton);
+        addActionButton(albumActions, compactButton);
+        addActionButton(albumActions, clearAlbumButton);
+        root.addView(wrapHorizontal(albumActions), matchWidthWrapContent());
+
+        LinearLayout fileActions = toolbarRow("Files");
         backupsButton = smallButton("Backups", v -> listener.onBackupsRequested());
         importSaveButton = smallButton("Import save", v -> listener.onImportSaveRequested());
         exportSaveButton = smallButton("Export save", v -> listener.onExportSaveRequested());
@@ -416,6 +445,8 @@ final class MainScreen {
 
     void updateActions() {
         int selected = gallery == null ? 0 : gallery.selectedCount();
+        int selectedActive = gallery == null ? 0 : gallery.selectedActiveCount();
+        int selectedDeleted = gallery == null ? 0 : gallery.selectedDeletedCount();
         int total = gallery == null ? 0 : gallery.photos.size();
         selection.setText(total == 0 ? "No photos" : selected == 0 ? "0 selected" : selected + " of " + total + " selected");
 
@@ -431,7 +462,16 @@ final class MainScreen {
         backupsButton.setEnabled(!busy);
         importSaveButton.setEnabled(!busy);
         exportSaveButton.setEnabled(!busy && gallery != null);
-        deleteButton.setEnabled(!busy && selected > 0);
+        deleteButton.setEnabled(!busy && selectedActive > 0);
+        deleteButton.setVisibility(selectedActive > 0 ? View.VISIBLE : View.GONE);
+        recoverButton.setEnabled(!busy && selectedDeleted > 0);
+        recoverButton.setVisibility(selectedDeleted > 0 ? View.VISIBLE : View.GONE);
+        moveFirstButton.setEnabled(!busy && selectedActive > 0);
+        moveFirstButton.setVisibility(selectedActive > 0 ? View.VISIBLE : View.GONE);
+        compactButton.setEnabled(!busy && gallery != null);
+        compactButton.setVisibility(gallery != null ? View.VISIBLE : View.GONE);
+        clearAlbumButton.setEnabled(!busy && total > 0);
+        clearAlbumButton.setVisibility(total > 0 ? View.VISIBLE : View.GONE);
         paletteField.setEnabled(!busy);
         paletteField.setAlpha(busy ? 0.42f : 1.0f);
         setButtonAvailability(loadButton, !busy);
@@ -442,21 +482,19 @@ final class MainScreen {
         setButtonAvailability(backupsButton, !busy);
         setButtonAvailability(importSaveButton, !busy);
         setButtonAvailability(exportSaveButton, !busy && gallery != null);
-        if (!busy && selected > 0) {
-            deleteButton.setTextColor(Color.WHITE);
-            deleteButton.setBackgroundColor(colors.danger);
-        } else {
-            deleteButton.setTextColor(colors.disabledText);
-            deleteButton.setBackgroundColor(colors.disabledBackground);
-        }
+        setButtonAvailability(recoverButton, !busy && selectedDeleted > 0);
+        setButtonAvailability(moveFirstButton, !busy && selectedActive > 0);
+        setButtonAvailability(compactButton, !busy && gallery != null);
+        setButtonAvailability(clearAlbumButton, !busy && total > 0);
+        deleteButton.setTextColor(!busy && selectedActive > 0 ? Color.WHITE : colors.disabledText);
     }
 
     private View photoTile(GalleryPhoto photo) {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(7));
-        tile.setBackground(tileBackground(photo.selected));
-        tile.setContentDescription("Photo " + String.format("%02d", photo.displayIndex + 1)
+        tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        tile.setContentDescription((photo.deleted ? "Deleted photo " : "Photo ") + String.format("%02d", photo.displayIndex + 1)
                 + (photo.selected ? ", selected" : ", not selected"));
         tile.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
         tile.setOnLongClickListener(v -> {
@@ -476,6 +514,7 @@ final class MainScreen {
         image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
+        image.setAlpha(photo.deleted ? 0.72f : 1.0f);
         image.setBackgroundColor(colors.photoBackground);
         imageFrame.addView(image, new FrameLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -495,20 +534,45 @@ final class MainScreen {
         checkParams.gravity = Gravity.TOP | Gravity.START;
         checkParams.setMargins(dp(6), dp(6), 0, 0);
         imageFrame.addView(selectionMarker, checkParams);
+        if (photo.deleted) {
+            TextView deletedBadge = new TextView(context);
+            deletedBadge.setText("Deleted");
+            deletedBadge.setTextColor(Color.WHITE);
+            deletedBadge.setTextSize(10);
+            deletedBadge.setTypeface(Typeface.DEFAULT_BOLD);
+            deletedBadge.setIncludeFontPadding(false);
+            deletedBadge.setGravity(Gravity.CENTER);
+            deletedBadge.setPadding(dp(8), 0, dp(8), 0);
+            deletedBadge.setBackground(rounded(blend(colors.danger, Color.BLACK, 0.18f), colors.danger, 8, 1));
+            FrameLayout.LayoutParams badgeParams = new FrameLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    dp(24));
+            badgeParams.gravity = Gravity.TOP | Gravity.END;
+            badgeParams.setMargins(0, dp(6), dp(6), 0);
+            imageFrame.addView(deletedBadge, badgeParams);
+        }
         tile.addView(imageFrame, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout row = row();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(4), dp(6), dp(4), 0);
-        row.setOnClickListener(toggleSelection);
+        LinearLayout labelBlock = new LinearLayout(context);
+        labelBlock.setOrientation(LinearLayout.VERTICAL);
+        labelBlock.setGravity(Gravity.CENTER_VERTICAL);
+        labelBlock.setPadding(dp(4), dp(7), dp(4), 0);
+        labelBlock.setOnClickListener(toggleSelection);
         TextView label = new TextView(context);
-        label.setText("Photo " + String.format("%02d", photo.displayIndex + 1));
+        label.setText((photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1));
         label.setTextColor(colors.textPrimary);
         label.setTextSize(12);
-        row.addView(label);
-        tile.addView(row, matchWidthWrapContent());
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView meta = new TextView(context);
+        meta.setText(photo.deleted ? "Recoverable slot " + (photo.physicalSlot + 1) : "Slot " + (photo.physicalSlot + 1));
+        meta.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f) : colors.textMuted);
+        meta.setTextSize(10);
+        meta.setIncludeFontPadding(false);
+        labelBlock.addView(label);
+        labelBlock.addView(meta);
+        tile.addView(labelBlock, matchWidthWrapContent());
 
         return tile;
     }
@@ -522,10 +586,10 @@ final class MainScreen {
         showGallery(gallery);
     }
 
-    private GradientDrawable tileBackground(boolean selected) {
+    private GradientDrawable tileBackground(boolean selected, boolean deleted) {
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(selected ? accentSurface : colors.surface);
-        bg.setStroke(selected ? dp(2) : dp(1), selected ? accent : colors.border);
+        bg.setColor(selected ? accentSurface : deleted ? blend(colors.danger, colors.background, 0.90f) : colors.surface);
+        bg.setStroke(selected ? dp(2) : dp(1), selected ? accent : deleted ? blend(colors.danger, colors.border, 0.42f) : colors.border);
         bg.setCornerRadius(dp(8));
         return bg;
     }
@@ -714,6 +778,10 @@ final class MainScreen {
 
         loadButton.setTextColor(accent);
         loadButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
+        if (recoverButton != null) {
+            recoverButton.setTextColor(accent);
+            recoverButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
+        }
     }
 
     private void setAccentForPalette(int paletteIndex) {
@@ -761,6 +829,28 @@ final class MainScreen {
         row.addView(button, params);
     }
 
+    private LinearLayout toolbarRow(String label) {
+        LinearLayout row = row();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(2), 0, dp(2));
+        TextView labelView = new TextView(context);
+        labelView.setText(label);
+        labelView.setTextColor(colors.textMuted);
+        labelView.setTextSize(10);
+        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        labelView.setAllCaps(false);
+        labelView.setGravity(Gravity.CENTER);
+        labelView.setIncludeFontPadding(false);
+        labelView.setPadding(dp(9), 0, dp(9), 0);
+        labelView.setBackground(rounded(colors.background, colors.border, 999, 1));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(28));
+        params.setMargins(0, 0, dp(8), 0);
+        row.addView(labelView, params);
+        return row;
+    }
+
     private HorizontalScrollView wrapHorizontal(LinearLayout row) {
         HorizontalScrollView scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
@@ -782,6 +872,14 @@ final class MainScreen {
         states.addState(new int[] { -android.R.attr.state_enabled }, rounded(disabled, colors.border, 6, 1));
         states.addState(new int[] { android.R.attr.state_pressed }, rounded(pressed, colors.borderStrong, 6, 1));
         states.addState(new int[] {}, rounded(normal, stroke, 6, 1));
+        return states;
+    }
+
+    private StateListDrawable dangerButtonBackground() {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[] { -android.R.attr.state_enabled }, rounded(colors.disabledBackground, colors.border, 6, 1));
+        states.addState(new int[] { android.R.attr.state_pressed }, rounded(blend(colors.danger, Color.BLACK, 0.18f), colors.danger, 6, 1));
+        states.addState(new int[] {}, rounded(colors.danger, colors.danger, 6, 1));
         return states;
     }
 

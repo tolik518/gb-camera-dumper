@@ -6,7 +6,11 @@
 //!   termux-usb -r -e "./gbxcam --erase" /dev/bus/usb/001/002
 //!   gbxcam GAMEBOYCAMERA.sav
 
-use gbxcam_core::{write_photos_to_dir, CartridgeReport, MAPPER_MAC_GBD, SAVE_SIZE, WRITE_CHUNK};
+use gbxcam_core::{
+    apply_album_delete, apply_album_rebuild_from_nonblank_slots, apply_album_recover,
+    apply_album_reorder, write_photos_to_dir, CartridgeReport, GbcamSave, ValidationSeverity,
+    MAPPER_MAC_GBD, SAVE_SIZE, WRITE_CHUNK,
+};
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -60,6 +64,44 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if args.len() == 2 && args[0] == "--check" && args[1].ends_with(".sav") {
+        let data = fs::read(&args[1])?;
+        println!("Checking {} ({} KiB)...", args[1], data.len() / 1024);
+        check_save(&data)?;
+        return Ok(());
+    }
+
+    if args.len() == 4 && args[0] == "--delete-save" {
+        edit_save_file(&args[1], &args[2], &args[3], apply_album_delete)?;
+        return Ok(());
+    }
+
+    if args.len() == 4 && args[0] == "--recover" {
+        edit_save_file(&args[1], &args[2], &args[3], apply_album_recover)?;
+        return Ok(());
+    }
+
+    if args.len() == 4 && args[0] == "--reorder" {
+        edit_save_file(&args[1], &args[2], &args[3], apply_album_reorder)?;
+        return Ok(());
+    }
+
+    if args.len() == 3 && args[0] == "--clear-album" {
+        let data = fs::read(&args[1])?;
+        let updated = apply_album_reorder(&data, &[])?;
+        fs::write(&args[2], updated)?;
+        println!("Wrote cleared album state vector: {}", args[2]);
+        return Ok(());
+    }
+
+    if args.len() == 3 && args[0] == "--rebuild-nonblank" {
+        let data = fs::read(&args[1])?;
+        let updated = apply_album_rebuild_from_nonblank_slots(&data)?;
+        fs::write(&args[2], updated)?;
+        println!("Wrote rebuilt album state vector: {}", args[2]);
+        return Ok(());
+    }
 
     if args.len() == 1 && args[0].ends_with(".sav") {
         let data = fs::read(&args[0])?;
@@ -126,6 +168,111 @@ fn extract_photos(save: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("\nExtracted {} image(s).", names.len());
     Ok(())
+}
+
+fn check_save(save: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let save = GbcamSave::new(save)?;
+    let state = save.state_vector_report();
+    println!("Album state vector:");
+    println!(
+        "  primary: magic={}, checksum={}, stored={:02X?}, computed={:02X?}",
+        state.primary.magic_valid,
+        state.primary.checksum_valid(),
+        state.primary.stored_checksum,
+        state.primary.computed_checksum
+    );
+    println!(
+        "  echo:    magic={}, checksum={}, stored={:02X?}, computed={:02X?}",
+        state.echo.magic_valid,
+        state.echo.checksum_valid(),
+        state.echo.stored_checksum,
+        state.echo.computed_checksum
+    );
+    println!("  selected: {:?}", state.selected);
+    println!("  copies match: {}", state.copies_match());
+
+    let settings = save.settings_block();
+    println!("Settings/minigames block:");
+    println!(
+        "  primary: magic={}, checksum={}, stored={:02X?}, computed={:02X?}",
+        settings.primary.magic_valid,
+        settings.primary.checksum_valid(),
+        settings.primary.stored_checksum,
+        settings.primary.computed_checksum
+    );
+    println!(
+        "  echo:    magic={}, checksum={}, stored={:02X?}, computed={:02X?}",
+        settings.echo.magic_valid,
+        settings.echo.checksum_valid(),
+        settings.echo.stored_checksum,
+        settings.echo.computed_checksum
+    );
+    println!("  copies match: {}", settings.copies_match);
+    println!(
+        "  counters raw: taken={:02X?}, erased={:02X?}, transferred={:02X?}, printed={:02X?}, received={:02X?}",
+        settings.counters.pictures_taken_raw,
+        settings.counters.pictures_erased_raw,
+        settings.counters.pictures_transferred_raw,
+        settings.counters.pictures_printed_raw,
+        settings.counters.pictures_received_raw
+    );
+    println!(
+        "  scores raw: space_fever_ii={:02X?}, ball={:02X?}, run_run_run={:02X?}",
+        settings.scores.space_fever_ii_raw,
+        settings.scores.ball_raw,
+        settings.scores.run_run_run_raw
+    );
+    println!("  print intensity: 0x{:02X}", settings.printing_intensity);
+
+    let report = save.validate();
+    if report.findings.is_empty() {
+        println!("No validation findings.");
+    } else {
+        println!("Validation findings:");
+        for finding in &report.findings {
+            let severity = match finding.severity {
+                ValidationSeverity::Info => "info",
+                ValidationSeverity::Warning => "warning",
+                ValidationSeverity::Error => "error",
+            };
+            match finding.offset {
+                Some(offset) => println!("  {severity} @ 0x{offset:05X}: {}", finding.message),
+                None => println!("  {severity}: {}", finding.message),
+            }
+        }
+    }
+
+    if report.is_valid() {
+        Ok(())
+    } else {
+        Err("save validation failed".into())
+    }
+}
+
+fn edit_save_file(
+    input: &str,
+    output: &str,
+    csv: &str,
+    edit: fn(&[u8], &[usize]) -> Result<Vec<u8>, gbxcam_core::GbcamCoreError>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let data = fs::read(input)?;
+    let slots = parse_slot_csv(csv)?;
+    let updated = edit(&data, &slots)?;
+    fs::write(output, updated)?;
+    println!("Wrote updated save: {output}");
+    Ok(())
+}
+
+fn parse_slot_csv(csv: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+    let mut slots = Vec::new();
+    for part in csv
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        slots.push(part.parse()?);
+    }
+    Ok(slots)
 }
 
 fn print_connected(info: &GbxCartInfo) {

@@ -62,11 +62,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private boolean autoLoadAttempted;
     private int paletteIndex;
     private File pendingSaveExport;
+    private String pendingReorderCsv = "";
+    private String pendingReorderMessage = "Reordering album...";
 
     private enum PendingOperation {
         NONE,
         LOAD,
-        DELETE
+        DELETE,
+        RECOVER,
+        REORDER
     }
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -221,15 +225,81 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     @Override
     public void onDeleteSelectedRequested() {
         GalleryState gallery = screen.gallery();
-        if (gallery == null || gallery.selectedCount() == 0) {
+        if (gallery == null || gallery.selectedActiveCount() == 0) {
             return;
         }
 
         new AlertDialog.Builder(this)
                 .setTitle("Delete selected photos?")
-                .setMessage("This removes " + gallery.selectedCount() + " photo(s) from the camera album. A save backup is kept in the app dumps folder.")
+                .setMessage("This removes " + gallery.selectedActiveCount() + " active photo(s) from the camera album. A save backup is kept in the app dumps folder.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete", (dialog, which) -> startOperation(PendingOperation.DELETE))
+                .show();
+    }
+
+    @Override
+    public void onRecoverSelectedRequested() {
+        GalleryState gallery = screen.gallery();
+        if (gallery == null || gallery.selectedDeletedCount() == 0) {
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Recover deleted photos?")
+                .setMessage("This restores " + gallery.selectedDeletedCount() + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Recover", (dialog, which) -> startOperation(PendingOperation.RECOVER))
+                .show();
+    }
+
+    @Override
+    public void onMoveSelectedFirstRequested() {
+        GalleryState gallery = screen.gallery();
+        if (gallery == null || gallery.selectedActiveCount() == 0) {
+            return;
+        }
+
+        pendingReorderCsv = gallery.selectedActiveFirstPhysicalSlotsCsv();
+        pendingReorderMessage = "Moving selected photos to front...";
+        new AlertDialog.Builder(this)
+                .setTitle("Move selected photos first?")
+                .setMessage("This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Move", (dialog, which) -> startOperation(PendingOperation.REORDER))
+                .show();
+    }
+
+    @Override
+    public void onCompactAlbumRequested() {
+        GalleryState gallery = screen.gallery();
+        if (gallery == null) {
+            return;
+        }
+
+        pendingReorderCsv = gallery.activePhysicalSlotsCsv();
+        pendingReorderMessage = "Compacting album order...";
+        new AlertDialog.Builder(this)
+                .setTitle("Compact album order?")
+                .setMessage("This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Compact", (dialog, which) -> startOperation(PendingOperation.REORDER))
+                .show();
+    }
+
+    @Override
+    public void onClearAlbumRequested() {
+        GalleryState gallery = screen.gallery();
+        if (gallery == null) {
+            return;
+        }
+
+        pendingReorderCsv = "";
+        pendingReorderMessage = "Clearing album order...";
+        new AlertDialog.Builder(this)
+                .setTitle("Clear camera album?")
+                .setMessage("This hides every album slot by writing an empty state vector. Image data remains in SRAM for recovery/export until overwritten. A save backup is kept in the app dumps folder.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear", (dialog, which) -> startOperation(PendingOperation.REORDER))
                 .show();
     }
 
@@ -311,6 +381,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         rememberBackupPalette(new File(gallery.savePath), gallery.paletteIndex);
         screen.showGallery(gallery);
         onLog("Loaded " + gallery.photos.size() + " camera photo(s).");
+        if (gallery.validationErrors > 0 || gallery.validationWarnings > 0) {
+            onLog("Save validation: " + gallery.validationErrors + " error(s), "
+                    + gallery.validationWarnings + " warning(s).");
+        }
     }
 
     private boolean refreshDevice() {
@@ -360,6 +434,18 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 GalleryState gallery = screen.gallery();
                 if (gallery != null) {
                     operationRunner.deletePhotos(usbManager, selectedDevice, gallery, dumpsDir(), paletteIndex, this);
+                }
+                break;
+            case RECOVER:
+                GalleryState recoverGallery = screen.gallery();
+                if (recoverGallery != null) {
+                    operationRunner.recoverPhotos(usbManager, selectedDevice, recoverGallery, dumpsDir(), paletteIndex, this);
+                }
+                break;
+            case REORDER:
+                GalleryState reorderGallery = screen.gallery();
+                if (reorderGallery != null) {
+                    operationRunner.reorderPhotos(usbManager, selectedDevice, reorderGallery, dumpsDir(), paletteIndex, pendingReorderCsv, pendingReorderMessage, this);
                 }
                 break;
             case NONE:
@@ -709,7 +795,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         TextView meta = new TextView(this);
         meta.setText("Album " + String.format("%02d", photo.displayIndex + 1)
                 + " · Slot " + photo.physicalSlot
-                + " · " + photo.width + "x" + photo.height);
+                + " · " + photo.width + "x" + photo.height
+                + " · Border " + photo.border
+                + (photo.copy ? " · Copy" : " · Original")
+                + " · Metadata " + (photo.metadataValid ? "OK" : "check")
+                + (photo.ownerUserId.isEmpty() ? "" : " · Owner " + photo.ownerUserId));
         meta.setTextColor(textSecondary);
         meta.setTextSize(12);
         titleBlock.addView(meta);

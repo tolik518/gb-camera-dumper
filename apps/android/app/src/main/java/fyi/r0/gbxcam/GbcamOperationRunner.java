@@ -48,13 +48,54 @@ final class GbcamOperationRunner {
             File outputDir,
             int paletteIndex,
             Callback callback) {
-        String slots = gallery.selectedPhysicalSlotsCsv();
+        String slots = gallery.selectedPhysicalSlotsCsv(false);
         runUsbOperation(usbManager, device, "Deleting selected photos...", callback, connection -> {
             String json = NativeGbcam.deletePhotosFromFd(
                     connection.getFileDescriptor(),
                     gallery.savePath,
                     outputDir.getAbsolutePath(),
                     slots,
+                    paletteIndex,
+                    message -> postLog(callback, message));
+            return GalleryState.fromJson(json);
+        });
+    }
+
+    void recoverPhotos(
+            UsbManager usbManager,
+            UsbDevice device,
+            GalleryState gallery,
+            File outputDir,
+            int paletteIndex,
+            Callback callback) {
+        String slots = gallery.selectedPhysicalSlotsCsv(true);
+        runUsbOperation(usbManager, device, "Recovering selected deleted photos...", callback, connection -> {
+            String json = NativeGbcam.recoverPhotosFromFd(
+                    connection.getFileDescriptor(),
+                    gallery.savePath,
+                    outputDir.getAbsolutePath(),
+                    slots,
+                    paletteIndex,
+                    message -> postLog(callback, message));
+            return GalleryState.fromJson(json);
+        });
+    }
+
+    void reorderPhotos(
+            UsbManager usbManager,
+            UsbDevice device,
+            GalleryState gallery,
+            File outputDir,
+            int paletteIndex,
+            String physicalSlotsCsv,
+            String busyMessage,
+            Callback callback) {
+        runUsbOperation(usbManager, device, busyMessage, callback, connection -> {
+            String json = NativeGbcam.reorderPhotosFromFd(
+                    connection.getFileDescriptor(),
+                    gallery.savePath,
+                    outputDir.getAbsolutePath(),
+                    physicalSlotsCsv,
                     paletteIndex,
                     message -> postLog(callback, message));
             return GalleryState.fromJson(json);

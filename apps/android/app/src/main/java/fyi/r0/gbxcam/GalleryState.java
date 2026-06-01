@@ -13,6 +13,8 @@ final class GalleryState {
     final String outputDir;
     final int paletteIndex;
     final String paletteName;
+    final int validationErrors;
+    final int validationWarnings;
     final List<GalleryPhoto> photos;
 
     GalleryState(
@@ -21,12 +23,16 @@ final class GalleryState {
             String outputDir,
             int paletteIndex,
             String paletteName,
+            int validationErrors,
+            int validationWarnings,
             List<GalleryPhoto> photos) {
         this.connected = connected;
         this.savePath = savePath;
         this.outputDir = outputDir;
         this.paletteIndex = paletteIndex;
         this.paletteName = paletteName;
+        this.validationErrors = validationErrors;
+        this.validationWarnings = validationWarnings;
         this.photos = photos;
     }
 
@@ -42,7 +48,12 @@ final class GalleryState {
                     item.getInt("displayIndex"),
                     item.getInt("physicalSlot"),
                     item.getInt("width"),
-                    item.getInt("height")));
+                    item.getInt("height"),
+                    item.optBoolean("deleted", false),
+                    item.optInt("border", 0),
+                    item.optBoolean("copy", false),
+                    item.optBoolean("metadataValid", false),
+                    item.optString("ownerUserId", "")));
         }
         return new GalleryState(
                 root.getString("connected"),
@@ -50,6 +61,8 @@ final class GalleryState {
                 root.getString("outputDir"),
                 root.optInt("paletteIndex", 0),
                 root.optString("paletteName", "Monochrome - Grayscale"),
+                root.optInt("validationErrors", 0),
+                root.optInt("validationWarnings", 0),
                 photos);
     }
 
@@ -57,6 +70,26 @@ final class GalleryState {
         int count = 0;
         for (GalleryPhoto photo : photos) {
             if (photo.selected) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    int selectedActiveCount() {
+        int count = 0;
+        for (GalleryPhoto photo : photos) {
+            if (photo.selected && !photo.deleted) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    int selectedDeletedCount() {
+        int count = 0;
+        for (GalleryPhoto photo : photos) {
+            if (photo.selected && photo.deleted) {
                 count++;
             }
         }
@@ -75,6 +108,53 @@ final class GalleryState {
             csv.append(photo.physicalSlot);
         }
         return csv.toString();
+    }
+
+    String selectedPhysicalSlotsCsv(boolean deleted) {
+        StringBuilder csv = new StringBuilder();
+        for (GalleryPhoto photo : photos) {
+            if (!photo.selected || photo.deleted != deleted) {
+                continue;
+            }
+            if (csv.length() > 0) {
+                csv.append(',');
+            }
+            csv.append(photo.physicalSlot);
+        }
+        return csv.toString();
+    }
+
+    String activePhysicalSlotsCsv() {
+        StringBuilder csv = new StringBuilder();
+        for (GalleryPhoto photo : photos) {
+            if (photo.deleted) {
+                continue;
+            }
+            if (csv.length() > 0) {
+                csv.append(',');
+            }
+            csv.append(photo.physicalSlot);
+        }
+        return csv.toString();
+    }
+
+    String selectedActiveFirstPhysicalSlotsCsv() {
+        StringBuilder csv = new StringBuilder();
+        appendActiveSlots(csv, true);
+        appendActiveSlots(csv, false);
+        return csv.toString();
+    }
+
+    private void appendActiveSlots(StringBuilder csv, boolean selected) {
+        for (GalleryPhoto photo : photos) {
+            if (photo.deleted || photo.selected != selected) {
+                continue;
+            }
+            if (csv.length() > 0) {
+                csv.append(',');
+            }
+            csv.append(photo.physicalSlot);
+        }
     }
 
     void copySelectionFrom(GalleryState previous) {
