@@ -18,4 +18,39 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    // Read upload keystore credentials from local.properties (not committed to git).
+    // Add these four keys to local.properties before running bundleRelease:
+    //   RELEASE_STORE_FILE=/absolute/path/to/upload.keystore
+    //   RELEASE_STORE_PASSWORD=...
+    //   RELEASE_KEY_ALIAS=...
+    //   RELEASE_KEY_PASSWORD=...
+    // Then enroll in Play App Signing so Google holds the final signing key.
+    def localProps = new Properties()
+    def localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) {
+        localProps.load(localPropsFile.newDataInputStream())
+    }
+
+    signingConfigs {
+        release {
+            def keyPath = localProps["RELEASE_STORE_FILE"]
+            if (keyPath) {
+                storeFile file(keyPath)
+                storePassword localProps["RELEASE_STORE_PASSWORD"] ?: ""
+                keyAlias localProps["RELEASE_KEY_ALIAS"] ?: ""
+                keyPassword localProps["RELEASE_KEY_PASSWORD"] ?: ""
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            def hasKey = localProps["RELEASE_STORE_FILE"] != null
+            if (hasKey) signingConfig signingConfigs.release
+        }
+    }
 }

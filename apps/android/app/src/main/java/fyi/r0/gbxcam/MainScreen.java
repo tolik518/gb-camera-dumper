@@ -44,6 +44,8 @@ final class MainScreen {
 
         void onSettingsRequested();
 
+        void onAboutRequested();
+
         void onDeleteSelectedRequested();
 
         void onRecoverSelectedRequested();
@@ -95,6 +97,7 @@ final class MainScreen {
     private final Button backupsButton;
     private final Button importSaveButton;
     private final Button exportSaveButton;
+    private final Button aboutButton;
     private final Button settingsButton;
     private final Button deleteButton;
     private final Button recoverButton;
@@ -264,12 +267,14 @@ final class MainScreen {
         backupsButton = smallButton("Backups", v -> listener.onBackupsRequested());
         importSaveButton = smallButton("Import save", v -> listener.onImportSaveRequested());
         exportSaveButton = smallButton("Export save", v -> listener.onExportSaveRequested());
+        aboutButton = smallButton("About", v -> listener.onAboutRequested());
         settingsButton = smallButton("⚙", v -> listener.onSettingsRequested());
         settingsButton.setTextSize(18);
         settingsButton.setContentDescription("Settings");
         addActionButton(fileActions, backupsButton);
         addActionButton(fileActions, importSaveButton);
         addActionButton(fileActions, exportSaveButton);
+        addActionButton(fileActions, aboutButton);
         addActionButton(fileActions, settingsButton);
         root.addView(wrapHorizontal(fileActions), matchWidthWrapContent());
 

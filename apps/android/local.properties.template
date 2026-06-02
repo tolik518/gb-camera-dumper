@@ -1,0 +1,14 @@
+# Copy this file to local.properties and fill in your values.
+# local.properties is gitignored — never commit it.
+#
+# Generate an upload keystore (one-time):
+#   keytool -genkey -v -keystore upload.keystore \
+#     -alias upload -keyalg RSA -keysize 2048 -validity 10000
+#
+# Then enroll in Play App Signing in the Play Console so Google holds
+# the final distribution key; you only manage this upload key.
+
+RELEASE_STORE_FILE=/absolute/path/to/upload.keystore
+RELEASE_STORE_PASSWORD=
+RELEASE_KEY_ALIAS=upload
+RELEASE_KEY_PASSWORD=

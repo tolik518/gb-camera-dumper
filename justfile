@@ -216,6 +216,29 @@ android-apk api=android-api: (android-app-libs api)
 android-apk-install api=android-api: (android-apk api)
     adb install --no-streaming -r -t apps/android/app/build/outputs/apk/debug/app-debug.apk
 
+android-aab api=android-api: (android-app-libs api)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    local_props="apps/android/local.properties"
+    if [[ ! -f "$local_props" ]] || ! grep -qE "^RELEASE_STORE_FILE=.+" "$local_props"; then
+        echo "Release signing not configured." >&2
+        echo "Copy apps/android/local.properties.template to apps/android/local.properties and fill in your keystore details." >&2
+        exit 1
+    fi
+    sdk="$(just --quiet _android-sdk-home)"
+    gradle="$(just --quiet _gradle-bin)"
+    gradle_home="$PWD/.gradle-home"
+    gradle_tmp="$PWD/.gradle-tmp"
+    mkdir -p "$gradle_home" "$gradle_tmp"
+    cd apps/android
+    ANDROID_HOME="$sdk" \
+        ANDROID_SDK_ROOT="$sdk" \
+        GRADLE_USER_HOME="$gradle_home" \
+        JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=$gradle_tmp" \
+        GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.native=false -Djava.io.tmpdir=$gradle_tmp" \
+        "$gradle" --no-daemon :app:bundleRelease
+    echo "Built: apps/android/app/build/outputs/bundle/release/app-release.aab"
+
 android-app-start:
     adb shell am start -n fyi.r0.gbxcam/.MainActivity
 

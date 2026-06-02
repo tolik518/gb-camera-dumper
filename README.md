@@ -3,15 +3,15 @@
 An Android app to view and transfer photos from the Game Boy Camera to your Android device.  
 Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewer/releases).
 
-## Prequisites
+## Prerequisites
 
-- Anroid phone
+- Android phone
 - GB Camera
 - GBxCart RW 1.4 or later
 
 ## Screenshots
 
-![GBxCAM Viewer screenshot](.github/screenshot-dark.jpg)
+![GBxCAM Viewer screenshot](.github/screenshot-dark.png)
 
 ## License
 
