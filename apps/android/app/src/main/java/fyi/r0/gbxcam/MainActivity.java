@@ -7,10 +7,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.usb.UsbDevice;
@@ -31,7 +29,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -41,63 +38,25 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
     private static final String TAG = "GbcamApp";
     private static final String ACTION_USB_PERMISSION = "fyi.r0.gbxcam.USB_PERMISSION";
-    private static final String PREFS = "gbxcam-viewer";
-    private static final String KEY_PALETTE_INDEX = "palette-index";
-    private static final String KEY_PALETTE_FAVORITES = "palette-favorites";
-    private static final String KEY_PALETTE_RECENT = "palette-recent";
-    private static final String KEY_BACKUP_PALETTE_PREFIX = "backup-palette:";
-    private static final String KEY_AUTO_LOAD_CAMERA = "auto-load-camera";
-    private static final String KEY_LOAD_CACHED_GALLERY = "load-cached-gallery";
-    private static final String KEY_SHOW_LOGS = "show-logs";
-    private static final String KEY_CONFIRM_ALBUM_WRITES = "confirm-album-writes";
-    private static final String KEY_EXPORT_DELETED_PHOTOS = "export-deleted-photos";
-    private static final String KEY_AUTO_RGB_MERGE = "auto-rgb-merge";
-    private static final String KEY_RGB4_ORDER = "rgb4-order";
-    private static final String KEY_RGB3_ORDER = "rgb3-order";
-    private static final String KEY_DEFAULT_MERGE_ALGO = "default-merge-algo";
-    private static final String KEY_MERGE_ALGO_OVERRIDE_PREFIX = "merge-algo-override:";
-    private static final String DEFAULT_RGB4_ORDER = "CRGB";
-    private static final String DEFAULT_RGB3_ORDER = "RGB";
-    private static final String[] RGB4_ORDERS = {
-            "CRGB", "CRBG", "CGBR", "CGRB", "CBRG", "CBGR",
-            "RCGB", "RCBG", "RGBC", "RGCB", "RBGC", "RBCG",
-            "GCRB", "GCBR", "GRCB", "GRBC", "GBCR", "GBRC",
-            "BCRG", "BCGR", "BRCG", "BRGC", "BGCR", "BGRC"
-    };
-    private static final String[] RGB3_ORDERS = {
-            "RGB", "RBG", "GRB", "GBR", "BRG", "BGR"
-    };
     private static final int REQUEST_IMPORT_SAVE = 1;
     private static final int REQUEST_EXPORT_SAVE = 2;
 
     private UsbManager usbManager;
     private UsbDevice selectedDevice;
-    private PendingOperation pendingOperation = PendingOperation.NONE;
+    private AppSettings settings;
+    private Runnable pendingAction;
     private MainScreen screen;
     private GbcamOperationRunner operationRunner;
     private boolean autoLoadAttempted;
     private int paletteIndex;
     private File pendingSaveExport;
-    private String pendingReorderCsv = "";
-    private String pendingReorderMessage = "Reordering album...";
-
-    private enum PendingOperation {
-        NONE,
-        LOAD,
-        DELETE,
-        RECOVER,
-        REORDER
-    }
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
@@ -111,15 +70,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             if (!granted || device == null) {
                 Log.w(TAG, "USB permission denied");
                 onLog("USB permission denied.");
-                pendingOperation = PendingOperation.NONE;
+                pendingAction = null;
                 return;
             }
 
             selectedDevice = device;
             onLog("USB permission granted.");
-            PendingOperation operation = pendingOperation;
-            pendingOperation = PendingOperation.NONE;
-            runOperation(operation);
+            Runnable action = pendingAction;
+            pendingAction = null;
+            if (action != null) action.run();
         }
     };
 
@@ -128,28 +87,29 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         super.onCreate(savedInstanceState);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         operationRunner = new GbcamOperationRunner();
+        settings = new AppSettings(this);
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
         String[] paletteLabels = paletteLabels();
         int[][] paletteColors = paletteColors(paletteLabels.length);
-        paletteIndex = prefs().getInt(KEY_PALETTE_INDEX, defaultPaletteIndex);
+        paletteIndex = settings.paletteIndex(defaultPaletteIndex);
         paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
         screen = new MainScreen(
                 this,
                 this,
                 paletteLabels,
                 paletteColors,
-                paletteFavorites(paletteLabels),
-                recentPalettes(paletteLabels),
+                settings.paletteFavorites(paletteLabels),
+                settings.recentPalettes(paletteLabels),
                 defaultPaletteIndex);
         screen.setPaletteIndex(paletteIndex);
-        screen.setLogsVisibleFromSettings(showLogsByDefault());
+        screen.setLogsVisibleFromSettings(settings.showLogs());
         setContentView(screen.view());
 
         registerUsbReceiver();
         onLog("Rust core loaded: " + NativeGbcam.version());
-        if (refreshDevice() && autoLoadCameraEnabled()) {
+        if (refreshDevice() && settings.autoLoad()) {
             autoLoadCamera();
-        } else if (loadCachedGalleryEnabled()) {
+        } else if (settings.loadCache()) {
             loadCachedGallery();
         }
     }
@@ -163,7 +123,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     @Override
     public void onLoadRequested() {
-        startOperation(PendingOperation.LOAD);
+        runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
     }
 
     @Override
@@ -184,7 +144,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, exportDeletedPhotosEnabled());
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, settings.exportDeleted());
             onLog("Saved " + selected + " photo(s):\n" + result.summary());
         } catch (Exception e) {
             onLog("Save failed: " + e.getMessage());
@@ -199,7 +159,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, exportDeletedPhotosEnabled());
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, settings.exportDeleted());
             if (result.imageUris.isEmpty()) {
                 onLog("Share unavailable for this Android version. Saved instead:\n" + result.summary());
                 return;
@@ -265,7 +225,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 "Delete selected photos?",
                 "This removes " + gallery.selectedActiveCount() + " active photo(s) from the camera album. A save backup is kept in the app dumps folder.",
                 "Delete",
-                () -> startOperation(PendingOperation.DELETE));
+                () -> runWithPermission(() -> {
+                    GalleryState g = screen.gallery();
+                    if (g != null) operationRunner.deletePhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, this);
+                }));
     }
 
     @Override
@@ -279,7 +242,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 "Recover deleted photos?",
                 "This restores " + gallery.selectedDeletedCount() + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.",
                 "Recover",
-                () -> startOperation(PendingOperation.RECOVER));
+                () -> runWithPermission(() -> {
+                    GalleryState g = screen.gallery();
+                    if (g != null) operationRunner.recoverPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, this);
+                }));
     }
 
     @Override
@@ -289,13 +255,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             return;
         }
 
-        pendingReorderCsv = gallery.selectedActiveFirstPhysicalSlotsCsv();
-        pendingReorderMessage = "Moving selected photos to front...";
+        String csv = gallery.selectedActiveFirstPhysicalSlotsCsv();
         confirmOrRun(
                 "Move selected photos first?",
                 "This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.",
                 "Move",
-                () -> startOperation(PendingOperation.REORDER));
+                () -> runWithPermission(() -> {
+                    GalleryState g = screen.gallery();
+                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Moving selected photos to front...", this);
+                }));
     }
 
     @Override
@@ -305,13 +273,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             return;
         }
 
-        pendingReorderCsv = gallery.activePhysicalSlotsCsv();
-        pendingReorderMessage = "Compacting album order...";
+        String csv = gallery.activePhysicalSlotsCsv();
         confirmOrRun(
                 "Compact album order?",
                 "This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.",
                 "Compact",
-                () -> startOperation(PendingOperation.REORDER));
+                () -> runWithPermission(() -> {
+                    GalleryState g = screen.gallery();
+                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Compacting album order...", this);
+                }));
     }
 
     @Override
@@ -321,13 +291,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             return;
         }
 
-        pendingReorderCsv = "";
-        pendingReorderMessage = "Clearing album order...";
+        String csv = "";
         confirmOrRun(
                 "Clear camera album?",
                 "This hides every album slot by writing an empty state vector. Image data remains in SRAM for recovery/export until overwritten. A save backup is kept in the app dumps folder.",
                 "Clear",
-                () -> startOperation(PendingOperation.REORDER));
+                () -> runWithPermission(() -> {
+                    GalleryState g = screen.gallery();
+                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Clearing album order...", this);
+                }));
     }
 
     @Override
@@ -361,13 +333,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     @Override
     public void onPaletteChanged(int paletteIndex) {
         this.paletteIndex = paletteIndex;
-        prefs().edit().putInt(KEY_PALETTE_INDEX, paletteIndex).apply();
+        settings.savePaletteIndex(paletteIndex);
         GalleryState current = screen.gallery();
         if (current != null) {
-            rememberBackupPalette(new File(current.savePath), paletteIndex);
+            settings.rememberBackupPalette(new File(current.savePath), paletteIndex);
         }
-        rememberRecentPalette(paletteIndex);
-        screen.setRecentPalettes(recentPalettes(paletteLabels()));
+        settings.rememberRecentPalette(paletteLabels(), paletteIndex);
+        screen.setRecentPalettes(settings.recentPalettes(paletteLabels()));
         if (screen != null) {
             recolorCachedGallery();
         }
@@ -379,16 +351,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         if (paletteIndex < 0 || paletteIndex >= labels.length) {
             return;
         }
-        Set<String> favorites = new HashSet<>(prefs().getStringSet(KEY_PALETTE_FAVORITES, new HashSet<>()));
-        boolean favorite;
-        if (favorites.contains(labels[paletteIndex])) {
-            favorites.remove(labels[paletteIndex]);
-            favorite = false;
-        } else {
-            favorites.add(labels[paletteIndex]);
-            favorite = true;
-        }
-        prefs().edit().putStringSet(KEY_PALETTE_FAVORITES, new HashSet<>(favorites)).commit();
+        boolean favorite = settings.togglePaletteFavorite(labels, paletteIndex);
         screen.setPaletteFavorite(paletteIndex, favorite);
     }
 
@@ -430,51 +393,51 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 this,
                 "Auto-load camera on launch",
                 "Starts reading the camera automatically when a GBxCart RW is connected.",
-                autoLoadCameraEnabled(),
+                settings.autoLoad(),
                 accent);
         CheckBox loadCache = UiStyle.settingsCheckBox(
                 this,
                 "Load last gallery when offline",
                 "Shows the most recent save backup when no camera is connected or auto-load is off.",
-                loadCachedGalleryEnabled(),
+                settings.loadCache(),
                 accent);
         CheckBox showLogs = UiStyle.settingsCheckBox(
                 this,
                 "Show logs by default",
                 "Keeps the operation log panel open after app startup.",
-                showLogsByDefault(),
+                settings.showLogs(),
                 accent);
         CheckBox confirmWrites = UiStyle.settingsCheckBox(
                 this,
                 "Confirm album writes",
                 "Asks before delete, recover, reorder, compact, or clear operations.",
-                confirmAlbumWritesEnabled(),
+                settings.confirmAlbumWrites(),
                 accent);
         CheckBox exportDeleted = UiStyle.settingsCheckBox(
                 this,
                 "Export deleted photos",
                 "Includes selected recoverable deleted slots when saving or sharing images.",
-                exportDeletedPhotosEnabled(),
+                settings.exportDeleted(),
                 accent);
         CheckBox autoRgbMerge = UiStyle.settingsCheckBox(
                 this,
                 "Auto-detect RGB sets",
                 "Merges consecutive 3-shot RGB and 4-shot CRGB captures.",
-                autoRgbMergeEnabled(),
+                settings.autoRgbMerge(),
                 accent);
 
-        final String[] rgb4Value = { rgb4Order() };
-        final String[] rgb3Value = { rgb3Order() };
+        final String[] rgb4Value = { settings.rgb4Order() };
+        final String[] rgb3Value = { settings.rgb3Order() };
         View rgb4Row = settingsPickerRow(
                 "4-shot order",
                 "Position of C (clear), R, G, B in consecutive shots.",
-                RGB4_ORDERS, rgb4Value);
+                AppSettings.RGB4_ORDERS, rgb4Value);
         View rgb3Row = settingsPickerRow(
                 "3-shot order",
                 "Position of R, G, B in consecutive shots.",
-                RGB3_ORDERS, rgb3Value);
+                AppSettings.RGB3_ORDERS, rgb3Value);
 
-        final String[] defaultAlgoValue = { defaultMergeAlgorithm() };
+        final String[] defaultAlgoValue = { settings.mergeAlgorithm() };
         View algoRow = settingsIdPickerRow(
                 "Default merge algorithm",
                 "Algorithm used when auto-detecting RGB sets.",
@@ -518,21 +481,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         cancel.setOnClickListener(v -> dialog.dismiss());
         Button apply = previewButton("Apply", accent, colors.surfaceRaised, accent);
         apply.setOnClickListener(v -> {
-            boolean rgbSettingsChanged = autoRgbMerge.isChecked() != autoRgbMergeEnabled()
-                    || !rgb4Value[0].equals(rgb4Order())
-                    || !rgb3Value[0].equals(rgb3Order())
-                    || !defaultAlgoValue[0].equals(defaultMergeAlgorithm());
-            prefs().edit()
-                    .putBoolean(KEY_AUTO_LOAD_CAMERA, autoLoad.isChecked())
-                    .putBoolean(KEY_LOAD_CACHED_GALLERY, loadCache.isChecked())
-                    .putBoolean(KEY_SHOW_LOGS, showLogs.isChecked())
-                    .putBoolean(KEY_CONFIRM_ALBUM_WRITES, confirmWrites.isChecked())
-                    .putBoolean(KEY_EXPORT_DELETED_PHOTOS, exportDeleted.isChecked())
-                    .putBoolean(KEY_AUTO_RGB_MERGE, autoRgbMerge.isChecked())
-                    .putString(KEY_RGB4_ORDER, rgb4Value[0])
-                    .putString(KEY_RGB3_ORDER, rgb3Value[0])
-                    .putString(KEY_DEFAULT_MERGE_ALGO, defaultAlgoValue[0])
-                    .apply();
+            boolean rgbSettingsChanged = autoRgbMerge.isChecked() != settings.autoRgbMerge()
+                    || !rgb4Value[0].equals(settings.rgb4Order())
+                    || !rgb3Value[0].equals(settings.rgb3Order())
+                    || !defaultAlgoValue[0].equals(settings.mergeAlgorithm());
+            settings.saveSettings(autoLoad.isChecked(), loadCache.isChecked(), showLogs.isChecked(),
+                    confirmWrites.isChecked(), exportDeleted.isChecked(), autoRgbMerge.isChecked(),
+                    rgb4Value[0], rgb3Value[0], defaultAlgoValue[0]);
             screen.setLogsVisibleFromSettings(showLogs.isChecked());
             onLog("Settings updated.");
             dialog.dismiss();
@@ -611,64 +566,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void confirmOrRun(String title, String message, String action, Runnable runnable) {
-        if (!confirmAlbumWritesEnabled()) {
+        if (!settings.confirmAlbumWrites()) {
             runnable.run();
             return;
         }
 
         UiStyle.confirmDialog(this, title, message, action, runnable);
-    }
-
-    private boolean autoLoadCameraEnabled() {
-        return prefs().getBoolean(KEY_AUTO_LOAD_CAMERA, true);
-    }
-
-    private boolean loadCachedGalleryEnabled() {
-        return prefs().getBoolean(KEY_LOAD_CACHED_GALLERY, true);
-    }
-
-    private boolean showLogsByDefault() {
-        return prefs().getBoolean(KEY_SHOW_LOGS, false);
-    }
-
-    private boolean confirmAlbumWritesEnabled() {
-        return prefs().getBoolean(KEY_CONFIRM_ALBUM_WRITES, true);
-    }
-
-    private boolean exportDeletedPhotosEnabled() {
-        return prefs().getBoolean(KEY_EXPORT_DELETED_PHOTOS, true);
-    }
-
-    private boolean autoRgbMergeEnabled() {
-        return prefs().getBoolean(KEY_AUTO_RGB_MERGE, true);
-    }
-
-    private String rgb4Order() {
-        return prefs().getString(KEY_RGB4_ORDER, DEFAULT_RGB4_ORDER);
-    }
-
-    private String rgb3Order() {
-        return prefs().getString(KEY_RGB3_ORDER, DEFAULT_RGB3_ORDER);
-    }
-
-    private String defaultMergeAlgorithm() {
-        return prefs().getString(KEY_DEFAULT_MERGE_ALGO, RgbMergeDetector.ALGO_NORM_CLEAR_LUM);
-    }
-
-    private Map<String, String> mergeAlgorithmOverrides() {
-        Map<String, String> overrides = new HashMap<>();
-        for (Map.Entry<String, ?> entry : prefs().getAll().entrySet()) {
-            if (entry.getKey().startsWith(KEY_MERGE_ALGO_OVERRIDE_PREFIX) && entry.getValue() instanceof String) {
-                overrides.put(entry.getKey().substring(KEY_MERGE_ALGO_OVERRIDE_PREFIX.length()),
-                        (String) entry.getValue());
-            }
-        }
-        return overrides;
-    }
-
-    private void saveMergeAlgorithmOverride(GalleryPhoto photo, String algorithm) {
-        String identity = photo.mergedKind + ":" + photo.mergedSourceStartDisplayIndex + ":" + photo.mergedSourceCount;
-        prefs().edit().putString(KEY_MERGE_ALGO_OVERRIDE_PREFIX + identity, algorithm).apply();
     }
 
     private boolean refreshDevice() {
@@ -691,50 +594,22 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         autoLoadAttempted = true;
         onLog("Loading camera automatically...");
-        startOperation(PendingOperation.LOAD);
+        runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
     }
 
-    private void startOperation(PendingOperation operation) {
+    private void runWithPermission(Runnable action) {
         if (!refreshDevice()) {
             return;
         }
 
         if (!usbManager.hasPermission(selectedDevice)) {
-            pendingOperation = operation;
+            pendingAction = action;
             onLog("Requesting USB permission...");
             usbManager.requestPermission(selectedDevice, permissionIntent());
             return;
         }
 
-        runOperation(operation);
-    }
-
-    private void runOperation(PendingOperation operation) {
-        switch (operation) {
-            case LOAD:
-                operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this);
-                break;
-            case DELETE:
-                GalleryState gallery = screen.gallery();
-                if (gallery != null) {
-                    operationRunner.deletePhotos(usbManager, selectedDevice, gallery, dumpsDir(), paletteIndex, this);
-                }
-                break;
-            case RECOVER:
-                GalleryState recoverGallery = screen.gallery();
-                if (recoverGallery != null) {
-                    operationRunner.recoverPhotos(usbManager, selectedDevice, recoverGallery, dumpsDir(), paletteIndex, this);
-                }
-                break;
-            case REORDER:
-                GalleryState reorderGallery = screen.gallery();
-                if (reorderGallery != null) {
-                    operationRunner.reorderPhotos(usbManager, selectedDevice, reorderGallery, dumpsDir(), paletteIndex, pendingReorderCsv, pendingReorderMessage, this);
-                }
-                break;
-            case NONE:
-                break;
-        }
+        action.run();
     }
 
     private File dumpsDir() {
@@ -777,9 +652,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             File current = new File(dumpsDir(), "GAMEBOYCAMERA.sav");
             int backupPalette = backupPaletteIndex(save);
             paletteIndex = backupPalette;
-            prefs().edit().putInt(KEY_PALETTE_INDEX, paletteIndex).apply();
+            settings.savePaletteIndex(paletteIndex);
             if (!save.getCanonicalPath().equals(current.getCanonicalPath())) {
-                copy(save, current);
+                PhotoExporter.copyFile(save, current);
             }
             rememberBackupPalette(current, paletteIndex);
             loadCachedGallery();
@@ -988,27 +863,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private int backupPaletteIndex(File save) {
-        int fallback = NativeGbcam.defaultPaletteIndex();
-        return prefs().getInt(backupPaletteKey(save), fallback);
+        return settings.backupPaletteIndex(save, NativeGbcam.defaultPaletteIndex());
     }
 
     private void rememberBackupPalette(File save, int paletteIndex) {
-        prefs().edit().putInt(backupPaletteKey(save), paletteIndex).apply();
-    }
-
-    private String backupPaletteKey(File save) {
-        String path;
-        try {
-            path = save.getCanonicalPath();
-        } catch (Exception e) {
-            path = save.getAbsolutePath();
-        }
-        return KEY_BACKUP_PALETTE_PREFIX
-                + path
-                + ":"
-                + save.lastModified()
-                + ":"
-                + save.length();
+        settings.rememberBackupPalette(save, paletteIndex);
     }
 
     private void showPhotoDetail(GalleryPhoto photo) {
@@ -1170,7 +1029,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         if (photo.mergedRgb) {
             dialog.setOnDismissListener(d -> {
                 if (algoChanged[0]) {
-                    saveMergeAlgorithmOverride(photo, previewAlgo[0]);
+                    settings.saveMergeAlgorithmOverride(photo, previewAlgo[0]);
                     recolorCachedGallery(paletteIndex, false);
                 }
             });
@@ -1311,18 +1170,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
     }
 
-    private SharedPreferences prefs() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE);
-    }
-
     private GalleryState applyAutoRgbMerge(GalleryState gallery) {
         gallery = filterEmptyDeletedPhotos(gallery);
-        if (!autoRgbMergeEnabled()) {
+        if (!settings.autoRgbMerge()) {
             return gallery;
         }
         List<GalleryPhoto> sourcePhotos = monoSourcePhotos(gallery);
         GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, sourcePhotos, new File(gallery.outputDir),
-                rgb4Order(), rgb3Order(), defaultMergeAlgorithm(), mergeAlgorithmOverrides());
+                settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(), settings.mergeAlgorithmOverrides());
         int added = merged.photos.size() - gallery.photos.size();
         if (added > 0) {
             onLog("Auto-merged " + added + " RGB set(s).");
@@ -1402,13 +1257,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     if (in == null) {
                         throw new Exception("Could not open imported save.");
                     }
-                    copy(in, out);
+                    PhotoExporter.copyStream(in, out);
                 }
                 NativeGbcam.loadGalleryFromSave(
                         importCheck.getAbsolutePath(),
                         dumpsDir().getAbsolutePath(),
                         paletteIndex);
-                copy(importCheck, target);
+                PhotoExporter.copyFile(importCheck, target);
                 if (!importCheck.delete()) {
                     Log.w(TAG, "Could not delete import check file: " + importCheck);
                 }
@@ -1479,80 +1334,6 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             };
         }
         return colors;
-    }
-
-    private boolean[] paletteFavorites(String[] labels) {
-        Set<String> favorites = prefs().getStringSet(KEY_PALETTE_FAVORITES, new HashSet<>());
-        boolean[] result = new boolean[labels.length];
-        for (int i = 0; i < labels.length; i++) {
-            result[i] = favorites.contains(labels[i]);
-        }
-        return result;
-    }
-
-    private int[] recentPalettes(String[] labels) {
-        String stored = prefs().getString(KEY_PALETTE_RECENT, "");
-        if (stored.isEmpty()) {
-            return new int[0];
-        }
-        String[] names = stored.split("\\n");
-        int[] indices = new int[names.length];
-        int count = 0;
-        for (String name : names) {
-            int index = paletteIndexForLabel(labels, name);
-            if (index >= 0) {
-                indices[count++] = index;
-            }
-        }
-        return Arrays.copyOf(indices, count);
-    }
-
-    private void rememberRecentPalette(int paletteIndex) {
-        String[] labels = paletteLabels();
-        if (paletteIndex < 0 || paletteIndex >= labels.length) {
-            return;
-        }
-        LinkedHashSet<String> recent = new LinkedHashSet<>();
-        recent.add(labels[paletteIndex]);
-        String stored = prefs().getString(KEY_PALETTE_RECENT, "");
-        if (!stored.isEmpty()) {
-            for (String label : stored.split("\\n")) {
-                if (!label.isEmpty()) {
-                    recent.add(label);
-                }
-                if (recent.size() >= 5) {
-                    break;
-                }
-            }
-        }
-        prefs().edit().putString(KEY_PALETTE_RECENT, String.join("\n", recent)).apply();
-    }
-
-    private static int paletteIndexForLabel(String[] labels, String label) {
-        for (int i = 0; i < labels.length; i++) {
-            if (labels[i].equals(label)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private void copy(File source, File target) throws Exception {
-        if (target.getParentFile() != null && !target.getParentFile().mkdirs() && !target.getParentFile().isDirectory()) {
-            throw new Exception("Could not create directory: " + target.getParentFile());
-        }
-        try (InputStream in = new FileInputStream(source);
-             OutputStream out = new FileOutputStream(target)) {
-            copy(in, out);
-        }
-    }
-
-    private static void copy(InputStream in, OutputStream out) throws Exception {
-        byte[] buffer = new byte[8192];
-        int read;
-        while ((read = in.read(buffer)) != -1) {
-            out.write(buffer, 0, read);
-        }
     }
 
     private int dp(int value) {

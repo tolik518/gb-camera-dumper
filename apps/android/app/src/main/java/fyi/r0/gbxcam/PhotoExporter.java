@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -85,6 +86,24 @@ final class PhotoExporter {
             while ((read = in.read(buffer)) != -1) {
                 out.write(buffer, 0, read);
             }
+        }
+    }
+
+    static void copyFile(File source, File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.mkdirs() && !parent.isDirectory()) {
+            throw new IOException("Could not create directory: " + parent);
+        }
+        try (FileOutputStream out = new FileOutputStream(target)) {
+            copyToStream(source, out);
+        }
+    }
+
+    static void copyStream(InputStream in, OutputStream out) throws IOException {
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
         }
     }
 
