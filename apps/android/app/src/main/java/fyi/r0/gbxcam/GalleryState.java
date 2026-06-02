@@ -53,7 +53,12 @@ final class GalleryState {
                     item.optInt("border", 0),
                     item.optBoolean("copy", false),
                     item.optBoolean("metadataValid", false),
-                    item.optString("ownerUserId", "")));
+                    item.optString("ownerUserId", ""),
+                    item.optBoolean("mergedRgb", false),
+                    item.optString("mergedKind", ""),
+                    item.optInt("mergedSourceCount", 0),
+                    item.optInt("mergedSourceStartDisplayIndex", -1),
+                    item.optString("mergedAlgorithm", "")));
         }
         return new GalleryState(
                 root.getString("connected"),
@@ -79,7 +84,7 @@ final class GalleryState {
     int selectedActiveCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && !photo.deleted) {
+            if (photo.selected && isAlbumBackedActive(photo)) {
                 count++;
             }
         }
@@ -113,7 +118,7 @@ final class GalleryState {
     String selectedPhysicalSlotsCsv(boolean deleted) {
         StringBuilder csv = new StringBuilder();
         for (GalleryPhoto photo : photos) {
-            if (!photo.selected || photo.deleted != deleted) {
+            if (!photo.selected || photo.deleted != deleted || photo.physicalSlot < 0) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -127,7 +132,7 @@ final class GalleryState {
     String activePhysicalSlotsCsv() {
         StringBuilder csv = new StringBuilder();
         for (GalleryPhoto photo : photos) {
-            if (photo.deleted) {
+            if (photo.deleted || photo.physicalSlot < 0) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -147,7 +152,7 @@ final class GalleryState {
 
     private void appendActiveSlots(StringBuilder csv, boolean selected) {
         for (GalleryPhoto photo : photos) {
-            if (photo.deleted || photo.selected != selected) {
+            if (photo.deleted || photo.physicalSlot < 0 || photo.selected != selected) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -160,11 +165,22 @@ final class GalleryState {
     void copySelectionFrom(GalleryState previous) {
         for (GalleryPhoto photo : photos) {
             for (GalleryPhoto old : previous.photos) {
-                if (photo.physicalSlot == old.physicalSlot) {
+                if (sameSelectionIdentity(photo, old)) {
                     photo.selected = old.selected;
                     break;
                 }
             }
         }
+    }
+
+    private static boolean isAlbumBackedActive(GalleryPhoto photo) {
+        return !photo.deleted && photo.physicalSlot >= 0;
+    }
+
+    private static boolean sameSelectionIdentity(GalleryPhoto photo, GalleryPhoto old) {
+        if (photo.physicalSlot >= 0 && old.physicalSlot >= 0) {
+            return photo.physicalSlot == old.physicalSlot;
+        }
+        return photo.mergedRgb && old.mergedRgb && photo.path.equals(old.path);
     }
 }

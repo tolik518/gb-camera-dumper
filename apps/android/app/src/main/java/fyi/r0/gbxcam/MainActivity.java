@@ -9,6 +9,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -17,15 +20,22 @@ import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -35,12 +45,16 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
@@ -51,6 +65,27 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private static final String KEY_PALETTE_FAVORITES = "palette-favorites";
     private static final String KEY_PALETTE_RECENT = "palette-recent";
     private static final String KEY_BACKUP_PALETTE_PREFIX = "backup-palette:";
+    private static final String KEY_AUTO_LOAD_CAMERA = "auto-load-camera";
+    private static final String KEY_LOAD_CACHED_GALLERY = "load-cached-gallery";
+    private static final String KEY_SHOW_LOGS = "show-logs";
+    private static final String KEY_CONFIRM_ALBUM_WRITES = "confirm-album-writes";
+    private static final String KEY_EXPORT_DELETED_PHOTOS = "export-deleted-photos";
+    private static final String KEY_AUTO_RGB_MERGE = "auto-rgb-merge";
+    private static final String KEY_RGB4_ORDER = "rgb4-order";
+    private static final String KEY_RGB3_ORDER = "rgb3-order";
+    private static final String KEY_DEFAULT_MERGE_ALGO = "default-merge-algo";
+    private static final String KEY_MERGE_ALGO_OVERRIDE_PREFIX = "merge-algo-override:";
+    private static final String DEFAULT_RGB4_ORDER = "CRGB";
+    private static final String DEFAULT_RGB3_ORDER = "RGB";
+    private static final String[] RGB4_ORDERS = {
+            "CRGB", "CRBG", "CGBR", "CGRB", "CBRG", "CBGR",
+            "RCGB", "RCBG", "RGBC", "RGCB", "RBGC", "RBCG",
+            "GCRB", "GCBR", "GRCB", "GRBC", "GBCR", "GBRC",
+            "BCRG", "BCGR", "BRCG", "BRGC", "BGCR", "BGRC"
+    };
+    private static final String[] RGB3_ORDERS = {
+            "RGB", "RBG", "GRB", "GBR", "BRG", "BGR"
+    };
     private static final int REQUEST_IMPORT_SAVE = 1;
     private static final int REQUEST_EXPORT_SAVE = 2;
 
@@ -116,13 +151,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 recentPalettes(paletteLabels),
                 defaultPaletteIndex);
         screen.setPaletteIndex(paletteIndex);
+        screen.setLogsVisibleFromSettings(showLogsByDefault());
         setContentView(screen.view());
 
         registerUsbReceiver();
         onLog("Rust core loaded: " + NativeGbcam.version());
-        if (refreshDevice()) {
+        if (refreshDevice() && autoLoadCameraEnabled()) {
             autoLoadCamera();
-        } else {
+        } else if (loadCachedGalleryEnabled()) {
             loadCachedGallery();
         }
     }
@@ -157,7 +193,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery);
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, exportDeletedPhotosEnabled());
             onLog("Saved " + selected + " photo(s):\n" + result.summary());
         } catch (Exception e) {
             onLog("Save failed: " + e.getMessage());
@@ -172,7 +208,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery);
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, exportDeletedPhotosEnabled());
             if (result.imageUris.isEmpty()) {
                 onLog("Share unavailable for this Android version. Saved instead:\n" + result.summary());
                 return;
@@ -223,18 +259,22 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
+    public void onSettingsRequested() {
+        showSettingsDialog();
+    }
+
+    @Override
     public void onDeleteSelectedRequested() {
         GalleryState gallery = screen.gallery();
         if (gallery == null || gallery.selectedActiveCount() == 0) {
             return;
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle("Delete selected photos?")
-                .setMessage("This removes " + gallery.selectedActiveCount() + " active photo(s) from the camera album. A save backup is kept in the app dumps folder.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Delete", (dialog, which) -> startOperation(PendingOperation.DELETE))
-                .show();
+        confirmOrRun(
+                "Delete selected photos?",
+                "This removes " + gallery.selectedActiveCount() + " active photo(s) from the camera album. A save backup is kept in the app dumps folder.",
+                "Delete",
+                () -> startOperation(PendingOperation.DELETE));
     }
 
     @Override
@@ -244,12 +284,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             return;
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle("Recover deleted photos?")
-                .setMessage("This restores " + gallery.selectedDeletedCount() + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Recover", (dialog, which) -> startOperation(PendingOperation.RECOVER))
-                .show();
+        confirmOrRun(
+                "Recover deleted photos?",
+                "This restores " + gallery.selectedDeletedCount() + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.",
+                "Recover",
+                () -> startOperation(PendingOperation.RECOVER));
     }
 
     @Override
@@ -261,12 +300,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         pendingReorderCsv = gallery.selectedActiveFirstPhysicalSlotsCsv();
         pendingReorderMessage = "Moving selected photos to front...";
-        new AlertDialog.Builder(this)
-                .setTitle("Move selected photos first?")
-                .setMessage("This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Move", (dialog, which) -> startOperation(PendingOperation.REORDER))
-                .show();
+        confirmOrRun(
+                "Move selected photos first?",
+                "This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.",
+                "Move",
+                () -> startOperation(PendingOperation.REORDER));
     }
 
     @Override
@@ -278,12 +316,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         pendingReorderCsv = gallery.activePhysicalSlotsCsv();
         pendingReorderMessage = "Compacting album order...";
-        new AlertDialog.Builder(this)
-                .setTitle("Compact album order?")
-                .setMessage("This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Compact", (dialog, which) -> startOperation(PendingOperation.REORDER))
-                .show();
+        confirmOrRun(
+                "Compact album order?",
+                "This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.",
+                "Compact",
+                () -> startOperation(PendingOperation.REORDER));
     }
 
     @Override
@@ -295,12 +332,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         pendingReorderCsv = "";
         pendingReorderMessage = "Clearing album order...";
-        new AlertDialog.Builder(this)
-                .setTitle("Clear camera album?")
-                .setMessage("This hides every album slot by writing an empty state vector. Image data remains in SRAM for recovery/export until overwritten. A save backup is kept in the app dumps folder.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear", (dialog, which) -> startOperation(PendingOperation.REORDER))
-                .show();
+        confirmOrRun(
+                "Clear camera album?",
+                "This hides every album slot by writing an empty state vector. Image data remains in SRAM for recovery/export until overwritten. A save backup is kept in the app dumps folder.",
+                "Clear",
+                () -> startOperation(PendingOperation.REORDER));
     }
 
     @Override
@@ -378,6 +414,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     @Override
     public void onGalleryLoaded(GalleryState gallery) {
+        gallery = applyAutoRgbMerge(gallery);
         rememberBackupPalette(new File(gallery.savePath), gallery.paletteIndex);
         screen.showGallery(gallery);
         onLog("Loaded " + gallery.photos.size() + " camera photo(s).");
@@ -385,6 +422,456 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             onLog("Save validation: " + gallery.validationErrors + " error(s), "
                     + gallery.validationWarnings + " warning(s).");
         }
+    }
+
+    private void showSettingsDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        int panel = Color.rgb(15, 23, 42);
+        int panelRaised = Color.rgb(30, 41, 59);
+        int border = Color.rgb(71, 85, 105);
+        int borderSoft = Color.rgb(51, 65, 85);
+        int textPrimary = Color.rgb(248, 250, 252);
+        int textSecondary = Color.rgb(203, 213, 225);
+        int textMuted = Color.rgb(148, 163, 184);
+        int accent = screen.accentColor();
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(14), dp(16), dp(14));
+        content.setBackground(rounded(panel, border, 14, 1));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout titleBlock = new LinearLayout(this);
+        titleBlock.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(this);
+        title.setText("Settings");
+        title.setTextColor(textPrimary);
+        title.setTextSize(19);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        titleBlock.addView(title);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Startup, logs, exports, and album safety");
+        subtitle.setTextColor(textSecondary);
+        subtitle.setTextSize(12);
+        titleBlock.addView(subtitle);
+        header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        Button close = previewButton("Close", textSecondary, panelRaised, border);
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(82), dp(42)));
+        content.addView(header, matchWidthWrapContent());
+
+        LinearLayout options = new LinearLayout(this);
+        options.setOrientation(LinearLayout.VERTICAL);
+        options.setPadding(0, dp(12), 0, 0);
+
+        CheckBox autoLoad = settingsCheckBox(
+                "Auto-load camera on launch",
+                "Starts reading the camera automatically when a GBxCart RW is connected.",
+                autoLoadCameraEnabled(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+        CheckBox loadCache = settingsCheckBox(
+                "Load last gallery when offline",
+                "Shows the most recent save backup when no camera is connected or auto-load is off.",
+                loadCachedGalleryEnabled(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+        CheckBox showLogs = settingsCheckBox(
+                "Show logs by default",
+                "Keeps the operation log panel open after app startup.",
+                showLogsByDefault(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+        CheckBox confirmWrites = settingsCheckBox(
+                "Confirm album writes",
+                "Asks before delete, recover, reorder, compact, or clear operations.",
+                confirmAlbumWritesEnabled(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+        CheckBox exportDeleted = settingsCheckBox(
+                "Export deleted photos",
+                "Includes selected recoverable deleted slots when saving or sharing images.",
+                exportDeletedPhotosEnabled(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+        CheckBox autoRgbMerge = settingsCheckBox(
+                "Auto-detect RGB sets",
+                "Merges consecutive 3-shot RGB and 4-shot CRGB captures.",
+                autoRgbMergeEnabled(),
+                textPrimary,
+                textSecondary,
+                accent,
+                border);
+
+        final String[] rgb4Value = { rgb4Order() };
+        final String[] rgb3Value = { rgb3Order() };
+        View rgb4Row = settingsPickerRow(
+                "4-shot order",
+                "Position of C (clear), R, G, B in consecutive shots.",
+                RGB4_ORDERS, rgb4Value,
+                textPrimary, textSecondary, accent, border, panelRaised);
+        View rgb3Row = settingsPickerRow(
+                "3-shot order",
+                "Position of R, G, B in consecutive shots.",
+                RGB3_ORDERS, rgb3Value,
+                textPrimary, textSecondary, accent, border, panelRaised);
+
+        final String[] defaultAlgoValue = { defaultMergeAlgorithm() };
+        View algoRow = settingsIdPickerRow(
+                "Default merge algorithm",
+                "Algorithm used when auto-detecting RGB sets.",
+                RgbMergeDetector.ALGORITHM_IDS,
+                RgbMergeDetector.ALGORITHM_LABELS,
+                new String[]{ "Basic", "Clear Lum", "Norm RGB", "Norm+Clear", "Sat Boost", "Adaptive ★" },
+                defaultAlgoValue,
+                textPrimary, textSecondary, accent, border, panelRaised);
+
+        boolean rgbMergeOn = autoRgbMerge.isChecked();
+        rgb4Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
+        rgb3Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
+        algoRow.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
+        autoRgbMerge.setOnCheckedChangeListener((btn, checked) -> {
+            rgb4Row.setVisibility(checked ? View.VISIBLE : View.GONE);
+            rgb3Row.setVisibility(checked ? View.VISIBLE : View.GONE);
+            algoRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+        });
+
+        options.addView(settingsRow(autoLoad, panelRaised, borderSoft));
+        options.addView(settingsRow(loadCache, panelRaised, borderSoft));
+        options.addView(settingsRow(showLogs, panelRaised, borderSoft));
+        options.addView(settingsRow(confirmWrites, panelRaised, borderSoft));
+        options.addView(settingsRow(exportDeleted, panelRaised, borderSoft));
+        options.addView(settingsRow(autoRgbMerge, panelRaised, borderSoft));
+        options.addView(rgb4Row);
+        options.addView(rgb3Row);
+        options.addView(algoRow);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(options);
+        content.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.min(dp(360), dp(72) * 9 + dp(12))));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        actionParams.setMargins(0, dp(12), 0, 0);
+
+        Button cancel = previewButton("Cancel", textMuted, panelRaised, border);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(44), 1));
+
+        View gap = new View(this);
+        actions.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
+
+        Button apply = previewButton("Apply", accent, panelRaised, accent);
+        apply.setOnClickListener(v -> {
+            boolean rgbSettingsChanged = autoRgbMerge.isChecked() != autoRgbMergeEnabled()
+                    || !rgb4Value[0].equals(rgb4Order())
+                    || !rgb3Value[0].equals(rgb3Order())
+                    || !defaultAlgoValue[0].equals(defaultMergeAlgorithm());
+            prefs().edit()
+                    .putBoolean(KEY_AUTO_LOAD_CAMERA, autoLoad.isChecked())
+                    .putBoolean(KEY_LOAD_CACHED_GALLERY, loadCache.isChecked())
+                    .putBoolean(KEY_SHOW_LOGS, showLogs.isChecked())
+                    .putBoolean(KEY_CONFIRM_ALBUM_WRITES, confirmWrites.isChecked())
+                    .putBoolean(KEY_EXPORT_DELETED_PHOTOS, exportDeleted.isChecked())
+                    .putBoolean(KEY_AUTO_RGB_MERGE, autoRgbMerge.isChecked())
+                    .putString(KEY_RGB4_ORDER, rgb4Value[0])
+                    .putString(KEY_RGB3_ORDER, rgb3Value[0])
+                    .putString(KEY_DEFAULT_MERGE_ALGO, defaultAlgoValue[0])
+                    .apply();
+            screen.setLogsVisibleFromSettings(showLogs.isChecked());
+            onLog("Settings updated.");
+            dialog.dismiss();
+            if (rgbSettingsChanged && screen.gallery() != null) {
+                recolorCachedGallery(paletteIndex, false);
+            }
+        });
+        actions.addView(apply, new LinearLayout.LayoutParams(0, dp(44), 1));
+        content.addView(actions, actionParams);
+
+        dialog.setContentView(content);
+        dialog.setOnShowListener(d -> {
+            Window shownWindow = dialog.getWindow();
+            if (shownWindow != null) {
+                WindowManager.LayoutParams params = new WindowManager.LayoutParams();
+                params.copyFrom(shownWindow.getAttributes());
+                params.width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(560));
+                params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                shownWindow.setAttributes(params);
+                shownWindow.setBackgroundDrawableResource(android.R.color.transparent);
+            }
+        });
+        dialog.show();
+    }
+
+    private CheckBox settingsCheckBox(
+            String title,
+            String description,
+            boolean checked,
+            int textPrimary,
+            int textSecondary,
+            int accent,
+            int border) {
+        CheckBox box = new CheckBox(this);
+        SpannableString text = new SpannableString(title + "\n" + description);
+        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        box.setText(text);
+        box.setTextColor(textPrimary);
+        box.setTextSize(12);
+        box.setChecked(checked);
+        box.setMinHeight(0);
+        box.setMinimumHeight(0);
+        box.setPadding(dp(10), 0, dp(10), 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            box.setButtonTintList(new ColorStateList(
+                    new int[][] {
+                            new int[] { android.R.attr.state_checked },
+                            new int[] {}
+                    },
+                    new int[] {
+                            accent,
+                            border
+                    }));
+        }
+        return box;
+    }
+
+    private View settingsRow(CheckBox box, int fill, int stroke) {
+        FrameLayout row = new FrameLayout(this);
+        row.setBackground(rounded(fill, stroke, 10, 1));
+        row.setClickable(true);
+        row.setOnClickListener(v -> box.toggle());
+        row.addView(box, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(66));
+        params.setMargins(0, 0, 0, dp(6));
+        row.setLayoutParams(params);
+        return row;
+    }
+
+    private View settingsPickerRow(
+            String title,
+            String description,
+            String[] options,
+            String[] valueHolder,
+            int textPrimary,
+            int textSecondary,
+            int accent,
+            int border,
+            int fill) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(rounded(fill, border, 10, 1));
+        row.setPadding(dp(10), dp(10), dp(10), dp(10));
+
+        SpannableString text = new SpannableString(title + "\n" + description);
+        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextSize(12);
+        label.setPadding(0, 0, dp(8), 0);
+        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView badge = new TextView(this);
+        badge.setText(valueHolder[0]);
+        badge.setTextColor(accent);
+        badge.setTextSize(13);
+        badge.setTypeface(android.graphics.Typeface.MONOSPACE);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(12), 0, dp(12), 0);
+        badge.setBackground(rounded(fill, accent, 6, 1));
+        row.addView(badge, new LinearLayout.LayoutParams(dp(64), dp(36)));
+
+        row.setClickable(true);
+        row.setOnClickListener(v -> {
+            int current = 0;
+            for (int i = 0; i < options.length; i++) {
+                if (options[i].equals(valueHolder[0])) { current = i; break; }
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setSingleChoiceItems(options, current, (d, which) -> {
+                        valueHolder[0] = options[which];
+                        badge.setText(options[which]);
+                        d.dismiss();
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(66));
+        params.setMargins(0, 0, 0, dp(6));
+        row.setLayoutParams(params);
+        return row;
+    }
+
+    /** Like settingsPickerRow but stores IDs in valueHolder while showing labels in the dialog and shortLabels in the badge. */
+    private View settingsIdPickerRow(
+            String title,
+            String description,
+            String[] ids,
+            String[] labels,
+            String[] shortLabels,
+            String[] valueHolder,
+            int textPrimary,
+            int textSecondary,
+            int accent,
+            int border,
+            int fill) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(rounded(fill, border, 10, 1));
+        row.setPadding(dp(10), dp(10), dp(10), dp(10));
+
+        SpannableString text = new SpannableString(title + "\n" + description);
+        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextSize(12);
+        label.setPadding(0, 0, dp(8), 0);
+        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView badge = new TextView(this);
+        badge.setText(shortLabelForId(ids, shortLabels, valueHolder[0]));
+        badge.setTextColor(accent);
+        badge.setTextSize(11);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(8), 0, dp(8), 0);
+        badge.setBackground(rounded(fill, accent, 6, 1));
+        row.addView(badge, new LinearLayout.LayoutParams(dp(80), dp(36)));
+
+        row.setClickable(true);
+        row.setOnClickListener(v -> {
+            int current = 0;
+            for (int i = 0; i < ids.length; i++) {
+                if (ids[i].equals(valueHolder[0])) { current = i; break; }
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setSingleChoiceItems(labels, current, (d, which) -> {
+                        valueHolder[0] = ids[which];
+                        badge.setText(shortLabelForId(ids, shortLabels, ids[which]));
+                        d.dismiss();
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(66));
+        params.setMargins(0, 0, 0, dp(6));
+        row.setLayoutParams(params);
+        return row;
+    }
+
+    private static String shortLabelForId(String[] ids, String[] shortLabels, String id) {
+        for (int i = 0; i < ids.length; i++) {
+            if (ids[i].equals(id)) return shortLabels[i];
+        }
+        return id;
+    }
+
+    private void confirmOrRun(String title, String message, String action, Runnable runnable) {
+        if (!confirmAlbumWritesEnabled()) {
+            runnable.run();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton(action, (dialog, which) -> runnable.run())
+                .show();
+    }
+
+    private boolean autoLoadCameraEnabled() {
+        return prefs().getBoolean(KEY_AUTO_LOAD_CAMERA, true);
+    }
+
+    private boolean loadCachedGalleryEnabled() {
+        return prefs().getBoolean(KEY_LOAD_CACHED_GALLERY, true);
+    }
+
+    private boolean showLogsByDefault() {
+        return prefs().getBoolean(KEY_SHOW_LOGS, false);
+    }
+
+    private boolean confirmAlbumWritesEnabled() {
+        return prefs().getBoolean(KEY_CONFIRM_ALBUM_WRITES, true);
+    }
+
+    private boolean exportDeletedPhotosEnabled() {
+        return prefs().getBoolean(KEY_EXPORT_DELETED_PHOTOS, true);
+    }
+
+    private boolean autoRgbMergeEnabled() {
+        return prefs().getBoolean(KEY_AUTO_RGB_MERGE, true);
+    }
+
+    private String rgb4Order() {
+        return prefs().getString(KEY_RGB4_ORDER, DEFAULT_RGB4_ORDER);
+    }
+
+    private String rgb3Order() {
+        return prefs().getString(KEY_RGB3_ORDER, DEFAULT_RGB3_ORDER);
+    }
+
+    private String defaultMergeAlgorithm() {
+        return prefs().getString(KEY_DEFAULT_MERGE_ALGO, RgbMergeDetector.ALGO_NORM_CLEAR_LUM);
+    }
+
+    private Map<String, String> mergeAlgorithmOverrides() {
+        Map<String, String> overrides = new HashMap<>();
+        for (Map.Entry<String, ?> entry : prefs().getAll().entrySet()) {
+            if (entry.getKey().startsWith(KEY_MERGE_ALGO_OVERRIDE_PREFIX) && entry.getValue() instanceof String) {
+                overrides.put(entry.getKey().substring(KEY_MERGE_ALGO_OVERRIDE_PREFIX.length()),
+                        (String) entry.getValue());
+            }
+        }
+        return overrides;
+    }
+
+    private void saveMergeAlgorithmOverride(GalleryPhoto photo, String algorithm) {
+        String identity = photo.mergedKind + ":" + photo.mergedSourceStartDisplayIndex + ":" + photo.mergedSourceCount;
+        prefs().edit().putString(KEY_MERGE_ALGO_OVERRIDE_PREFIX + identity, algorithm).apply();
     }
 
     private boolean refreshDevice() {
@@ -479,6 +966,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     save.getAbsolutePath(),
                     dumpsDir().getAbsolutePath(),
                     paletteIndex));
+            gallery = applyAutoRgbMerge(gallery);
             rememberBackupPalette(save, paletteIndex);
             screen.showGallery(gallery);
             onLog("Loaded cached gallery from:\n" + save.getAbsolutePath());
@@ -789,7 +1277,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         titleBlock.setOrientation(LinearLayout.VERTICAL);
 
         TextView title = new TextView(this);
-        title.setText((photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1));
+        title.setText(photoDetailTitle(photo));
         title.setTextColor(textPrimary);
         title.setTextSize(21);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -818,9 +1306,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(12), 0, 0);
-        statusRow.addView(detailChip(photo.deleted ? "Deleted" : "Original", photo.deleted ? danger : accent, panelSoft, photo.deleted ? danger : accent));
-        statusRow.addView(detailChip(photo.copy ? "Copy" : "Camera photo", textSecondary, panelSoft, borderSoft));
-        statusRow.addView(detailChip(photo.metadataValid ? "Metadata OK" : "Check metadata", photo.metadataValid ? textSecondary : danger, panelSoft, photo.metadataValid ? borderSoft : danger));
+        statusRow.addView(detailChip(photo.deleted ? "Deleted" : photo.mergedRgb ? mergedPhotoTitle(photo) : "Original", photo.deleted ? danger : accent, panelSoft, photo.deleted ? danger : accent));
+        statusRow.addView(detailChip(photo.mergedRgb ? "Auto-merged" : photo.copy ? "Copy" : "Camera photo", textSecondary, panelSoft, borderSoft));
+        if (photo.mergedRgb && photo.mergedAlgorithm != null && !photo.mergedAlgorithm.isEmpty()) {
+            statusRow.addView(detailChip(RgbMergeDetector.algorithmShortLabel(photo.mergedAlgorithm), textSecondary, panelSoft, borderSoft));
+        }
+        if (!photo.mergedRgb) {
+            statusRow.addView(detailChip(photo.metadataValid ? "Metadata OK" : "Check metadata", photo.metadataValid ? textSecondary : danger, panelSoft, photo.metadataValid ? borderSoft : danger));
+        }
         content.addView(statusRow, statusParams);
 
         LinearLayout infoRow = new LinearLayout(this);
@@ -830,8 +1323,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         infoParams.setMargins(0, dp(8), 0, 0);
-        infoRow.addView(detailChip("Album " + String.format("%02d", photo.displayIndex + 1), textMuted, panel, borderSoft));
-        infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
+        infoRow.addView(detailChip(photo.mergedRgb ? mergedSourceLabel(photo) : "Album " + String.format("%02d", photo.displayIndex + 1), textMuted, panel, borderSoft));
+        if (!photo.mergedRgb) {
+            infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
+        }
         infoRow.addView(detailChip(photo.width + "×" + photo.height, textMuted, panel, borderSoft));
         infoRow.addView(detailChip("Border " + photo.border, textMuted, panel, borderSoft));
         content.addView(infoRow, infoParams);
@@ -848,12 +1343,16 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             content.addView(ownerRow, ownerParams);
         }
 
+        final String[] previewAlgo = { photo.mergedAlgorithm != null ? photo.mergedAlgorithm : "" };
+        final boolean[] algoChanged = { false };
+        final int[] previewGeneration = { 0 };
+
         FrameLayout imageMat = new FrameLayout(this);
         imageMat.setPadding(dp(8), dp(8), dp(8), dp(8));
         imageMat.setBackground(rounded(Color.rgb(2, 6, 23), border, 12, 1));
         LinearLayout.LayoutParams matParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(456));
+                LinearLayout.LayoutParams.WRAP_CONTENT);
         matParams.setMargins(0, dp(12), 0, dp(14));
 
         ImageView image = new ImageView(this);
@@ -861,11 +1360,119 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAlpha(photo.deleted ? 0.86f : 1.0f);
-        image.setBackgroundColor(Color.rgb(10, 10, 14));
         imageMat.addView(image, new android.widget.FrameLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT));
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        final ProgressBar[] progressRef = { null };
+
+        if (photo.mergedRgb) {
+            ProgressBar previewProgress = new ProgressBar(this);
+            previewProgress.setIndeterminate(true);
+            previewProgress.setVisibility(View.GONE);
+            FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(dp(48), dp(48));
+            progressParams.gravity = Gravity.CENTER;
+            imageMat.addView(previewProgress, progressParams);
+            progressRef[0] = previewProgress;
+        }
+
         content.addView(imageMat, matParams);
+
+        if (photo.mergedRgb) {
+            FrameLayout algoField = new FrameLayout(this);
+            algoField.setBackground(rounded(panelRaised, border, 8, 1));
+            algoField.setClickable(true);
+            algoField.setFocusable(true);
+            TextView algoDropText = new TextView(this);
+            algoDropText.setSingleLine(true);
+            algoDropText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            algoDropText.setGravity(Gravity.CENTER_VERTICAL);
+            algoDropText.setIncludeFontPadding(false);
+            algoDropText.setTextColor(textPrimary);
+            algoDropText.setTextSize(13);
+            algoDropText.setPadding(dp(14), 0, dp(36), 0);
+            algoDropText.setText(RgbMergeDetector.algorithmLabel(previewAlgo[0]));
+            algoField.addView(algoDropText, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            TextView algoArrow = new TextView(this);
+            algoArrow.setText("▼");
+            algoArrow.setTextSize(10);
+            algoArrow.setTextColor(textSecondary);
+            algoArrow.setGravity(Gravity.CENTER);
+            algoArrow.setEnabled(false);
+            FrameLayout.LayoutParams arrowParams = new FrameLayout.LayoutParams(dp(28),
+                    FrameLayout.LayoutParams.MATCH_PARENT);
+            arrowParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+            algoField.addView(algoArrow, arrowParams);
+
+            algoField.setOnClickListener(v -> {
+                boolean hasClear = photo.mergedSourceCount == 4;
+                String[] ids    = RgbMergeDetector.compatibleAlgorithmIds(hasClear);
+                String[] labels = RgbMergeDetector.compatibleAlgorithmLabels(hasClear);
+
+                int surfaceRaised = Color.rgb(37, 52, 76);
+                int borderStrong  = Color.rgb(71, 85, 105);
+                int textPrim      = Color.rgb(241, 245, 249);
+                int accentSurface = Color.rgb(
+                        Math.round(Color.red(accent)   * 0.28f + 15 * 0.72f),
+                        Math.round(Color.green(accent) * 0.28f + 23 * 0.72f),
+                        Math.round(Color.blue(accent)  * 0.28f + 42 * 0.72f));
+
+                LinearLayout menu = new LinearLayout(this);
+                menu.setOrientation(LinearLayout.VERTICAL);
+                ScrollView menuScroll = new ScrollView(this);
+                menuScroll.setBackground(rounded(surfaceRaised, borderStrong, 8, 1));
+                menuScroll.addView(menu);
+
+                int itemH       = dp(48);
+                int popupHeight = Math.min(itemH * ids.length, dp(288));
+                int popupWidth  = algoField.getWidth();
+
+                PopupWindow popup = new PopupWindow(menuScroll, popupWidth, popupHeight, true);
+                popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                popup.setOutsideTouchable(true);
+                popup.setElevation(dp(8));
+
+                for (int i = 0; i < ids.length; i++) {
+                    final int idx = i;
+                    boolean sel = ids[i].equals(previewAlgo[0]);
+                    LinearLayout item = new LinearLayout(this);
+                    item.setOrientation(LinearLayout.HORIZONTAL);
+                    item.setGravity(Gravity.CENTER_VERTICAL);
+                    item.setPadding(dp(16), 0, dp(16), 0);
+                    item.setBackgroundColor(sel ? accentSurface : surfaceRaised);
+                    item.setLayoutParams(new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, itemH));
+                    TextView itemLabel = new TextView(this);
+                    itemLabel.setText(labels[i]);
+                    itemLabel.setTextSize(13);
+                    itemLabel.setTextColor(sel ? accent : textPrim);
+                    itemLabel.setSingleLine(true);
+                    itemLabel.setIncludeFontPadding(false);
+                    item.addView(itemLabel, new LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                    item.setOnClickListener(iv -> {
+                        popup.dismiss();
+                        if (ids[idx].equals(previewAlgo[0])) return;
+                        previewAlgo[0] = ids[idx];
+                        algoChanged[0] = true;
+                        algoDropText.setText(labels[idx]);
+                        runPreviewMerge(photo, previewAlgo[0], image,
+                                progressRef[0], previewGeneration);
+                    });
+                    menu.addView(item);
+                }
+
+                // Popup opens above the field
+                popup.showAsDropDown(algoField, 0, -(popupHeight + algoField.getHeight() + dp(4)));
+            });
+
+            LinearLayout.LayoutParams algoFieldParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
+            algoFieldParams.setMargins(0, dp(8), 0, 0);
+            content.addView(algoField, algoFieldParams);
+        }
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -885,12 +1492,21 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         Button share = previewButton("Share", accent, panelRaised, accent);
         share.setOnClickListener(v -> shareSinglePhoto(photo));
         actions.addView(share, new LinearLayout.LayoutParams(0, dp(44), 1));
+
         content.addView(actions, matchWidthWrapContent());
 
         dialog.setContentView(content);
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawableResource(android.R.color.transparent);
+        }
+        if (photo.mergedRgb) {
+            dialog.setOnDismissListener(d -> {
+                if (algoChanged[0]) {
+                    saveMergeAlgorithmOverride(photo, previewAlgo[0]);
+                    recolorCachedGallery(paletteIndex, false);
+                }
+            });
         }
         dialog.setOnShowListener(d -> {
             Window shownWindow = dialog.getWindow();
@@ -922,6 +1538,96 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             gallery.photos.get(i).selected = previousSelection[i];
         }
         screen.showGallery(gallery);
+    }
+
+    private void runPreviewMerge(
+            GalleryPhoto mergedPhoto,
+            String algorithm,
+            ImageView imageView,
+            ProgressBar progressBar,
+            int[] generation) {
+        generation[0]++;
+        int gen = generation[0];
+        progressBar.setVisibility(View.VISIBLE);
+
+        GalleryState gallery = screen.gallery();
+        new Thread(() -> {
+            Bitmap preview = null;
+            try {
+                List<GalleryPhoto> monoPhotos = monoSourcePhotos(gallery);
+                int startIdx = mergedPhoto.mergedSourceStartDisplayIndex;
+                int count = mergedPhoto.mergedSourceCount;
+
+                // Build a display-index → mono-photo map so we're immune to merged photos
+                // being interspersed in gallery.photos and to empty-deleted filtering offsets.
+                Map<Integer, GalleryPhoto> monoByIndex = new HashMap<>();
+                for (GalleryPhoto mp : monoPhotos) {
+                    if (!mp.mergedRgb) monoByIndex.put(mp.displayIndex, mp);
+                }
+
+                GalleryPhoto[] sourceForPreview = new GalleryPhoto[count];
+                for (int pos = 0; pos < count; pos++) {
+                    sourceForPreview[pos] = monoByIndex.get(startIdx + pos);
+                }
+                preview = RgbMergeDetector.previewMerge(
+                        sourceForPreview, mergedPhoto.mergedKind, count, algorithm);
+            } catch (Exception ignored) {
+            }
+            final Bitmap result = preview;
+            runOnUiThread(() -> {
+                if (gen != generation[0]) return;
+                progressBar.setVisibility(View.GONE);
+                if (result != null) {
+                    int w = imageView.getWidth();
+                    int h = imageView.getHeight();
+                    Bitmap display = (w > 0 && h > 0)
+                            ? Bitmap.createScaledBitmap(result, w, h, true)
+                            : result;
+                    imageView.setAdjustViewBounds(false);
+                    imageView.setScaleType(ImageView.ScaleType.FIT_XY);
+                    imageView.setImageBitmap(display);
+                }
+            });
+        }).start();
+    }
+
+    private void showRemergePicker(GalleryPhoto photo, Dialog parentDialog) {
+        boolean hasClear = photo.mergedSourceCount == 4;
+        String[] ids    = RgbMergeDetector.compatibleAlgorithmIds(hasClear);
+        String[] labels = RgbMergeDetector.compatibleAlgorithmLabels(hasClear);
+        int current = 0;
+        for (int i = 0; i < ids.length; i++) {
+            if (ids[i].equals(photo.mergedAlgorithm)) { current = i; break; }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Merge algorithm")
+                .setSingleChoiceItems(labels, current, (d, which) -> {
+                    d.dismiss();
+                    parentDialog.dismiss();
+                    saveMergeAlgorithmOverride(photo, ids[which]);
+                    recolorCachedGallery(paletteIndex, false);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private String photoDetailTitle(GalleryPhoto photo) {
+        if (photo.mergedRgb) {
+            return mergedPhotoTitle(photo);
+        }
+        return (photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1);
+    }
+
+    private String mergedPhotoTitle(GalleryPhoto photo) {
+        return "Merged " + (photo.mergedKind == null || photo.mergedKind.isEmpty() ? "RGB" : photo.mergedKind);
+    }
+
+    private String mergedSourceLabel(GalleryPhoto photo) {
+        int start = photo.mergedSourceStartDisplayIndex + 1;
+        int end = start + Math.max(0, photo.mergedSourceCount - 1);
+        return photo.mergedSourceCount > 0
+                ? "Sources " + String.format("%02d-%02d", start, end)
+                : "Sources";
     }
 
     private TextView detailChip(String text, int textColor, int fillColor, int strokeColor) {
@@ -988,6 +1694,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     previous.savePath,
                     previous.outputDir,
                     paletteIndex));
+            gallery = applyAutoRgbMerge(gallery);
             gallery.copySelectionFrom(previous);
             screen.showGallery(gallery);
             if (logChange) {
@@ -1000,6 +1707,73 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     private SharedPreferences prefs() {
         return getSharedPreferences(PREFS, MODE_PRIVATE);
+    }
+
+    private GalleryState applyAutoRgbMerge(GalleryState gallery) {
+        gallery = filterEmptyDeletedPhotos(gallery);
+        if (!autoRgbMergeEnabled()) {
+            return gallery;
+        }
+        List<GalleryPhoto> sourcePhotos = monoSourcePhotos(gallery);
+        GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, sourcePhotos, new File(gallery.outputDir),
+                rgb4Order(), rgb3Order(), defaultMergeAlgorithm(), mergeAlgorithmOverrides());
+        int added = merged.photos.size() - gallery.photos.size();
+        if (added > 0) {
+            onLog("Auto-merged " + added + " RGB set(s).");
+        }
+        return merged;
+    }
+
+    private GalleryState filterEmptyDeletedPhotos(GalleryState gallery) {
+        List<GalleryPhoto> filtered = null;
+        for (int i = 0; i < gallery.photos.size(); i++) {
+            GalleryPhoto photo = gallery.photos.get(i);
+            if (photo.deleted && isEmptyImage(photo)) {
+                if (filtered == null) {
+                    filtered = new ArrayList<>(gallery.photos.subList(0, i));
+                }
+            } else if (filtered != null) {
+                filtered.add(photo);
+            }
+        }
+        if (filtered == null) return gallery;
+        return new GalleryState(
+                gallery.connected, gallery.savePath, gallery.outputDir,
+                gallery.paletteIndex, gallery.paletteName,
+                gallery.validationErrors, gallery.validationWarnings,
+                filtered);
+    }
+
+    private static boolean isEmptyImage(GalleryPhoto photo) {
+        Bitmap bmp = BitmapFactory.decodeFile(photo.path);
+        if (bmp == null) return true;
+        int w = bmp.getWidth(), h = bmp.getHeight();
+        int[] pixels = new int[w * h];
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h);
+        bmp.recycle();
+        int first = pixels[0];
+        for (int p : pixels) {
+            if (p != first) return false;
+        }
+        return true;
+    }
+
+    private List<GalleryPhoto> monoSourcePhotos(GalleryState gallery) {
+        int monoPaletteIndex = NativeGbcam.defaultPaletteIndex();
+        if (gallery.paletteIndex == monoPaletteIndex) {
+            return gallery.photos;
+        }
+        try {
+            File monoDir = new File(gallery.outputDir, "rgb-merge-mono");
+            GalleryState mono = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
+                    gallery.savePath,
+                    monoDir.getAbsolutePath(),
+                    monoPaletteIndex));
+            // Apply the same empty-deleted filter so indices align with the main gallery.
+            return filterEmptyDeletedPhotos(mono).photos;
+        } catch (Exception e) {
+            return gallery.photos;
+        }
     }
 
     @Override

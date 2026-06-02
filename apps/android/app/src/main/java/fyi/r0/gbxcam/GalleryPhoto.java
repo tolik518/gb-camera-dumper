@@ -12,6 +12,11 @@ final class GalleryPhoto {
     final boolean copy;
     final boolean metadataValid;
     final String ownerUserId;
+    final boolean mergedRgb;
+    final String mergedKind;
+    final int mergedSourceCount;
+    final int mergedSourceStartDisplayIndex;
+    final String mergedAlgorithm;
     boolean selected;
 
     GalleryPhoto(
@@ -26,6 +31,49 @@ final class GalleryPhoto {
             boolean copy,
             boolean metadataValid,
             String ownerUserId) {
+        this(name, path, displayIndex, physicalSlot, width, height,
+                deleted, border, copy, metadataValid, ownerUserId,
+                false, "", 0, -1, "");
+    }
+
+    GalleryPhoto(
+            String name,
+            String path,
+            int displayIndex,
+            int physicalSlot,
+            int width,
+            int height,
+            boolean deleted,
+            int border,
+            boolean copy,
+            boolean metadataValid,
+            String ownerUserId,
+            boolean mergedRgb,
+            String mergedKind,
+            int mergedSourceCount,
+            int mergedSourceStartDisplayIndex) {
+        this(name, path, displayIndex, physicalSlot, width, height,
+                deleted, border, copy, metadataValid, ownerUserId,
+                mergedRgb, mergedKind, mergedSourceCount, mergedSourceStartDisplayIndex, "");
+    }
+
+    GalleryPhoto(
+            String name,
+            String path,
+            int displayIndex,
+            int physicalSlot,
+            int width,
+            int height,
+            boolean deleted,
+            int border,
+            boolean copy,
+            boolean metadataValid,
+            String ownerUserId,
+            boolean mergedRgb,
+            String mergedKind,
+            int mergedSourceCount,
+            int mergedSourceStartDisplayIndex,
+            String mergedAlgorithm) {
         this.name = name;
         this.path = path;
         this.displayIndex = displayIndex;
@@ -37,5 +85,10 @@ final class GalleryPhoto {
         this.copy = copy;
         this.metadataValid = metadataValid;
         this.ownerUserId = ownerUserId;
+        this.mergedRgb = mergedRgb;
+        this.mergedKind = mergedKind;
+        this.mergedSourceCount = mergedSourceCount;
+        this.mergedSourceStartDisplayIndex = mergedSourceStartDisplayIndex;
+        this.mergedAlgorithm = mergedAlgorithm;
     }
 }

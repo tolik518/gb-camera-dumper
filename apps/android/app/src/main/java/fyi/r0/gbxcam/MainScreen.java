@@ -43,6 +43,8 @@ final class MainScreen {
 
         void onExportSaveRequested();
 
+        void onSettingsRequested();
+
         void onDeleteSelectedRequested();
 
         void onRecoverSelectedRequested();
@@ -94,6 +96,7 @@ final class MainScreen {
     private final Button backupsButton;
     private final Button importSaveButton;
     private final Button exportSaveButton;
+    private final Button settingsButton;
     private final Button deleteButton;
     private final Button recoverButton;
     private final Button moveFirstButton;
@@ -270,9 +273,13 @@ final class MainScreen {
         backupsButton = smallButton("Backups", v -> listener.onBackupsRequested());
         importSaveButton = smallButton("Import save", v -> listener.onImportSaveRequested());
         exportSaveButton = smallButton("Export save", v -> listener.onExportSaveRequested());
+        settingsButton = smallButton("⚙", v -> listener.onSettingsRequested());
+        settingsButton.setTextSize(18);
+        settingsButton.setContentDescription("Settings");
         addActionButton(fileActions, backupsButton);
         addActionButton(fileActions, importSaveButton);
         addActionButton(fileActions, exportSaveButton);
+        addActionButton(fileActions, settingsButton);
         root.addView(wrapHorizontal(fileActions), matchWidthWrapContent());
 
         LinearLayout libraryHeader = row();
@@ -425,6 +432,10 @@ final class MainScreen {
         logScroll.setVisibility(visibility);
     }
 
+    void setLogsVisibleFromSettings(boolean visible) {
+        setLogsVisible(visible);
+    }
+
     GalleryState gallery() {
         return gallery;
     }
@@ -462,6 +473,7 @@ final class MainScreen {
         backupsButton.setEnabled(!busy);
         importSaveButton.setEnabled(!busy);
         exportSaveButton.setEnabled(!busy && gallery != null);
+        settingsButton.setEnabled(!busy);
         deleteButton.setEnabled(!busy && selectedActive > 0);
         deleteButton.setVisibility(selectedActive > 0 ? View.VISIBLE : View.GONE);
         recoverButton.setEnabled(!busy && selectedDeleted > 0);
@@ -482,6 +494,7 @@ final class MainScreen {
         setButtonAvailability(backupsButton, !busy);
         setButtonAvailability(importSaveButton, !busy);
         setButtonAvailability(exportSaveButton, !busy && gallery != null);
+        setButtonAvailability(settingsButton, !busy);
         setButtonAvailability(recoverButton, !busy && selectedDeleted > 0);
         setButtonAvailability(moveFirstButton, !busy && selectedActive > 0);
         setButtonAvailability(compactButton, !busy && gallery != null);
@@ -494,7 +507,7 @@ final class MainScreen {
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(7));
         tile.setBackground(tileBackground(photo.selected, photo.deleted));
-        tile.setContentDescription((photo.deleted ? "Deleted photo " : "Photo ") + String.format("%02d", photo.displayIndex + 1)
+        tile.setContentDescription(photoTitle(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
         tile.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
         tile.setOnLongClickListener(v -> {
@@ -561,12 +574,12 @@ final class MainScreen {
         labelBlock.setPadding(dp(4), dp(7), dp(4), 0);
         labelBlock.setOnClickListener(toggleSelection);
         TextView label = new TextView(context);
-        label.setText((photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1));
+        label.setText(photoTitle(photo));
         label.setTextColor(colors.textPrimary);
         label.setTextSize(12);
         label.setTypeface(Typeface.DEFAULT_BOLD);
         TextView meta = new TextView(context);
-        meta.setText(photo.deleted ? "Recoverable slot " + (photo.physicalSlot + 1) : "Slot " + (photo.physicalSlot + 1));
+        meta.setText(photoMeta(photo));
         meta.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f) : colors.textMuted);
         meta.setTextSize(10);
         meta.setIncludeFontPadding(false);
@@ -575,6 +588,28 @@ final class MainScreen {
         tile.addView(labelBlock, matchWidthWrapContent());
 
         return tile;
+    }
+
+    private String photoTitle(GalleryPhoto photo) {
+        if (photo.mergedRgb) {
+            return "Merged " + mergedKindLabel(photo);
+        }
+        return (photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1);
+    }
+
+    private String mergedKindLabel(GalleryPhoto photo) {
+        return photo.mergedKind == null || photo.mergedKind.isEmpty() ? "RGB" : photo.mergedKind;
+    }
+
+    private String photoMeta(GalleryPhoto photo) {
+        if (photo.mergedRgb) {
+            int start = photo.mergedSourceStartDisplayIndex + 1;
+            int end = start + Math.max(0, photo.mergedSourceCount - 1);
+            return photo.mergedSourceCount > 0
+                    ? "Auto-merged " + String.format("%02d-%02d", start, end)
+                    : "Auto-merged";
+        }
+        return photo.deleted ? "Recoverable slot " + (photo.physicalSlot + 1) : "Slot " + (photo.physicalSlot + 1);
     }
 
     private void togglePhotoSelection(GalleryPhoto photo) {

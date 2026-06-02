@@ -39,17 +39,25 @@ final class PhotoExporter {
     }
 
     static ExportResult exportSelected(Context context, GalleryState gallery) throws IOException {
-        return exportPhotos(context, gallery, true);
+        return exportSelected(context, gallery, true);
+    }
+
+    static ExportResult exportSelected(Context context, GalleryState gallery, boolean includeDeleted) throws IOException {
+        return exportPhotos(context, gallery, true, includeDeleted);
     }
 
     static ExportResult exportAll(Context context, GalleryState gallery) throws IOException {
-        return exportPhotos(context, gallery, false);
+        return exportPhotos(context, gallery, false, true);
     }
 
     static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly) throws IOException {
-        int count = selectedOnly ? gallery.selectedCount() : gallery.photos.size();
+        return exportPhotos(context, gallery, selectedOnly, true);
+    }
+
+    static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly, boolean includeDeleted) throws IOException {
+        int count = eligiblePhotoCount(gallery, selectedOnly, includeDeleted);
         if (count == 0) {
-            throw new IOException("No photos selected.");
+            throw new IOException(selectedOnly ? "No exportable photos selected." : "No exportable photos.");
         }
 
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
@@ -57,10 +65,10 @@ final class PhotoExporter {
         String imageLocation;
         ArrayList<Uri> imageUris;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            imageUris = exportImagesToMediaStore(context, gallery, album, selectedOnly);
+            imageUris = exportImagesToMediaStore(context, gallery, album, selectedOnly, includeDeleted);
             imageLocation = "Pictures/" + album;
         } else {
-            File output = exportImagesToAppFolder(context, gallery, album, selectedOnly);
+            File output = exportImagesToAppFolder(context, gallery, album, selectedOnly, includeDeleted);
             imageUris = new ArrayList<>();
             imageLocation = output.getAbsolutePath();
         }
@@ -84,11 +92,12 @@ final class PhotoExporter {
             Context context,
             GalleryState gallery,
             String album,
-            boolean selectedOnly) throws IOException {
+            boolean selectedOnly,
+            boolean includeDeleted) throws IOException {
         ContentResolver resolver = context.getContentResolver();
         ArrayList<Uri> uris = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (selectedOnly && !photo.selected) {
+            if (!isExportable(photo, selectedOnly, includeDeleted)) {
                 continue;
             }
 
@@ -127,17 +136,35 @@ final class PhotoExporter {
             Context context,
             GalleryState gallery,
             String album,
-            boolean selectedOnly) throws IOException {
+            boolean selectedOnly,
+            boolean includeDeleted) throws IOException {
         File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
         if (!out.mkdirs() && !out.isDirectory()) {
             throw new IOException("Could not create export directory: " + out);
         }
         for (GalleryPhoto photo : gallery.photos) {
-            if (!selectedOnly || photo.selected) {
+            if (isExportable(photo, selectedOnly, includeDeleted)) {
                 copy(new File(photo.path), new File(out, photo.name));
             }
         }
         return out;
+    }
+
+    private static int eligiblePhotoCount(GalleryState gallery, boolean selectedOnly, boolean includeDeleted) {
+        int count = 0;
+        for (GalleryPhoto photo : gallery.photos) {
+            if (isExportable(photo, selectedOnly, includeDeleted)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean isExportable(GalleryPhoto photo, boolean selectedOnly, boolean includeDeleted) {
+        if (selectedOnly && !photo.selected) {
+            return false;
+        }
+        return includeDeleted || !photo.deleted;
     }
 
     private static File appExportDir(Context context, String stamp) throws IOException {
