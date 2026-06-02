@@ -122,6 +122,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (refreshDevice() && settings.autoLoad() && !autoLoadAttempted) {
+            autoLoadCamera();
+        }
+    }
+
+    @Override
     public void onLoadRequested() {
         runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
     }

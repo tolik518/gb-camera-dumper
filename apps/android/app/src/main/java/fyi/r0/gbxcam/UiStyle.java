@@ -9,7 +9,6 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
-import android.os.Build;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -95,17 +94,15 @@ final class UiStyle {
         box.setMinHeight(0);
         box.setMinimumHeight(0);
         box.setPadding(dp(context, 10), 0, dp(context, 10), 0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            box.setButtonTintList(new ColorStateList(
-                    new int[][] {
-                            new int[] { android.R.attr.state_checked },
-                            new int[] {}
-                    },
-                    new int[] {
-                            accent,
-                            colors.borderStrong
-                    }));
-        }
+        box.setButtonTintList(new ColorStateList(
+                new int[][] {
+                        new int[] { android.R.attr.state_checked },
+                        new int[] {}
+                },
+                new int[] {
+                        accent,
+                        colors.borderStrong
+                }));
         return box;
     }
 
