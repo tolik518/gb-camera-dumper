@@ -7,7 +7,7 @@ Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewe
 
 - Android phone
 - GB Camera
-- GBxCart RW 1.4 or later
+- [GBxCart RW 1.4 or later](https://www.gbxcart.com/)
 
 ## Screenshots
 
