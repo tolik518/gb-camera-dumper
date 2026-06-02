@@ -128,7 +128,7 @@ final class GbcamOperationRunner {
                 main.post(() -> callback.onGalleryLoaded(gallery));
             } catch (Throwable t) {
                 Log.e(TAG, "USB operation failed", t);
-                postLog(callback, "Error: " + t.getMessage());
+                postLog(callback, "Error: " + t.toString());
             } finally {
                 if (connection != null) {
                     connection.close();

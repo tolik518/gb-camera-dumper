@@ -147,7 +147,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, settings.exportDeleted());
             onLog("Saved " + selected + " photo(s):\n" + result.summary());
         } catch (Exception e) {
-            onLog("Save failed: " + e.getMessage());
+            onLog("Save failed: " + e.toString());
         }
     }
 
@@ -172,7 +172,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             startActivity(Intent.createChooser(share, "Share selected photos"));
             onLog("Prepared " + selected + " photo(s) for sharing.");
         } catch (Exception e) {
-            onLog("Share failed: " + e.getMessage());
+            onLog("Share failed: " + e.toString());
         }
     }
 
@@ -340,9 +340,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         settings.rememberRecentPalette(paletteLabels(), paletteIndex);
         screen.setRecentPalettes(settings.recentPalettes(paletteLabels()));
-        if (screen != null) {
-            recolorCachedGallery();
-        }
+        recolorCachedGallery();
     }
 
     @Override
@@ -643,7 +641,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             screen.showGallery(gallery);
             onLog("Loaded cached gallery from:\n" + save.getAbsolutePath());
         } catch (Exception e) {
-            onLog("Cached gallery load failed: " + e.getMessage());
+            onLog("Cached gallery load failed: " + e.toString());
         }
     }
 
@@ -660,7 +658,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             loadCachedGallery();
             onLog("Loaded save backup:\n" + save.getAbsolutePath());
         } catch (Exception e) {
-            onLog("Backup load failed: " + e.getMessage());
+            onLog("Backup load failed: " + e.toString());
         }
     }
 
@@ -1166,7 +1164,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 onLog("Palette changed: " + gallery.paletteName);
             }
         } catch (Exception e) {
-            onLog("Palette change failed: " + e.getMessage());
+            onLog("Palette change failed: " + e.toString());
         }
     }
 
@@ -1212,6 +1210,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         int[] pixels = new int[w * h];
         bmp.getPixels(pixels, 0, w, 0, 0, w, h);
         bmp.recycle();
+        if (pixels.length == 0) return true;
         int first = pixels[0];
         for (int p : pixels) {
             if (p != first) return false;
@@ -1280,7 +1279,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 pendingSaveExport = null;
             }
         } catch (Exception e) {
-            onLog("File operation failed: " + e.getMessage());
+            onLog("File operation failed: " + e.toString());
         }
     }
 
