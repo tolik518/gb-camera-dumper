@@ -1,7 +1,6 @@
 package fyi.r0.gbxcam;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -9,7 +8,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -20,21 +18,14 @@ import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
-import android.text.style.RelativeSizeSpan;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -425,113 +416,63 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void showSettingsDialog() {
-        Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        int panel = Color.rgb(15, 23, 42);
-        int panelRaised = Color.rgb(30, 41, 59);
-        int border = Color.rgb(71, 85, 105);
-        int borderSoft = Color.rgb(51, 65, 85);
-        int textPrimary = Color.rgb(248, 250, 252);
-        int textSecondary = Color.rgb(203, 213, 225);
-        int textMuted = Color.rgb(148, 163, 184);
+        Dialog dialog = UiStyle.baseDialog(this);
+        UiStyle.Palette colors = UiStyle.palette(this);
         int accent = screen.accentColor();
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(14), dp(16), dp(14));
-        content.setBackground(rounded(panel, border, 14, 1));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout titleBlock = new LinearLayout(this);
-        titleBlock.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("Settings");
-        title.setTextColor(textPrimary);
-        title.setTextSize(19);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        titleBlock.addView(title);
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Startup, logs, exports, and album safety");
-        subtitle.setTextColor(textSecondary);
-        subtitle.setTextSize(12);
-        titleBlock.addView(subtitle);
-        header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        Button close = previewButton("Close", textSecondary, panelRaised, border);
-        close.setOnClickListener(v -> dialog.dismiss());
-        header.addView(close, new LinearLayout.LayoutParams(dp(82), dp(42)));
-        content.addView(header, matchWidthWrapContent());
+        LinearLayout content = UiStyle.dialog(this, dialog, "Settings", "Startup, logs, exports, and album safety");
 
         LinearLayout options = new LinearLayout(this);
         options.setOrientation(LinearLayout.VERTICAL);
         options.setPadding(0, dp(12), 0, 0);
 
-        CheckBox autoLoad = settingsCheckBox(
+        CheckBox autoLoad = UiStyle.settingsCheckBox(
+                this,
                 "Auto-load camera on launch",
                 "Starts reading the camera automatically when a GBxCart RW is connected.",
                 autoLoadCameraEnabled(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
-        CheckBox loadCache = settingsCheckBox(
+                accent);
+        CheckBox loadCache = UiStyle.settingsCheckBox(
+                this,
                 "Load last gallery when offline",
                 "Shows the most recent save backup when no camera is connected or auto-load is off.",
                 loadCachedGalleryEnabled(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
-        CheckBox showLogs = settingsCheckBox(
+                accent);
+        CheckBox showLogs = UiStyle.settingsCheckBox(
+                this,
                 "Show logs by default",
                 "Keeps the operation log panel open after app startup.",
                 showLogsByDefault(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
-        CheckBox confirmWrites = settingsCheckBox(
+                accent);
+        CheckBox confirmWrites = UiStyle.settingsCheckBox(
+                this,
                 "Confirm album writes",
                 "Asks before delete, recover, reorder, compact, or clear operations.",
                 confirmAlbumWritesEnabled(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
-        CheckBox exportDeleted = settingsCheckBox(
+                accent);
+        CheckBox exportDeleted = UiStyle.settingsCheckBox(
+                this,
                 "Export deleted photos",
                 "Includes selected recoverable deleted slots when saving or sharing images.",
                 exportDeletedPhotosEnabled(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
-        CheckBox autoRgbMerge = settingsCheckBox(
+                accent);
+        CheckBox autoRgbMerge = UiStyle.settingsCheckBox(
+                this,
                 "Auto-detect RGB sets",
                 "Merges consecutive 3-shot RGB and 4-shot CRGB captures.",
                 autoRgbMergeEnabled(),
-                textPrimary,
-                textSecondary,
-                accent,
-                border);
+                accent);
 
         final String[] rgb4Value = { rgb4Order() };
         final String[] rgb3Value = { rgb3Order() };
         View rgb4Row = settingsPickerRow(
                 "4-shot order",
                 "Position of C (clear), R, G, B in consecutive shots.",
-                RGB4_ORDERS, rgb4Value,
-                textPrimary, textSecondary, accent, border, panelRaised);
+                RGB4_ORDERS, rgb4Value);
         View rgb3Row = settingsPickerRow(
                 "3-shot order",
                 "Position of R, G, B in consecutive shots.",
-                RGB3_ORDERS, rgb3Value,
-                textPrimary, textSecondary, accent, border, panelRaised);
+                RGB3_ORDERS, rgb3Value);
 
         final String[] defaultAlgoValue = { defaultMergeAlgorithm() };
         View algoRow = settingsIdPickerRow(
@@ -540,8 +481,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 RgbMergeDetector.ALGORITHM_IDS,
                 RgbMergeDetector.ALGORITHM_LABELS,
                 new String[]{ "Basic", "Clear Lum", "Norm RGB", "Norm+Clear", "Sat Boost", "Adaptive ★" },
-                defaultAlgoValue,
-                textPrimary, textSecondary, accent, border, panelRaised);
+                defaultAlgoValue);
 
         boolean rgbMergeOn = autoRgbMerge.isChecked();
         rgb4Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
@@ -553,12 +493,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             algoRow.setVisibility(checked ? View.VISIBLE : View.GONE);
         });
 
-        options.addView(settingsRow(autoLoad, panelRaised, borderSoft));
-        options.addView(settingsRow(loadCache, panelRaised, borderSoft));
-        options.addView(settingsRow(showLogs, panelRaised, borderSoft));
-        options.addView(settingsRow(confirmWrites, panelRaised, borderSoft));
-        options.addView(settingsRow(exportDeleted, panelRaised, borderSoft));
-        options.addView(settingsRow(autoRgbMerge, panelRaised, borderSoft));
+        options.addView(UiStyle.settingsRow(this, autoLoad));
+        options.addView(UiStyle.settingsRow(this, loadCache));
+        options.addView(UiStyle.settingsRow(this, showLogs));
+        options.addView(UiStyle.settingsRow(this, confirmWrites));
+        options.addView(UiStyle.settingsRow(this, exportDeleted));
+        options.addView(UiStyle.settingsRow(this, autoRgbMerge));
         options.addView(rgb4Row);
         options.addView(rgb3Row);
         options.addView(algoRow);
@@ -569,22 +509,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 Math.min(dp(360), dp(72) * 9 + dp(12))));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         actionParams.setMargins(0, dp(12), 0, 0);
 
-        Button cancel = previewButton("Cancel", textMuted, panelRaised, border);
+        Button cancel = previewButton("Cancel", colors.textMuted, colors.surfaceRaised, colors.border);
         cancel.setOnClickListener(v -> dialog.dismiss());
-        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        View gap = new View(this);
-        actions.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
-
-        Button apply = previewButton("Apply", accent, panelRaised, accent);
+        Button apply = previewButton("Apply", accent, colors.surfaceRaised, accent);
         apply.setOnClickListener(v -> {
             boolean rgbSettingsChanged = autoRgbMerge.isChecked() != autoRgbMergeEnabled()
                     || !rgb4Value[0].equals(rgb4Order())
@@ -608,197 +540,67 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 recolorCachedGallery(paletteIndex, false);
             }
         });
-        actions.addView(apply, new LinearLayout.LayoutParams(0, dp(44), 1));
+        LinearLayout actions = UiStyle.actionRow(this, cancel, apply);
         content.addView(actions, actionParams);
 
         dialog.setContentView(content);
-        dialog.setOnShowListener(d -> {
-            Window shownWindow = dialog.getWindow();
-            if (shownWindow != null) {
-                WindowManager.LayoutParams params = new WindowManager.LayoutParams();
-                params.copyFrom(shownWindow.getAttributes());
-                params.width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(560));
-                params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-                shownWindow.setAttributes(params);
-                shownWindow.setBackgroundDrawableResource(android.R.color.transparent);
-            }
-        });
+        UiStyle.sizeDialog(dialog, this, 32, 560);
         dialog.show();
-    }
-
-    private CheckBox settingsCheckBox(
-            String title,
-            String description,
-            boolean checked,
-            int textPrimary,
-            int textSecondary,
-            int accent,
-            int border) {
-        CheckBox box = new CheckBox(this);
-        SpannableString text = new SpannableString(title + "\n" + description);
-        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        box.setText(text);
-        box.setTextColor(textPrimary);
-        box.setTextSize(12);
-        box.setChecked(checked);
-        box.setMinHeight(0);
-        box.setMinimumHeight(0);
-        box.setPadding(dp(10), 0, dp(10), 0);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            box.setButtonTintList(new ColorStateList(
-                    new int[][] {
-                            new int[] { android.R.attr.state_checked },
-                            new int[] {}
-                    },
-                    new int[] {
-                            accent,
-                            border
-                    }));
-        }
-        return box;
-    }
-
-    private View settingsRow(CheckBox box, int fill, int stroke) {
-        FrameLayout row = new FrameLayout(this);
-        row.setBackground(rounded(fill, stroke, 10, 1));
-        row.setClickable(true);
-        row.setOnClickListener(v -> box.toggle());
-        row.addView(box, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
-
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(66));
-        params.setMargins(0, 0, 0, dp(6));
-        row.setLayoutParams(params);
-        return row;
     }
 
     private View settingsPickerRow(
             String title,
             String description,
             String[] options,
-            String[] valueHolder,
-            int textPrimary,
-            int textSecondary,
-            int accent,
-            int border,
-            int fill) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(rounded(fill, border, 10, 1));
-        row.setPadding(dp(10), dp(10), dp(10), dp(10));
-
-        SpannableString text = new SpannableString(title + "\n" + description);
-        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextSize(12);
-        label.setPadding(0, 0, dp(8), 0);
-        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView badge = new TextView(this);
-        badge.setText(valueHolder[0]);
-        badge.setTextColor(accent);
-        badge.setTextSize(13);
-        badge.setTypeface(android.graphics.Typeface.MONOSPACE);
-        badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(12), 0, dp(12), 0);
-        badge.setBackground(rounded(fill, accent, 6, 1));
-        row.addView(badge, new LinearLayout.LayoutParams(dp(64), dp(36)));
-
-        row.setClickable(true);
-        row.setOnClickListener(v -> {
-            int current = 0;
-            for (int i = 0; i < options.length; i++) {
-                if (options[i].equals(valueHolder[0])) { current = i; break; }
-            }
-            new AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setSingleChoiceItems(options, current, (d, which) -> {
-                        valueHolder[0] = options[which];
-                        badge.setText(options[which]);
-                        d.dismiss();
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        });
-
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(66));
-        params.setMargins(0, 0, 0, dp(6));
-        row.setLayoutParams(params);
-        return row;
+            String[] valueHolder) {
+        return UiStyle.settingsChoiceRow(
+                this,
+                title,
+                description,
+                options,
+                indexOf(options, valueHolder[0]),
+                valueHolder[0],
+                64,
+                13,
+                true,
+                screen.accentColor(),
+                which -> {
+                    valueHolder[0] = options[which];
+                    return options[which];
+                });
     }
 
-    /** Like settingsPickerRow but stores IDs in valueHolder while showing labels in the dialog and shortLabels in the badge. */
     private View settingsIdPickerRow(
             String title,
             String description,
             String[] ids,
             String[] labels,
             String[] shortLabels,
-            String[] valueHolder,
-            int textPrimary,
-            int textSecondary,
-            int accent,
-            int border,
-            int fill) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(rounded(fill, border, 10, 1));
-        row.setPadding(dp(10), dp(10), dp(10), dp(10));
+            String[] valueHolder) {
+        return UiStyle.settingsChoiceRow(
+                this,
+                title,
+                description,
+                labels,
+                indexOf(ids, valueHolder[0]),
+                shortLabelForId(ids, shortLabels, valueHolder[0]),
+                80,
+                11,
+                false,
+                screen.accentColor(),
+                which -> {
+                    valueHolder[0] = ids[which];
+                    return shortLabelForId(ids, shortLabels, ids[which]);
+                });
+    }
 
-        SpannableString text = new SpannableString(title + "\n" + description);
-        text.setSpan(new ForegroundColorSpan(textPrimary), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new ForegroundColorSpan(textSecondary), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new RelativeSizeSpan(0.88f), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextSize(12);
-        label.setPadding(0, 0, dp(8), 0);
-        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView badge = new TextView(this);
-        badge.setText(shortLabelForId(ids, shortLabels, valueHolder[0]));
-        badge.setTextColor(accent);
-        badge.setTextSize(11);
-        badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(8), 0, dp(8), 0);
-        badge.setBackground(rounded(fill, accent, 6, 1));
-        row.addView(badge, new LinearLayout.LayoutParams(dp(80), dp(36)));
-
-        row.setClickable(true);
-        row.setOnClickListener(v -> {
-            int current = 0;
-            for (int i = 0; i < ids.length; i++) {
-                if (ids[i].equals(valueHolder[0])) { current = i; break; }
+    private static int indexOf(String[] values, String value) {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(value)) {
+                return i;
             }
-            new AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setSingleChoiceItems(labels, current, (d, which) -> {
-                        valueHolder[0] = ids[which];
-                        badge.setText(shortLabelForId(ids, shortLabels, ids[which]));
-                        d.dismiss();
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-        });
-
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(66));
-        params.setMargins(0, 0, 0, dp(6));
-        row.setLayoutParams(params);
-        return row;
+        }
+        return 0;
     }
 
     private static String shortLabelForId(String[] ids, String[] shortLabels, String id) {
@@ -814,12 +616,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             return;
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setMessage(message)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton(action, (dialog, which) -> runnable.run())
-                .show();
+        UiStyle.confirmDialog(this, title, message, action, runnable);
     }
 
     private boolean autoLoadCameraEnabled() {
@@ -993,53 +790,27 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void showBackupPicker(File[] saves) {
-        Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        int panel = Color.rgb(15, 23, 42);
-        int panelRaised = Color.rgb(30, 41, 59);
-        int border = Color.rgb(71, 85, 105);
-        int textPrimary = Color.rgb(248, 250, 252);
-        int textSecondary = Color.rgb(203, 213, 225);
-        int textMuted = Color.rgb(148, 163, 184);
+        Dialog dialog = UiStyle.baseDialog(this);
+        UiStyle.Palette colors = UiStyle.palette(this);
+        int panelRaised = colors.surfaceRaised;
+        int border = colors.borderStrong;
+        int textPrimary = colors.textPrimary;
+        int textSecondary = colors.textSecondary;
+        int textMuted = colors.textMuted;
         int accent = screen.accentColor();
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(14), dp(16), dp(14));
-        content.setBackground(rounded(panel, border, 14, 1));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout titleBlock = new LinearLayout(this);
-        titleBlock.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(this);
-        title.setText("Save Backups");
-        title.setTextColor(textPrimary);
-        title.setTextSize(19);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        titleBlock.addView(title);
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText(saves.length + " file" + (saves.length == 1 ? "" : "s") + " available");
-        subtitle.setTextColor(textSecondary);
-        subtitle.setTextSize(12);
-        titleBlock.addView(subtitle);
-        header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        Button close = previewButton("Close", textSecondary, panelRaised, border);
-        close.setOnClickListener(v -> dialog.dismiss());
-        header.addView(close, new LinearLayout.LayoutParams(dp(82), dp(42)));
-        content.addView(header, matchWidthWrapContent());
+        LinearLayout content = UiStyle.dialog(
+                this,
+                dialog,
+                "Save Backups",
+                saves.length + " file" + (saves.length == 1 ? "" : "s") + " available");
 
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(0, dp(12), 0, 0);
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
         for (File save : saves) {
-            list.addView(backupRow(save, format, dialog, panelRaised, border, textPrimary, textSecondary, textMuted, accent));
+            list.addView(backupRow(save, format, dialog, panelRaised, border, textPrimary, textSecondary, textMuted, accent, colors.logBackground));
         }
 
         ScrollView scroll = new ScrollView(this);
@@ -1050,17 +821,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         content.addView(scroll, scrollParams);
 
         dialog.setContentView(content);
-        dialog.setOnShowListener(d -> {
-            Window shownWindow = dialog.getWindow();
-            if (shownWindow != null) {
-                WindowManager.LayoutParams params = new WindowManager.LayoutParams();
-                params.copyFrom(shownWindow.getAttributes());
-                params.width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(560));
-                params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-                shownWindow.setAttributes(params);
-                shownWindow.setBackgroundDrawableResource(android.R.color.transparent);
-            }
-        });
+        UiStyle.sizeDialog(dialog, this, 32, 560);
         dialog.show();
     }
 
@@ -1073,7 +834,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             int textPrimary,
             int textSecondary,
             int textMuted,
-            int accent) {
+            int accent,
+            int previewBackground) {
         boolean current = save.getName().equals("GAMEBOYCAMERA.sav");
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1085,7 +847,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             loadBackupSave(save);
         });
 
-        row.addView(backupMosaic(save, current, border, accent, textSecondary), new LinearLayout.LayoutParams(dp(58), dp(58)));
+        row.addView(backupMosaic(save, current, border, accent, textSecondary, previewBackground), new LinearLayout.LayoutParams(dp(58), dp(58)));
 
         LinearLayout text = new LinearLayout(this);
         text.setOrientation(LinearLayout.VERTICAL);
@@ -1125,10 +887,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         return row;
     }
 
-    private View backupMosaic(File save, boolean current, int border, int accent, int textSecondary) {
+    private View backupMosaic(File save, boolean current, int border, int accent, int textSecondary, int background) {
         FrameLayout frame = new FrameLayout(this);
         frame.setPadding(dp(2), dp(2), dp(2), dp(2));
-        frame.setBackground(rounded(Color.rgb(15, 23, 42), current ? accent : border, 8, current ? 2 : 1));
+        frame.setBackground(rounded(background, current ? accent : border, 8, current ? 2 : 1));
 
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
@@ -1144,11 +906,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     ImageView image = new ImageView(this);
                     image.setImageURI(Uri.fromFile(new File(photos[index].path)));
                     image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                    image.setBackgroundColor(Color.rgb(24, 24, 27));
+                    image.setBackgroundColor(background);
                     tile = image;
                 } else {
                     tile = new View(this);
-                    tile.setBackgroundColor(Color.rgb(24, 24, 27));
+                    tile.setBackgroundColor(background);
                 }
                 LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1);
                 tileParams.setMargins(x == 0 ? 0 : dp(1), y == 0 ? 0 : dp(1), 0, 0);
@@ -1250,54 +1012,20 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void showPhotoDetail(GalleryPhoto photo) {
-        Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        int panel = Color.rgb(15, 23, 42);
-        int panelRaised = Color.rgb(30, 41, 59);
-        int panelSoft = Color.rgb(22, 33, 52);
-        int border = Color.rgb(71, 85, 105);
-        int borderSoft = Color.rgb(51, 65, 85);
-        int textPrimary = Color.rgb(248, 250, 252);
-        int textSecondary = Color.rgb(203, 213, 225);
-        int textMuted = Color.rgb(148, 163, 184);
-        int danger = Color.rgb(220, 38, 38);
+        Dialog dialog = UiStyle.baseDialog(this);
+        UiStyle.Palette colors = UiStyle.palette(this);
+        int panel = colors.surface;
+        int panelRaised = colors.surfaceRaised;
+        int panelSoft = UiStyle.blend(colors.surfaceRaised, colors.surface, 0.45f);
+        int border = colors.borderStrong;
+        int borderSoft = colors.border;
+        int textPrimary = colors.textPrimary;
+        int textSecondary = colors.textSecondary;
+        int textMuted = colors.textMuted;
+        int danger = colors.danger;
         int accent = screen.accentColor();
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(14), dp(16), dp(16));
-        content.setBackground(rounded(panel, border, 14, 1));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout titleBlock = new LinearLayout(this);
-        titleBlock.setOrientation(LinearLayout.VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setText(photoDetailTitle(photo));
-        title.setTextColor(textPrimary);
-        title.setTextSize(21);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setSingleLine(true);
-        titleBlock.addView(title);
-
-        TextView fileName = new TextView(this);
-        fileName.setText(photo.name);
-        fileName.setTextColor(textSecondary);
-        fileName.setTextSize(12);
-        fileName.setSingleLine(true);
-        titleBlock.addView(fileName);
-
-        header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        Button close = previewButton("×", textSecondary, panelRaised, border);
-        close.setTextSize(22);
-        close.setOnClickListener(v -> dialog.dismiss());
-        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(42)));
-        content.addView(header, matchWidthWrapContent());
+        LinearLayout content = UiStyle.dialog(this, dialog, photoDetailTitle(photo), photo.name);
 
         LinearLayout statusRow = new LinearLayout(this);
         statusRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1349,11 +1077,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         FrameLayout imageMat = new FrameLayout(this);
         imageMat.setPadding(dp(8), dp(8), dp(8), dp(8));
-        imageMat.setBackground(rounded(Color.rgb(2, 6, 23), border, 12, 1));
+        imageMat.setBackground(rounded(colors.logBackground, border, 12, 1));
         LinearLayout.LayoutParams matParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        matParams.setMargins(0, dp(12), 0, dp(14));
+        matParams.setMargins(0, dp(12), 0, dp(12));
 
         ImageView image = new ImageView(this);
         image.setImageURI(Uri.fromFile(new File(photo.path)));
@@ -1380,7 +1108,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         if (photo.mergedRgb) {
             FrameLayout algoField = new FrameLayout(this);
-            algoField.setBackground(rounded(panelRaised, border, 8, 1));
+            algoField.setBackground(rounded(panelRaised, borderSoft, 8, 1));
             algoField.setClickable(true);
             algoField.setFocusable(true);
             TextView algoDropText = new TextView(this);
@@ -1411,95 +1139,34 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 String[] ids    = RgbMergeDetector.compatibleAlgorithmIds(hasClear);
                 String[] labels = RgbMergeDetector.compatibleAlgorithmLabels(hasClear);
 
-                int surfaceRaised = Color.rgb(37, 52, 76);
-                int borderStrong  = Color.rgb(71, 85, 105);
-                int textPrim      = Color.rgb(241, 245, 249);
-                int accentSurface = Color.rgb(
-                        Math.round(Color.red(accent)   * 0.28f + 15 * 0.72f),
-                        Math.round(Color.green(accent) * 0.28f + 23 * 0.72f),
-                        Math.round(Color.blue(accent)  * 0.28f + 42 * 0.72f));
-
-                LinearLayout menu = new LinearLayout(this);
-                menu.setOrientation(LinearLayout.VERTICAL);
-                ScrollView menuScroll = new ScrollView(this);
-                menuScroll.setBackground(rounded(surfaceRaised, borderStrong, 8, 1));
-                menuScroll.addView(menu);
-
-                int itemH       = dp(48);
-                int popupHeight = Math.min(itemH * ids.length, dp(288));
-                int popupWidth  = algoField.getWidth();
-
-                PopupWindow popup = new PopupWindow(menuScroll, popupWidth, popupHeight, true);
-                popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                popup.setOutsideTouchable(true);
-                popup.setElevation(dp(8));
-
-                for (int i = 0; i < ids.length; i++) {
-                    final int idx = i;
-                    boolean sel = ids[i].equals(previewAlgo[0]);
-                    LinearLayout item = new LinearLayout(this);
-                    item.setOrientation(LinearLayout.HORIZONTAL);
-                    item.setGravity(Gravity.CENTER_VERTICAL);
-                    item.setPadding(dp(16), 0, dp(16), 0);
-                    item.setBackgroundColor(sel ? accentSurface : surfaceRaised);
-                    item.setLayoutParams(new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, itemH));
-                    TextView itemLabel = new TextView(this);
-                    itemLabel.setText(labels[i]);
-                    itemLabel.setTextSize(13);
-                    itemLabel.setTextColor(sel ? accent : textPrim);
-                    itemLabel.setSingleLine(true);
-                    itemLabel.setIncludeFontPadding(false);
-                    item.addView(itemLabel, new LinearLayout.LayoutParams(
-                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-                    item.setOnClickListener(iv -> {
-                        popup.dismiss();
-                        if (ids[idx].equals(previewAlgo[0])) return;
-                        previewAlgo[0] = ids[idx];
-                        algoChanged[0] = true;
-                        algoDropText.setText(labels[idx]);
-                        runPreviewMerge(photo, previewAlgo[0], image,
-                                progressRef[0], previewGeneration);
-                    });
-                    menu.addView(item);
-                }
-
-                // Popup opens above the field
-                popup.showAsDropDown(algoField, 0, -(popupHeight + algoField.getHeight() + dp(4)));
+                UiStyle.dropdown(this, algoField, labels, indexOf(ids, previewAlgo[0]), accent, which -> {
+                    if (ids[which].equals(previewAlgo[0])) return;
+                    previewAlgo[0] = ids[which];
+                    algoChanged[0] = true;
+                    algoDropText.setText(labels[which]);
+                    runPreviewMerge(photo, previewAlgo[0], image, progressRef[0], previewGeneration);
+                });
             });
 
             LinearLayout.LayoutParams algoFieldParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(40));
-            algoFieldParams.setMargins(0, dp(8), 0, 0);
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(38));
+            algoFieldParams.setMargins(0, 0, 0, dp(12));
             content.addView(algoField, algoFieldParams);
         }
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
-
-        Button select = previewButton(photo.selected ? "Deselect" : "Select", textPrimary, panelRaised, border);
+        Button select = previewButton(photo.selected ? "Deselect" : "Select", textPrimary, panelRaised, borderSoft);
         select.setOnClickListener(v -> {
             photo.selected = !photo.selected;
             select.setText(photo.selected ? "Deselect" : "Select");
             screen.showGallery(screen.gallery());
         });
-        actions.addView(select, new LinearLayout.LayoutParams(0, dp(44), 1));
-
-        View gap = new View(this);
-        actions.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
-
         Button share = previewButton("Share", accent, panelRaised, accent);
         share.setOnClickListener(v -> shareSinglePhoto(photo));
-        actions.addView(share, new LinearLayout.LayoutParams(0, dp(44), 1));
+        LinearLayout actions = UiStyle.actionRow(this, select, share);
 
         content.addView(actions, matchWidthWrapContent());
 
         dialog.setContentView(content);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawableResource(android.R.color.transparent);
-        }
         if (photo.mergedRgb) {
             dialog.setOnDismissListener(d -> {
                 if (algoChanged[0]) {
@@ -1508,17 +1175,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 }
             });
         }
-        dialog.setOnShowListener(d -> {
-            Window shownWindow = dialog.getWindow();
-            if (shownWindow != null) {
-                WindowManager.LayoutParams params = new WindowManager.LayoutParams();
-                params.copyFrom(shownWindow.getAttributes());
-                params.width = Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(560));
-                params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-                shownWindow.setAttributes(params);
-                shownWindow.setBackgroundDrawableResource(android.R.color.transparent);
-            }
-        });
+        UiStyle.sizeDialog(dialog, this, 32, 560);
         dialog.show();
     }
 
@@ -1591,26 +1248,6 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }).start();
     }
 
-    private void showRemergePicker(GalleryPhoto photo, Dialog parentDialog) {
-        boolean hasClear = photo.mergedSourceCount == 4;
-        String[] ids    = RgbMergeDetector.compatibleAlgorithmIds(hasClear);
-        String[] labels = RgbMergeDetector.compatibleAlgorithmLabels(hasClear);
-        int current = 0;
-        for (int i = 0; i < ids.length; i++) {
-            if (ids[i].equals(photo.mergedAlgorithm)) { current = i; break; }
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Merge algorithm")
-                .setSingleChoiceItems(labels, current, (d, which) -> {
-                    d.dismiss();
-                    parentDialog.dismiss();
-                    saveMergeAlgorithmOverride(photo, ids[which]);
-                    recolorCachedGallery(paletteIndex, false);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
     private String photoDetailTitle(GalleryPhoto photo) {
         if (photo.mergedRgb) {
             return mergedPhotoTitle(photo);
@@ -1631,46 +1268,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private TextView detailChip(String text, int textColor, int fillColor, int strokeColor) {
-        TextView chip = new TextView(this);
-        chip.setText(text);
-        chip.setTextColor(textColor);
-        chip.setTextSize(11);
-        chip.setTypeface(Typeface.DEFAULT_BOLD);
-        chip.setGravity(Gravity.CENTER);
-        chip.setIncludeFontPadding(false);
-        chip.setSingleLine(true);
-        chip.setPadding(dp(10), 0, dp(10), 0);
-        chip.setBackground(rounded(fillColor, strokeColor, 999, 1));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(28));
-        params.setMargins(0, 0, dp(8), 0);
-        chip.setLayoutParams(params);
-        return chip;
+        return UiStyle.chip(this, text, textColor, fillColor, strokeColor);
     }
 
     private Button previewButton(String text, int textColor, int fillColor, int strokeColor) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(13);
-        button.setTextColor(textColor);
-        button.setMinHeight(0);
-        button.setMinWidth(0);
-        button.setMinimumHeight(0);
-        button.setMinimumWidth(0);
-        button.setIncludeFontPadding(false);
-        button.setPadding(dp(12), 0, dp(12), 0);
-        button.setBackground(rounded(fillColor, strokeColor, 8, 1));
-        return button;
+        return UiStyle.button(this, text, textColor, fillColor, strokeColor);
     }
 
     private GradientDrawable rounded(int fill, int stroke, int radiusDp, int strokeDp) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(fill);
-        bg.setStroke(dp(strokeDp), stroke);
-        bg.setCornerRadius(dp(radiusDp));
-        return bg;
+        return UiStyle.rounded(this, fill, stroke, radiusDp, strokeDp);
     }
 
     private static LinearLayout.LayoutParams matchWidthWrapContent() {
@@ -1950,7 +1556,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+        return UiStyle.dp(this, value);
     }
 
     private void registerUsbReceiver() {

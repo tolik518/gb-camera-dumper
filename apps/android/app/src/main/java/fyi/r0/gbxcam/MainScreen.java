@@ -1,7 +1,6 @@
 package fyi.r0.gbxcam;
 
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -74,7 +73,7 @@ final class MainScreen {
     private final int[][] paletteColors;
     private final boolean[] paletteFavorites;
     private int[] recentPalettes;
-    private final Palette colors;
+    private final UiStyle.Palette colors;
     private final LinearLayout root;
     private final TextView subtitle;
     private final TextView selection;
@@ -120,7 +119,7 @@ final class MainScreen {
         this.paletteColors = paletteColors.length == 0 ? new int[][] { fallbackPaletteColors() } : paletteColors;
         this.paletteFavorites = paletteFavorites.length == this.paletteLabels.length ? paletteFavorites : new boolean[this.paletteLabels.length];
         this.recentPalettes = recentPalettes;
-        this.colors = Palette.from(context);
+        this.colors = UiStyle.palette(context);
 
         root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -149,17 +148,9 @@ final class MainScreen {
         titleBlock.addView(subtitle);
         header.addView(titleBlock, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-        loadButton = new Button(context);
-        loadButton.setText("Load Camera");
-        loadButton.setAllCaps(false);
+        loadButton = UiStyle.button(context, "Load Camera", accent, colors.surfaceRaised, accent);
         loadButton.setTextSize(12);
-        loadButton.setMinHeight(0);
-        loadButton.setMinWidth(0);
-        loadButton.setMinimumHeight(0);
-        loadButton.setMinimumWidth(0);
-        loadButton.setIncludeFontPadding(false);
         loadButton.setPadding(dp(14), dp(9), dp(14), dp(9));
-        loadButton.setTextColor(accent);
         loadButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         loadButton.setOnClickListener(v -> listener.onLoadRequested());
         LinearLayout.LayoutParams loadParams = new LinearLayout.LayoutParams(
@@ -177,13 +168,13 @@ final class MainScreen {
         TextView loadingText = new TextView(context);
         loadingText.setText("Working with GBxCart RW...");
         loadingText.setTextColor(colors.textSecondary);
-        loadingText.setPadding(16, 0, 0, 0);
+        loadingText.setPadding(dp(16), 0, 0, 0);
         loadingRow.addView(loadingText);
         root.addView(loadingRow, matchWidthWrapContent());
 
         LinearLayout paletteRow = row();
         paletteRow.setGravity(Gravity.CENTER_VERTICAL);
-        paletteRow.setPadding(0, dp(4), 0, dp(5));
+        paletteRow.setPadding(0, dp(4), 0, dp(4));
         TextView paletteLabel = new TextView(context);
         paletteLabel.setText("Palette");
         paletteLabel.setTextColor(colors.textSecondary);
@@ -311,7 +302,7 @@ final class MainScreen {
         empty.setText("No camera photos loaded yet.");
         empty.setGravity(Gravity.CENTER);
         empty.setTextColor(colors.textMuted);
-        empty.setPadding(0, 80, 0, 80);
+        empty.setPadding(0, dp(80), 0, dp(80));
 
         LinearLayout galleryContainer = new LinearLayout(context);
         galleryContainer.setOrientation(LinearLayout.VERTICAL);
@@ -330,14 +321,14 @@ final class MainScreen {
         logTitle.setText("Logs");
         logTitle.setTypeface(Typeface.DEFAULT_BOLD);
         logTitle.setTextColor(colors.textPrimary);
-        logTitle.setPadding(0, 8, 0, 4);
+        logTitle.setPadding(0, dp(8), 0, dp(4));
         root.addView(logTitle, matchWidthWrapContent());
 
         logs = new TextView(context);
         logs.setTextSize(12);
         logs.setTextColor(colors.logText);
         logs.setTextIsSelectable(true);
-        logs.setPadding(12, 12, 12, 12);
+        logs.setPadding(dp(12), dp(12), dp(12), dp(12));
         logs.setBackgroundColor(colors.logBackground);
         logScroll = new ScrollView(context);
         logScroll.addView(logs);
@@ -505,7 +496,7 @@ final class MainScreen {
     private View photoTile(GalleryPhoto photo) {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setPadding(dp(6), dp(6), dp(6), dp(7));
+        tile.setPadding(dp(6), dp(6), dp(6), dp(6));
         tile.setBackground(tileBackground(photo.selected, photo.deleted));
         tile.setContentDescription(photoTitle(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
@@ -639,17 +630,9 @@ final class MainScreen {
     }
 
     private Button smallButton(String label, View.OnClickListener listener) {
-        Button button = new Button(context);
-        button.setText(label);
+        Button button = UiStyle.button(context, label, colors.textPrimary, colors.surfaceRaised, colors.border);
         button.setTextSize(11);
-        button.setAllCaps(false);
-        button.setMinHeight(0);
-        button.setMinWidth(0);
-        button.setMinimumHeight(0);
-        button.setMinimumWidth(0);
-        button.setIncludeFontPadding(false);
         button.setPadding(dp(11), dp(7), dp(11), dp(7));
-        button.setTextColor(colors.textPrimary);
         button.setBackground(buttonBackground(colors.surfaceRaised, colors.actionPressed, colors.disabledBackground));
         button.setOnClickListener(listener);
         return button;
@@ -665,7 +648,6 @@ final class MainScreen {
         int popupWidth = Math.min(dp(340), root.getWidth() - dp(72));
         LinearLayout menu = new LinearLayout(context);
         menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setBackground(rounded(colors.surfaceRaised, colors.borderStrong, 8, 1));
         ScrollView menuScroll = new ScrollView(context);
         menuScroll.setBackground(rounded(colors.surfaceRaised, colors.borderStrong, 8, 1));
         menuScroll.addView(menu);
@@ -678,6 +660,7 @@ final class MainScreen {
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setElevation(dp(8));
+        popup.setAnimationStyle(android.R.style.Animation);
         popup.setOnDismissListener(() -> {
             if (!committed[0]) {
                 listener.onPalettePreviewCanceled(originalIndex);
@@ -844,11 +827,7 @@ final class MainScreen {
     }
 
     private static int blend(int foreground, int background, float backgroundAmount) {
-        float foregroundAmount = 1.0f - backgroundAmount;
-        return Color.rgb(
-                Math.round(Color.red(foreground) * foregroundAmount + Color.red(background) * backgroundAmount),
-                Math.round(Color.green(foreground) * foregroundAmount + Color.green(background) * backgroundAmount),
-                Math.round(Color.blue(foreground) * foregroundAmount + Color.blue(background) * backgroundAmount));
+        return UiStyle.blend(foreground, background, backgroundAmount);
     }
 
     private static int contrastText(int color) {
@@ -903,19 +882,11 @@ final class MainScreen {
     }
 
     private StateListDrawable buttonBackground(int normal, int pressed, int disabled, int stroke) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[] { -android.R.attr.state_enabled }, rounded(disabled, colors.border, 6, 1));
-        states.addState(new int[] { android.R.attr.state_pressed }, rounded(pressed, colors.borderStrong, 6, 1));
-        states.addState(new int[] {}, rounded(normal, stroke, 6, 1));
-        return states;
+        return UiStyle.buttonBackground(context, normal, pressed, disabled, stroke);
     }
 
     private StateListDrawable dangerButtonBackground() {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[] { -android.R.attr.state_enabled }, rounded(colors.disabledBackground, colors.border, 6, 1));
-        states.addState(new int[] { android.R.attr.state_pressed }, rounded(blend(colors.danger, Color.BLACK, 0.18f), colors.danger, 6, 1));
-        states.addState(new int[] {}, rounded(colors.danger, colors.danger, 6, 1));
-        return states;
+        return UiStyle.dangerButtonBackground(context);
     }
 
     private GradientDrawable chipBackground() {
@@ -931,11 +902,7 @@ final class MainScreen {
     }
 
     private GradientDrawable rounded(int fill, int stroke, int radiusDp, int strokeDp) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(fill);
-        bg.setStroke(dp(strokeDp), stroke);
-        bg.setCornerRadius(dp(radiusDp));
-        return bg;
+        return UiStyle.rounded(context, fill, stroke, radiusDp, strokeDp);
     }
 
     private LinearLayout row() {
@@ -951,7 +918,7 @@ final class MainScreen {
     }
 
     private int dp(int value) {
-        return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
+        return UiStyle.dp(context, value);
     }
 
     private static final class CameraImageFrame extends FrameLayout {
@@ -969,123 +936,4 @@ final class MainScreen {
         }
     }
 
-    private static final class Palette {
-        final int background;
-        final int surface;
-        final int surfaceRaised;
-        final int logBackground;
-        final int photoBackground;
-        final int textPrimary;
-        final int textSecondary;
-        final int textMuted;
-        final int logText;
-        final int border;
-        final int borderStrong;
-        final int selectedBackground;
-        final int selectedBorder;
-        final int primary;
-        final int primaryPressed;
-        final int primaryButtonText;
-        final int actionPressed;
-        final int checkSurface;
-        final int danger;
-        final int disabledText;
-        final int disabledBackground;
-
-        private Palette(
-                int background,
-                int surface,
-                int surfaceRaised,
-                int logBackground,
-                int photoBackground,
-                int textPrimary,
-                int textSecondary,
-                int textMuted,
-                int logText,
-                int border,
-                int borderStrong,
-                int selectedBackground,
-                int selectedBorder,
-                int primary,
-                int primaryPressed,
-                int primaryButtonText,
-                int actionPressed,
-                int checkSurface,
-                int danger,
-                int disabledText,
-                int disabledBackground) {
-            this.background = background;
-            this.surface = surface;
-            this.surfaceRaised = surfaceRaised;
-            this.logBackground = logBackground;
-            this.photoBackground = photoBackground;
-            this.textPrimary = textPrimary;
-            this.textSecondary = textSecondary;
-            this.textMuted = textMuted;
-            this.logText = logText;
-            this.border = border;
-            this.borderStrong = borderStrong;
-            this.selectedBackground = selectedBackground;
-            this.selectedBorder = selectedBorder;
-            this.primary = primary;
-            this.primaryPressed = primaryPressed;
-            this.primaryButtonText = primaryButtonText;
-            this.actionPressed = actionPressed;
-            this.checkSurface = checkSurface;
-            this.danger = danger;
-            this.disabledText = disabledText;
-            this.disabledBackground = disabledBackground;
-        }
-
-        static Palette from(Context context) {
-            int nightMode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-            if (nightMode == Configuration.UI_MODE_NIGHT_YES) {
-                return new Palette(
-                        Color.rgb(15, 23, 42),
-                        Color.rgb(30, 41, 59),
-                        Color.rgb(37, 52, 76),
-                        Color.rgb(2, 6, 23),
-                        Color.rgb(15, 23, 42),
-                        Color.rgb(241, 245, 249),
-                        Color.rgb(203, 213, 225),
-                        Color.rgb(148, 163, 184),
-                        Color.rgb(226, 232, 240),
-                        Color.rgb(51, 65, 85),
-                        Color.rgb(71, 85, 105),
-                        Color.rgb(19, 54, 39),
-                        Color.rgb(74, 222, 128),
-                        Color.rgb(74, 222, 128),
-                        Color.rgb(34, 197, 94),
-                        Color.rgb(5, 46, 22),
-                        Color.rgb(51, 65, 85),
-                        Color.rgb(15, 23, 42),
-                        Color.rgb(220, 38, 38),
-                        Color.rgb(100, 116, 139),
-                        Color.rgb(30, 41, 59));
-            }
-
-            return new Palette(
-                    Color.rgb(248, 250, 252),
-                    Color.WHITE,
-                    Color.rgb(241, 245, 249),
-                    Color.WHITE,
-                    Color.WHITE,
-                    Color.rgb(15, 23, 42),
-                    Color.rgb(71, 85, 105),
-                    Color.rgb(100, 116, 139),
-                    Color.rgb(39, 39, 42),
-                    Color.rgb(226, 232, 240),
-                    Color.rgb(203, 213, 225),
-                    Color.rgb(240, 253, 244),
-                    Color.rgb(22, 163, 74),
-                    Color.rgb(22, 163, 74),
-                    Color.rgb(21, 128, 61),
-                    Color.WHITE,
-                    Color.rgb(226, 232, 240),
-                    Color.WHITE,
-                    Color.rgb(185, 28, 28),
-                    Color.rgb(148, 163, 184),
-                    Color.rgb(241, 245, 249));
-        }
-    }
 }

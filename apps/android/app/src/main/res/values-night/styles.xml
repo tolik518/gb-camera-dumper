@@ -8,4 +8,8 @@
         <item name="android:navigationBarColor">#020617</item>
         <item name="android:colorAccent">#60A5FA</item>
     </style>
+    <style name="DialogFade">
+        <item name="android:windowEnterAnimation">@anim/dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit</item>
+    </style>
 </resources>
