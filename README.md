@@ -9,11 +9,6 @@ Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewe
 - GB Camera
 - [GBxCart RW 1.4 or later](https://www.gbxcart.com/)
 
-## Screenshots
-
-![GBxCAM Viewer screenshot](.github/screenshot-dark.png)
-![GBxCAM Viewer screenshot](.github/screenshot-light.png)
-
 ## License
 
 This project is licensed under the [GNU General Public License v3.0 or later](LICENSE).
@@ -24,3 +19,7 @@ This project is licensed under the [GNU General Public License v3.0 or later](LI
 - Game Boy Camera technical documentation by [Antonio Niño Díaz](https://github.com/AntonioND) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), from [gbcam-rev-engineer](https://github.com/AntonioND/gbcam-rev-engineer)
 - Save file injection research by [Raphaël Boichot](https://github.com/Raphael-Boichot) ([Inject-pictures-in-your-Game-Boy-Camera-saves](https://github.com/Raphael-Boichot/Inject-pictures-in-your-Game-Boy-Camera-saves))
 - The codebase was created with heavy AI assistance, using Codex with GPT 5.5
+
+## Screenshots
+
+<img src=".github/screenshot-dark.jpg" alt="GBxCAM Viewer dark screenshot" width="49%"/> <img src=".github/screenshot-light.jpg" alt="GBxCAM Viewer light screenshot" width="49%"/>
