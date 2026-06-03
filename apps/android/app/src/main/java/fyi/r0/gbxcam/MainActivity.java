@@ -41,6 +41,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
     private static final String TAG = "GbcamApp";
@@ -57,6 +60,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private boolean autoLoadAttempted;
     private int paletteIndex;
     private File pendingSaveExport;
+    private final ExecutorService previewExecutor = Executors.newFixedThreadPool(3);
+    private final AtomicInteger recolorGeneration = new AtomicInteger(0);
+    private final Map<String, Boolean> emptyImageCache = new HashMap<>();
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
@@ -101,6 +107,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 settings.paletteFavorites(paletteLabels),
                 settings.recentPalettes(paletteLabels),
                 defaultPaletteIndex);
+        screen.setBitmapExecutor(previewExecutor);
         screen.setPaletteIndex(paletteIndex);
         screen.setLogsVisibleFromSettings(settings.showLogs());
         setContentView(screen.view());
@@ -118,6 +125,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     protected void onDestroy() {
         unregisterReceiver(usbReceiver);
         operationRunner.shutdown();
+        previewExecutor.shutdownNow();
         super.onDestroy();
     }
 
@@ -845,7 +853,25 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             loadBackupSave(save);
         });
 
-        row.addView(backupMosaic(save, current, border, accent, textSecondary, previewBackground), new LinearLayout.LayoutParams(dp(58), dp(58)));
+        ImageView[] tiles = new ImageView[4];
+        View[] badge = new View[1];
+        row.addView(backupMosaic(tiles, badge, current, border, accent, textSecondary, previewBackground),
+                new LinearLayout.LayoutParams(dp(58), dp(58)));
+        previewExecutor.submit(() -> {
+            GalleryPhoto[] photos = backupPreviewPhotos(save);
+            runOnUiThread(() -> {
+                boolean anyPhoto = false;
+                for (int i = 0; i < tiles.length; i++) {
+                    if (photos[i] != null && tiles[i] != null) {
+                        tiles[i].setImageURI(Uri.fromFile(new File(photos[i].path)));
+                        anyPhoto = true;
+                    }
+                }
+                if (anyPhoto && badge[0] != null) {
+                    badge[0].setVisibility(View.GONE);
+                }
+            });
+        });
 
         LinearLayout text = new LinearLayout(this);
         text.setOrientation(LinearLayout.VERTICAL);
@@ -885,7 +911,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         return row;
     }
 
-    private View backupMosaic(File save, boolean current, int border, int accent, int textSecondary, int background) {
+    private View backupMosaic(ImageView[] tilesOut, View[] badgeOut, boolean current,
+            int border, int accent, int textSecondary, int background) {
         FrameLayout frame = new FrameLayout(this);
         frame.setPadding(dp(2), dp(2), dp(2), dp(2));
         frame.setBackground(rounded(background, current ? accent : border, 8, current ? 2 : 1));
@@ -893,23 +920,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipToOutline(true);
-        GalleryPhoto[] photos = backupPreviewPhotos(save);
         for (int y = 0; y < 2; y++) {
             LinearLayout line = new LinearLayout(this);
             line.setOrientation(LinearLayout.HORIZONTAL);
             for (int x = 0; x < 2; x++) {
                 int index = y * 2 + x;
-                View tile;
-                if (photos[index] != null) {
-                    ImageView image = new ImageView(this);
-                    image.setImageURI(Uri.fromFile(new File(photos[index].path)));
-                    image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                    image.setBackgroundColor(background);
-                    tile = image;
-                } else {
-                    tile = new View(this);
-                    tile.setBackgroundColor(background);
-                }
+                ImageView tile = new ImageView(this);
+                tile.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                tile.setBackgroundColor(background);
+                tilesOut[index] = tile;
                 LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1);
                 tileParams.setMargins(x == 0 ? 0 : dp(1), y == 0 ? 0 : dp(1), 0, 0);
                 line.addView(tile, tileParams);
@@ -920,17 +939,16 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
-        if (photos[0] == null) {
-            TextView badge = new TextView(this);
-            badge.setText("SAV");
-            badge.setGravity(Gravity.CENTER);
-            badge.setTextSize(9);
-            badge.setTypeface(Typeface.DEFAULT_BOLD);
-            badge.setTextColor(textSecondary);
-            frame.addView(badge, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT));
-        }
+        TextView badge = new TextView(this);
+        badge.setText("SAV");
+        badge.setGravity(Gravity.CENTER);
+        badge.setTextSize(9);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setTextColor(textSecondary);
+        frame.addView(badge, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        badgeOut[0] = badge;
 
         return frame;
     }
@@ -942,6 +960,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             File output = new File(
                     appFilesDir(null),
                     "backup-previews/" + safeFilePart(save.getName()) + "-" + save.lastModified() + "-p" + backupPalette);
+
+            // Fast path: if preview PNGs already exist on disk, use them without re-decoding.
+            if (output.isDirectory()) {
+                GalleryPhoto[] cached = loadCachedPreviews(output);
+                if (cached != null) return cached;
+            }
+
             if (!output.mkdirs() && !output.isDirectory()) {
                 return preview;
             }
@@ -960,6 +985,28 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             }
         } catch (Exception e) {
             Log.w(TAG, "Backup preview failed for " + save.getName(), e);
+        }
+        return preview;
+    }
+
+    private GalleryPhoto[] loadCachedPreviews(File dir) {
+        // Count how many IMG_PCxx.png files exist from a prior decode.
+        int count = 0;
+        for (int i = 1; i <= 30; i++) {
+            if (new File(dir, String.format(Locale.US, "IMG_PC%02d.png", i)).exists()) {
+                count = i;
+            }
+        }
+        if (count == 0) return null;
+
+        int[] indices = backupPreviewIndices(count);
+        GalleryPhoto[] preview = new GalleryPhoto[4];
+        for (int i = 0; i < Math.min(indices.length, preview.length); i++) {
+            File f = new File(dir, String.format(Locale.US, "IMG_PC%02d.png", indices[i] + 1));
+            if (f.exists()) {
+                preview[i] = new GalleryPhoto(f.getName(), f.getAbsolutePath(),
+                        indices[i], indices[i], 128, 112, false, 0, false, true, "");
+            }
         }
         return preview;
     }
@@ -1276,21 +1323,30 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         if (previous == null) {
             return;
         }
-
-        try {
-            GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
-                    previous.savePath,
-                    previous.outputDir,
-                    paletteIndex));
-            gallery = applyAutoRgbMerge(gallery);
-            gallery.copySelectionFrom(previous);
-            screen.showGallery(gallery);
-            if (logChange) {
-                onLog("Palette changed: " + gallery.paletteName);
+        int generation = recolorGeneration.incrementAndGet();
+        previewExecutor.submit(() -> {
+            if (recolorGeneration.get() != generation) return;
+            try {
+                GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
+                        previous.savePath,
+                        previous.outputDir,
+                        paletteIndex));
+                if (recolorGeneration.get() != generation) return;
+                gallery = applyAutoRgbMerge(gallery);
+                gallery.copySelectionFrom(previous);
+                GalleryState finalGallery = gallery;
+                runOnUiThread(() -> {
+                    if (recolorGeneration.get() != generation) return;
+                    screen.showGallery(finalGallery);
+                    if (logChange) onLog("Palette changed: " + finalGallery.paletteName);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (recolorGeneration.get() != generation) return;
+                    onLog("Palette change failed: " + e);
+                });
             }
-        } catch (Exception e) {
-            onLog("Palette change failed: " + e.toString());
-        }
+        });
     }
 
     private GalleryState applyAutoRgbMerge(GalleryState gallery) {
@@ -1328,8 +1384,16 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 filtered);
     }
 
-    private static boolean isEmptyImage(GalleryPhoto photo) {
-        Bitmap bmp = BitmapFactory.decodeFile(photo.path);
+    private boolean isEmptyImage(GalleryPhoto photo) {
+        Boolean cached = emptyImageCache.get(photo.path);
+        if (cached != null) return cached;
+        boolean empty = decodeAndCheckEmpty(photo.path);
+        emptyImageCache.put(photo.path, empty);
+        return empty;
+    }
+
+    private static boolean decodeAndCheckEmpty(String path) {
+        Bitmap bmp = BitmapFactory.decodeFile(path);
         if (bmp == null) return true;
         int w = bmp.getWidth(), h = bmp.getHeight();
         int[] pixels = new int[w * h];

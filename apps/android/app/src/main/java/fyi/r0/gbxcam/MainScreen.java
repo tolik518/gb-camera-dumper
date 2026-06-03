@@ -1,6 +1,8 @@
 package fyi.r0.gbxcam;
 
+import android.app.Activity;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -23,6 +25,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class MainScreen {
     interface Listener {
@@ -114,6 +118,25 @@ final class MainScreen {
     private int accentPressed;
     private int accentSurface;
     private int accentText;
+
+    private Executor bitmapExecutor;
+    private TileHolder[] tileHolders;
+    private final AtomicInteger displayGeneration = new AtomicInteger(0);
+
+    private static final class TileHolder {
+        final LinearLayout tile;
+        final ImageView image;
+        final TextView selectionMarker;
+        TileHolder(LinearLayout tile, ImageView image, TextView selectionMarker) {
+            this.tile = tile;
+            this.image = image;
+            this.selectionMarker = selectionMarker;
+        }
+    }
+
+    void setBitmapExecutor(Executor executor) {
+        this.bitmapExecutor = executor;
+    }
 
     MainScreen(Context context, Listener listener, String[] paletteLabels, int[][] paletteColors, boolean[] paletteFavorites, int[] recentPalettes, int defaultPaletteIndex) {
         this.context = context;
@@ -352,10 +375,15 @@ final class MainScreen {
 
     void showGallery(GalleryState gallery) {
         this.gallery = gallery;
+        int gen = displayGeneration.incrementAndGet();
         setPaletteIndex(gallery.paletteIndex);
         grid.removeAllViews();
-        for (GalleryPhoto photo : gallery.photos) {
-            grid.addView(photoTile(photo), tileParams());
+        tileHolders = new TileHolder[gallery.photos.size()];
+        for (int i = 0; i < gallery.photos.size(); i++) {
+            GalleryPhoto photo = gallery.photos.get(i);
+            TileHolder holder = photoTile(photo, gen);
+            tileHolders[i] = holder;
+            grid.addView(holder.tile, tileParams());
         }
         empty.setVisibility(gallery.photos.isEmpty() ? View.VISIBLE : View.GONE);
         grid.setVisibility(gallery.photos.isEmpty() ? View.GONE : View.VISIBLE);
@@ -441,13 +469,15 @@ final class MainScreen {
     }
 
     void selectAll(boolean selected) {
-        if (gallery == null) {
-            return;
-        }
-        for (GalleryPhoto photo : gallery.photos) {
+        if (gallery == null) return;
+        for (int i = 0; i < gallery.photos.size(); i++) {
+            GalleryPhoto photo = gallery.photos.get(i);
             photo.selected = selected;
+            if (tileHolders != null && i < tileHolders.length) {
+                applySelectionToTile(tileHolders[i], photo);
+            }
         }
-        showGallery(gallery);
+        updateActions();
     }
 
     void updateActions() {
@@ -498,7 +528,7 @@ final class MainScreen {
         deleteButton.setTextColor(!busy && selectedActive > 0 ? Color.WHITE : colors.disabledText);
     }
 
-    private View photoTile(GalleryPhoto photo) {
+    private TileHolder photoTile(GalleryPhoto photo, int gen) {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(6));
@@ -520,11 +550,25 @@ final class MainScreen {
             return true;
         });
         ImageView image = new ImageView(context);
-        image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
         image.setAlpha(photo.deleted ? 0.72f : 1.0f);
         image.setBackgroundColor(colors.photoBackground);
+        if (bitmapExecutor != null) {
+            bitmapExecutor.execute(() -> {
+                Bitmap bmp = BitmapFactory.decodeFile(photo.path);
+                if (bmp == null || displayGeneration.get() != gen) {
+                    if (bmp != null) bmp.recycle();
+                    return;
+                }
+                ((Activity) context).runOnUiThread(() -> {
+                    if (displayGeneration.get() == gen) image.setImageBitmap(bmp);
+                    else bmp.recycle();
+                });
+            });
+        } else {
+            image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
+        }
         imageFrame.addView(image, new FrameLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT));
@@ -583,7 +627,7 @@ final class MainScreen {
         labelBlock.addView(meta);
         tile.addView(labelBlock, matchWidthWrapContent());
 
-        return tile;
+        return new TileHolder(tile, image, selectionMarker);
     }
 
     private String photoTitle(GalleryPhoto photo) {
@@ -609,12 +653,24 @@ final class MainScreen {
     }
 
     private void togglePhotoSelection(GalleryPhoto photo) {
-        if (gallery == null) {
-            return;
-        }
+        if (gallery == null) return;
         photo.selected = !photo.selected;
         listener.onPhotoSelectionChanged(photo, photo.selected);
-        showGallery(gallery);
+        int idx = gallery.photos.indexOf(photo);
+        if (tileHolders != null && idx >= 0 && idx < tileHolders.length) {
+            applySelectionToTile(tileHolders[idx], photo);
+        }
+        updateActions();
+    }
+
+    private void applySelectionToTile(TileHolder holder, GalleryPhoto photo) {
+        holder.tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        holder.tile.setContentDescription(photoTitle(photo)
+                + (photo.selected ? ", selected" : ", not selected"));
+        holder.selectionMarker.setText(photo.selected ? "✓" : "");
+        holder.selectionMarker.setBackground(checkBackground(photo.selected));
+        holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+        holder.selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
     }
 
     private GradientDrawable tileBackground(boolean selected, boolean deleted) {

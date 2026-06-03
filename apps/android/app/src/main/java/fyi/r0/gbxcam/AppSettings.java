@@ -143,7 +143,7 @@ final class AppSettings {
             favorites.add(labels[index]);
             favorite = true;
         }
-        prefs.edit().putStringSet(KEY_PALETTE_FAVORITES, new HashSet<>(favorites)).commit();
+        prefs.edit().putStringSet(KEY_PALETTE_FAVORITES, new HashSet<>(favorites)).apply();
         return favorite;
     }
 
