@@ -969,14 +969,17 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     save.getAbsolutePath(),
                     output.getAbsolutePath(),
                     backupPalette));
-            int count = gallery.photos.size();
-            if (count == 0) {
+            List<GalleryPhoto> active = new ArrayList<>();
+            for (GalleryPhoto p : gallery.photos) {
+                if (!p.deleted) active.add(p);
+            }
+            if (active.isEmpty()) {
                 return preview;
             }
 
-            int[] indices = backupPreviewIndices(count);
+            int[] indices = backupPreviewIndices(active.size());
             for (int i = 0; i < indices.length; i++) {
-                preview[i] = gallery.photos.get(indices[i]);
+                preview[i] = active.get(indices[i]);
             }
         } catch (Exception e) {
             Log.w(TAG, "Backup preview failed for " + save.getName(), e);
