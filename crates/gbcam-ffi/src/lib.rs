@@ -1,12 +1,13 @@
 use gbxcam_core::{
     apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, palette_colors,
-    palette_labels, write_palette_png, write_photos_to_dir, write_photos_to_dir_with_palette,
-    GbcamSave, PaletteId, PhotoKind, ValidationSeverity, DEFAULT_PALETTE_INDEX,
+    palette_labels, write_palette_png, write_photos_to_dir, GbcamSave, PaletteId, PhotoKind,
+    ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jint, jstring};
-use jni::JNIEnv;
+use jni::strings::JNIString;
+use jni::Env;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
@@ -34,15 +35,15 @@ pub unsafe extern "C" fn gbcam_string_free(ptr: *mut c_char) {
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_version(
-    mut env: JNIEnv,
+    env: jni::EnvUnowned,
     _class: JClass,
 ) -> jstring {
-    java_string_or_throw(&mut env, env!("CARGO_PKG_VERSION").to_string())
+    with_jni(&env, |env| java_string_or_throw(env, env!("CARGO_PKG_VERSION").to_string()))
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_defaultPaletteIndex(
-    _env: JNIEnv,
+    _env: jni::EnvUnowned,
     _class: JClass,
 ) -> jint {
     DEFAULT_PALETTE_INDEX as jint
@@ -50,59 +51,59 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_defaultPaletteIndex(
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_paletteLabels(
-    mut env: JNIEnv,
+    env: jni::EnvUnowned,
     _class: JClass,
 ) -> jstring {
-    java_string_or_throw(&mut env, palette_labels().collect::<Vec<_>>().join("\n"))
+    with_jni(&env, |env| {
+        java_string_or_throw(env, palette_labels().collect::<Vec<_>>().join("\n"))
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_paletteColors(
-    mut env: JNIEnv,
+    env: jni::EnvUnowned,
     _class: JClass,
 ) -> jstring {
-    let colors = palette_colors()
-        .map(|palette| {
-            palette
-                .iter()
-                .map(|color| format!("{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    java_string_or_throw(&mut env, colors)
+    with_jni(&env, |env| {
+        let colors = palette_colors()
+            .map(|palette| {
+                palette
+                    .iter()
+                    .map(|color| format!("{:02X}{:02X}{:02X}", color[0], color[1], color[2]))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        java_string_or_throw(env, colors)
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromFd<'local>(
-    mut env: JNIEnv<'local>,
+    env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
     output_dir: JString<'local>,
     palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-
-    let result = {
-        let mut progress = JniProgress::new(&mut env, progress);
-        load_gallery_from_fd(
-            fd,
-            output_dir,
-            palette_from_jint(palette_index),
-            &mut progress,
-        )
-    };
-    java_result(&mut env, result, "GB Camera gallery load failed")
+    with_jni(&env, |env| {
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = JniProgress::new(env, progress);
+            load_gallery_from_fd(fd, output_dir, palette_from_jint(palette_index), &mut progress)
+        };
+        java_result(env, result, "GB Camera gallery load failed")
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>(
-    mut env: JNIEnv<'local>,
+    env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
     save_path: JString<'local>,
@@ -111,36 +112,37 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>
     palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
-    let save_path = match java_path(&mut env, save_path) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let physical_slots_csv = match java_string(&mut env, physical_slots_csv) {
-        Ok(value) => value,
-        Err(e) => return throw(&mut env, e),
-    };
-
-    let result = {
-        let mut progress = JniProgress::new(&mut env, progress);
-        delete_photos_from_fd(
-            fd,
-            save_path,
-            output_dir,
-            &physical_slots_csv,
-            palette_from_jint(palette_index),
-            &mut progress,
-        )
-    };
-    java_result(&mut env, result, "GB Camera delete failed")
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let physical_slots_csv = match java_string(env, physical_slots_csv) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = JniProgress::new(env, progress);
+            delete_photos_from_fd(
+                fd,
+                save_path,
+                output_dir,
+                &physical_slots_csv,
+                palette_from_jint(palette_index),
+                &mut progress,
+            )
+        };
+        java_result(env, result, "GB Camera delete failed")
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local>(
-    mut env: JNIEnv<'local>,
+    env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
     save_path: JString<'local>,
@@ -149,36 +151,37 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local
     palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
-    let save_path = match java_path(&mut env, save_path) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let physical_slots_csv = match java_string(&mut env, physical_slots_csv) {
-        Ok(value) => value,
-        Err(e) => return throw(&mut env, e),
-    };
-
-    let result = {
-        let mut progress = JniProgress::new(&mut env, progress);
-        recover_photos_from_fd(
-            fd,
-            save_path,
-            output_dir,
-            &physical_slots_csv,
-            palette_from_jint(palette_index),
-            &mut progress,
-        )
-    };
-    java_result(&mut env, result, "GB Camera recover failed")
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let physical_slots_csv = match java_string(env, physical_slots_csv) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = JniProgress::new(env, progress);
+            recover_photos_from_fd(
+                fd,
+                save_path,
+                output_dir,
+                &physical_slots_csv,
+                palette_from_jint(palette_index),
+                &mut progress,
+            )
+        };
+        java_result(env, result, "GB Camera recover failed")
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local>(
-    mut env: JNIEnv<'local>,
+    env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
     save_path: JString<'local>,
@@ -187,89 +190,98 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local
     palette_index: jint,
     progress: JObject<'local>,
 ) -> jstring {
-    let save_path = match java_path(&mut env, save_path) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let physical_slots_csv = match java_string(&mut env, physical_slots_csv) {
-        Ok(value) => value,
-        Err(e) => return throw(&mut env, e),
-    };
-
-    let result = {
-        let mut progress = JniProgress::new(&mut env, progress);
-        reorder_photos_from_fd(
-            fd,
-            save_path,
-            output_dir,
-            &physical_slots_csv,
-            palette_from_jint(palette_index),
-            &mut progress,
-        )
-    };
-    java_result(&mut env, result, "GB Camera reorder failed")
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let physical_slots_csv = match java_string(env, physical_slots_csv) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = JniProgress::new(env, progress);
+            reorder_photos_from_fd(
+                fd,
+                save_path,
+                output_dir,
+                &physical_slots_csv,
+                palette_from_jint(palette_index),
+                &mut progress,
+            )
+        };
+        java_result(env, result, "GB Camera reorder failed")
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromSave<'local>(
-    mut env: JNIEnv<'local>,
+    env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     save_path: JString<'local>,
     output_dir: JString<'local>,
     palette_index: jint,
 ) -> jstring {
-    let save_path = match java_path(&mut env, save_path) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
-
-    java_result(
-        &mut env,
-        load_gallery_from_save(save_path, output_dir, palette_from_jint(palette_index)),
-        "GB Camera cached gallery load failed",
-    )
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        java_result(
+            env,
+            load_gallery_from_save(save_path, output_dir, palette_from_jint(palette_index)),
+            "GB Camera cached gallery load failed",
+        )
+    })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_dumpFromFd(
-    mut env: JNIEnv,
+    env: jni::EnvUnowned,
     _class: JClass,
     fd: jint,
     output_dir: JString,
     erase_after: jni::sys::jboolean,
 ) -> jstring {
-    let output_dir = match java_path(&mut env, output_dir) {
-        Ok(path) => path,
-        Err(e) => return throw(&mut env, e),
-    };
+    with_jni(&env, |env| {
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = NoJniProgress;
+            dump_from_fd(fd, output_dir, erase_after != jni::sys::JNI_FALSE, &mut progress)
+        };
+        java_result(env, result, "GB Camera dump failed")
+    })
+}
 
-    let result = {
-        let mut progress = NoJniProgress;
-        dump_from_fd(
-            fd,
-            output_dir,
-            erase_after != jni::sys::JNI_FALSE,
-            &mut progress,
-        )
-    };
-    java_result(&mut env, result, "GB Camera dump failed")
+// Safety: called directly from a JNI native method; env is a valid non-null
+// JNIEnv* for the duration of the call.
+fn with_jni<'local, F>(env: &jni::EnvUnowned<'local>, f: F) -> jstring
+where
+    F: FnOnce(&mut Env<'local>) -> jstring,
+{
+    let mut guard: jni::AttachGuard<'local> =
+        unsafe { jni::AttachGuard::from_unowned(env.as_raw()) };
+    f(guard.borrow_env_mut())
 }
 
 struct JniProgress<'a, 'local> {
-    env: &'a mut JNIEnv<'local>,
+    env: &'a mut Env<'local>,
     callback: JObject<'local>,
 }
 
 impl<'a, 'local> JniProgress<'a, 'local> {
-    fn new(env: &'a mut JNIEnv<'local>, callback: JObject<'local>) -> Self {
+    fn new(env: &'a mut Env<'local>, callback: JObject<'local>) -> Self {
         Self { env, callback }
     }
 
@@ -280,8 +292,8 @@ impl<'a, 'local> JniProgress<'a, 'local> {
         let message = JObject::from(message);
         let _ = self.env.call_method(
             &self.callback,
-            "onProgress",
-            "(Ljava/lang/String;)V",
+            jni::jni_str!("onProgress"),
+            jni::jni_sig!("(Ljava/lang/String;)V"),
             &[JValue::Object(&message)],
         );
     }
@@ -328,9 +340,6 @@ fn load_gallery_from_fd(
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
     progress.message("Decoding photos...");
-    write_photos_to_dir_with_palette(&save, &output_dir, palette)?;
-    progress.message("Gallery ready.");
-
     gallery_json(&save, &output_dir, &save_path, &info, palette)
 }
 
@@ -362,9 +371,7 @@ fn delete_photos_from_fd(
 
     let updated = apply_album_delete(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
-    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
     progress.message("Gallery updated after delete.");
-
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
@@ -396,9 +403,7 @@ fn recover_photos_from_fd(
 
     let updated = apply_album_recover(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
-    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
     progress.message("Gallery updated after recover.");
-
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
@@ -427,9 +432,7 @@ fn reorder_photos_from_fd(
 
     let updated = apply_album_reorder(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
-    write_photos_to_dir_with_palette(&updated, &output_dir, palette)?;
     progress.message("Gallery updated after reorder.");
-
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
@@ -514,77 +517,56 @@ fn gallery_json(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let photos = extract_photos(save)?;
     let save_view = GbcamSave::new(save)?;
-    let mut json = String::new();
-    json.push_str("{\"connected\":\"");
-    json.push_str(&json_escape(&connected_label(info)));
-    json.push_str("\",\"savePath\":\"");
-    json.push_str(&json_escape(&save_path.to_string_lossy()));
-    json.push_str("\",\"outputDir\":\"");
-    json.push_str(&json_escape(&output_dir.to_string_lossy()));
-    json.push_str("\",\"paletteIndex\":");
-    json.push_str(&palette.index().to_string());
-    json.push_str(",\"paletteName\":\"");
-    json.push_str(&json_escape(palette.label()));
-    let validation = save_view.validate();
-    let validation_errors = validation
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == ValidationSeverity::Error)
-        .count();
-    let validation_warnings = validation
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == ValidationSeverity::Warning)
-        .count();
-    json.push_str("\",\"validationErrors\":");
-    json.push_str(&validation_errors.to_string());
-    json.push_str(",\"validationWarnings\":");
-    json.push_str(&validation_warnings.to_string());
-    json.push_str(",\"photos\":[");
 
-    let mut first = true;
-    for photo in photos.iter().filter(|photo| photo.kind == PhotoKind::Album) {
+    let validation = save_view.validate();
+    let (validation_errors, validation_warnings) =
+        validation
+            .findings
+            .iter()
+            .fold((0usize, 0usize), |(e, w), f| match f.severity {
+                ValidationSeverity::Error => (e + 1, w),
+                ValidationSeverity::Warning => (e, w + 1),
+                ValidationSeverity::Info => (e, w),
+            });
+
+    let mut photos_json: Vec<serde_json::Value> = Vec::new();
+    for photo in photos.iter().filter(|p| p.kind == PhotoKind::Album) {
         let path = output_dir.join(&photo.name);
         write_palette_png(&path, &photo.pixels_indexed, palette)?;
-        if !first {
-            json.push(',');
-        }
-        first = false;
-        json.push_str("{\"name\":\"");
-        json.push_str(&json_escape(&photo.name));
-        json.push_str("\",\"path\":\"");
-        json.push_str(&json_escape(&path.to_string_lossy()));
-        json.push_str("\",\"displayIndex\":");
-        json.push_str(&photo.display_index.unwrap_or(0).to_string());
-        json.push_str(",\"physicalSlot\":");
-        json.push_str(&photo.physical_slot.unwrap_or(0).to_string());
-        json.push_str(",\"width\":");
-        json.push_str(&photo.width.to_string());
-        json.push_str(",\"height\":");
-        json.push_str(&photo.height.to_string());
-        json.push_str(",\"deleted\":");
-        json.push_str(if photo.deleted { "true" } else { "false" });
+
+        let mut obj = serde_json::json!({
+            "name": photo.name,
+            "path": path.to_string_lossy(),
+            "displayIndex": photo.display_index.unwrap_or(0),
+            "physicalSlot": photo.physical_slot.unwrap_or(0),
+            "width": photo.width,
+            "height": photo.height,
+            "deleted": photo.deleted,
+        });
+
         if let Some(slot) = photo.physical_slot {
             let metadata = save_view.metadata_for_slot(slot)?;
-            json.push_str(",\"border\":");
-            json.push_str(&metadata.border.to_string());
-            json.push_str(",\"copy\":");
-            json.push_str(if metadata.copy { "true" } else { "false" });
-            json.push_str(",\"metadataValid\":");
-            json.push_str(if metadata.owner_checksum.valid() {
-                "true"
-            } else {
-                "false"
-            });
-            json.push_str(",\"ownerUserId\":\"");
-            json.push_str(&hex_bytes(&metadata.image_owner.user_id));
-            json.push('"');
+            obj["border"] = serde_json::json!(metadata.border);
+            obj["copy"] = serde_json::json!(metadata.copy);
+            obj["metadataValid"] = serde_json::json!(metadata.owner_checksum.valid());
+            obj["ownerUserId"] = serde_json::json!(hex_bytes(&metadata.image_owner.user_id));
         }
-        json.push('}');
+
+        photos_json.push(obj);
     }
 
-    json.push_str("]}");
-    Ok(json)
+    let out = serde_json::json!({
+        "connected": connected_label(info),
+        "savePath": save_path.to_string_lossy(),
+        "outputDir": output_dir.to_string_lossy(),
+        "paletteIndex": palette.index(),
+        "paletteName": palette.label(),
+        "validationErrors": validation_errors,
+        "validationWarnings": validation_warnings,
+        "photos": photos_json,
+    });
+
+    Ok(serde_json::to_string(&out)?)
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -640,18 +622,16 @@ fn timestamped_backup_path(
     Ok(output_dir.join(format!("{prefix}-{seconds}.sav")))
 }
 
-fn java_path(env: &mut JNIEnv, value: JString) -> Result<PathBuf, String> {
+fn java_path(env: &mut Env<'_>, value: JString) -> Result<PathBuf, String> {
     java_string(env, value).map(PathBuf::from)
 }
 
-fn java_string(env: &mut JNIEnv, value: JString) -> Result<String, String> {
-    env.get_string(&value)
-        .map(|s| s.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+fn java_string(env: &mut Env<'_>, value: JString) -> Result<String, String> {
+    value.try_to_string(env).map_err(|e| e.to_string())
 }
 
 fn java_result(
-    env: &mut JNIEnv,
+    env: &mut Env<'_>,
     result: Result<String, Box<dyn std::error::Error>>,
     context: &str,
 ) -> jstring {
@@ -661,30 +641,34 @@ fn java_result(
     }
 }
 
-fn java_string_or_throw(env: &mut JNIEnv, value: String) -> jstring {
+fn java_string_or_throw(env: &mut Env<'_>, value: String) -> jstring {
     match env.new_string(value) {
         Ok(s) => s.into_raw(),
         Err(e) => throw(env, e.to_string()),
     }
 }
 
-fn throw(env: &mut JNIEnv, message: String) -> jstring {
-    let _ = env.throw_new("java/lang/RuntimeException", message);
+fn throw(env: &mut Env<'_>, message: String) -> jstring {
+    let _ = env.throw_new(jni::jni_str!("java/lang/RuntimeException"), JNIString::from(message));
     std::ptr::null_mut()
 }
 
-fn json_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => escaped.push(ch),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connected_label_includes_full_cfw_ver_above_255() {
+        // cfw_ver 258 (0x0102) must appear as "L258" in the label, not "L2".
+        // Before the fix, cfw_ver was stored as u8, truncating 258 → 2.
+        let info = GbxCartInfo {
+            pcb_ver: 5,
+            ofw_ver: 4,
+            cfw_ver: 258,
+            name: Some("GBxCart RW".to_string()),
+        };
+        let label = connected_label(&info);
+        assert_eq!(label, "GBxCart RW (PCB v5, OFW R4, CFW L258)");
     }
-    escaped
 }
+

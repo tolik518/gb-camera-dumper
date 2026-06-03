@@ -49,7 +49,7 @@ pub type Result<T> = std::result::Result<T, GbcamUsbError>;
 pub struct GbxCartInfo {
     pub pcb_ver: u8,
     pub ofw_ver: u8,
-    pub cfw_ver: u8,
+    pub cfw_ver: u16,
     pub name: Option<String>,
 }
 
@@ -67,6 +67,10 @@ fn iowr(type_char: u8, nr: u8, size: usize) -> libc::Ioctl {
     ((3u32 << 30) | ((size as u32) << 16) | ((type_char as u32) << 8) | (nr as u32)) as libc::Ioctl
 }
 
+fn iow(type_char: u8, nr: u8, size: usize) -> libc::Ioctl {
+    ((2u32 << 30) | ((size as u32) << 16) | ((type_char as u32) << 8) | (nr as u32)) as libc::Ioctl
+}
+
 fn usbdevfs_control() -> libc::Ioctl {
     iowr(b'U', 0, std::mem::size_of::<CtrlTransfer>())
 }
@@ -76,11 +80,11 @@ fn usbdevfs_bulk() -> libc::Ioctl {
 }
 
 fn usbdevfs_claiminterface() -> libc::Ioctl {
-    ((2u32 << 30) | (4u32 << 16) | (b'U' as u32) << 8 | 15u32) as libc::Ioctl
+    iow(b'U', 15, std::mem::size_of::<u32>())
 }
 
 fn usbdevfs_resetep() -> libc::Ioctl {
-    ((2u32 << 30) | (4u32 << 16) | (b'U' as u32) << 8 | 3u32) as libc::Ioctl
+    iow(b'U', 3, std::mem::size_of::<u32>())
 }
 
 const USB_TYPE_VENDOR: u8 = 0x40;
@@ -124,9 +128,9 @@ const SRAM_VERIFY_RETRIES: usize = 3;
 
 pub struct UsbDev {
     fd: RawFd,
-    fw_ver: u8,
+    fw_ver: u16,
     has_cart_power: bool,
-    rxbuf: RefCell<Vec<u8>>,
+    rxbuf: RefCell<(Vec<u8>, usize)>,
 }
 
 impl UsbDev {
@@ -135,7 +139,7 @@ impl UsbDev {
             fd,
             fw_ver: 0,
             has_cart_power: false,
-            rxbuf: RefCell::new(Vec::new()),
+            rxbuf: RefCell::new((Vec::new(), 0)),
         }
     }
 
@@ -174,7 +178,7 @@ impl UsbDev {
             let mut info = vec![0u8; size];
             dev.bulk_read(&mut info)?;
             if size >= 3 {
-                dev.fw_ver = u16::from_be_bytes([info[1], info[2]]) as u8;
+                dev.fw_ver = u16::from_be_bytes([info[1], info[2]]);
             }
             if dev.fw_ver >= 12 {
                 let nlen = dev.read_u8()? as usize;
@@ -223,7 +227,7 @@ impl UsbDev {
             libc::ioctl(self.fd, usbdevfs_resetep(), &mut ep_in as *mut u32);
             libc::ioctl(self.fd, usbdevfs_resetep(), &mut ep_out as *mut u32);
         }
-        self.rxbuf.borrow_mut().clear();
+        self.clear_local_rx();
     }
 
     fn ctrl_out(&self, request: u8, value: u16, index: u16) -> Result<()> {
@@ -343,12 +347,14 @@ impl UsbDev {
         let mut rxbuf = self.rxbuf.borrow_mut();
         let mut got = 0;
         while got < buf.len() {
-            if rxbuf.is_empty() {
-                *rxbuf = self.raw_bulk_read()?;
+            if rxbuf.1 >= rxbuf.0.len() {
+                rxbuf.0 = self.raw_bulk_read()?;
+                rxbuf.1 = 0;
             }
-            let take = (buf.len() - got).min(rxbuf.len());
-            buf[got..got + take].copy_from_slice(&rxbuf[..take]);
-            rxbuf.drain(..take);
+            let pos = rxbuf.1;
+            let take = (buf.len() - got).min(rxbuf.0.len() - pos);
+            buf[got..got + take].copy_from_slice(&rxbuf.0[pos..pos + take]);
+            rxbuf.1 += take;
             got += take;
         }
         Ok(())
@@ -386,7 +392,7 @@ impl UsbDev {
     }
 
     fn ack_ok(b: u8) -> bool {
-        b == 0x01 || b == 0x03
+        matches!(b, 0x01 | 0x03)
     }
 
     fn ack_meaning(b: u8) -> &'static str {
@@ -399,7 +405,9 @@ impl UsbDev {
     }
 
     fn clear_local_rx(&self) {
-        self.rxbuf.borrow_mut().clear();
+        let mut r = self.rxbuf.borrow_mut();
+        r.0.clear();
+        r.1 = 0;
     }
 
     fn resync_after_bad_ack(&self) -> Result<()> {
@@ -415,7 +423,7 @@ impl UsbDev {
             for _ in 0..4 {
                 match self.raw_bulk_read_once(100) {
                     Ok(raw) => {
-                        if raw.iter().any(|b| *b == 0x01 || *b == 0x02) {
+                        if raw.iter().any(|b| matches!(b, 0x01 | 0x02)) {
                             self.clear_local_rx();
                             return Ok(());
                         }
@@ -447,7 +455,6 @@ impl UsbDev {
     }
 
     fn required_step(
-        &self,
         progress: &mut impl Progress,
         label: &str,
         result: Result<()>,
@@ -635,15 +642,14 @@ impl UsbDev {
     }
 
     fn write_wait_retry(&self, data: &[u8], ctx: &str, retries: usize) -> Result<()> {
-        for attempt in 1..=retries {
+        for attempt in 0..retries {
             self.clear_local_rx();
             self.bulk_write(data)?;
             let b = self.ack_byte()?;
             if Self::ack_ok(b) {
                 return Ok(());
             }
-
-            if attempt < retries {
+            if attempt + 1 < retries {
                 self.resync_after_bad_ack()?;
                 std::thread::sleep(Duration::from_millis(80));
             } else {
@@ -656,7 +662,7 @@ impl UsbDev {
                 )));
             }
         }
-        Ok(())
+        Ok(()) // reached only when retries == 0
     }
 
     fn expect_ack(&self, ctx: &'static str) -> Result<()> {
@@ -766,17 +772,17 @@ impl UsbDev {
         // Match FlashGBX's _cart_write(..., sram=True) ordering exactly. The
         // firmware path for single-byte SRAM writes is not the same as bulk
         // WriteRAM(): it does not set DMG_ACCESS_MODE before issuing 0xB3.
-        self.required_step(
+        Self::required_step(
             progress,
             "byte-write: SET_VARIABLE DMG_WRITE_CS_PULSE=1",
             self.set_var(VAR_DMG_WRITE_CS_PULSE, 1),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             &format!("byte-write: SET_VARIABLE ADDRESS=0x{gb_addr:04X}"),
             self.set_var(VAR_ADDRESS, gb_addr),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             "byte-write: SET_VARIABLE TRANSFER_SIZE=1",
             self.set_var(VAR_TRANSFER_SIZE, 1),
@@ -785,21 +791,21 @@ impl UsbDev {
         progress.message(&format!(
             "[debug][byte-write] SEND 0x{CMD_DMG_CART_WRITE_SRAM:02X} DMG_CART_WRITE_SRAM for 0x{gb_addr:04X}=0x{value:02X}"
         ));
-        self.required_step(
+        Self::required_step(
             progress,
             "byte-write: send DMG_CART_WRITE_SRAM command",
             self.bulk_write(&[CMD_DMG_CART_WRITE_SRAM]),
         )?;
 
         progress.message(&format!("[debug][byte-write] SEND data byte 0x{value:02X}"));
-        self.required_step(
+        Self::required_step(
             progress,
             "byte-write: send data byte",
             self.bulk_write(&[value]),
         )?;
 
         progress.message("[debug][byte-write] waiting for byte write ACK");
-        self.required_step(
+        Self::required_step(
             progress,
             "byte-write: DMG_CART_WRITE_SRAM byte ACK",
             self.expect_ack("DMG_CART_WRITE_SRAM byte"),
@@ -839,19 +845,16 @@ impl UsbDev {
             }
             Ok(())
         })();
-        let clear_result = self.set_var(VAR_DMG_READ_CS_PULSE, 0);
-
-        match (read_result, clear_result) {
-            (Err(e), _) => Err(e),
-            (Ok(_), Err(e)) => Err(e),
-            (Ok(_), Ok(_)) => Ok(()),
-        }
+        read_result.and(self.set_var(VAR_DMG_READ_CS_PULSE, 0))
     }
 
     fn read_sram_window_verified(&self, gb_addr: u32, len: usize) -> Result<Vec<u8>> {
         let mut first = vec![0u8; len];
         let mut second = vec![0u8; len];
 
+        // Bottleneck: reads every window twice and compares; doubles USB traffic.
+        // Required because the MAC-GBD chip can return stale or glitched data on
+        // the first SRAM access after a bank switch.
         for attempt in 1..=SRAM_VERIFY_RETRIES {
             self.read_sram_window(gb_addr, &mut first)?;
             self.read_sram_window(gb_addr, &mut second)?;
@@ -896,6 +899,9 @@ impl UsbDev {
         self.backup_restore_ram_preamble()?;
 
         progress.message("Dumping SRAM...");
+        // Bottleneck: 16 banks × 16 verified windows per bank × 2 reads each =
+        // 512 USB bulk reads, each preceded by 3–4 set_var round-trips. Total
+        // USB operation count is dominated by the firmware's per-window overhead.
         let mut save = vec![0u8; SAVE_SIZE];
         for bank in 0..SRAM_BANKS {
             self.set_var(VAR_DMG_WRITE_CS_PULSE, 0)?;
@@ -1112,6 +1118,13 @@ impl UsbDev {
             self.cart_write(0x4000, bank as u8)?;
             std::thread::sleep(Duration::from_millis(20));
 
+            // Bottleneck: writes 64 bytes (30 order + 2 checksum + 30 echo + 2 echo checksum)
+            // one byte at a time. Each sram_write_byte issues 3 set_var USB round-trips plus
+            // a write command and an ACK, then sleeps 2 ms for SRAM settling.
+            // Minimum wall time: 64 × 2 ms = ~128 ms of sleep per attempt, up to 3 attempts.
+            // Bulk chunk writes (sram_write_chunk) are available but produce less reliable
+            // results for individual order-table bytes on the MAC-GBD chip.
+
             // Write primary order table (30 bytes at 0x11B2)
             progress.message(&format!(
                 "[debug][delete] attempt {attempt}/3: writing primary order at 0x{ORDER_OFFSET_PRIMARY:05X}"
@@ -1208,27 +1221,27 @@ impl UsbDev {
     fn prepare_dmg_cart(&self, progress: &mut impl Progress) -> Result<()> {
         progress.message("[debug][prepare] begin DMG cartridge preparation");
         self.debug_cart_power(progress, "prepare: entry");
-        self.required_step(
+        Self::required_step(
             progress,
             "prepare: SET_MODE_DMG 0xA3",
             self.cmd_ack(CMD_SET_MODE_DMG),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             "prepare: SET_VOLTAGE_5V 0xA5",
             self.cmd_ack(CMD_SET_VOLTAGE_5V),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             "prepare: SET_VARIABLE DMG_READ_METHOD=A15",
             self.set_var(VAR_DMG_READ_METHOD, DMG_READ_METHOD_A15),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             "prepare: SET_VARIABLE CART_MODE=DMG",
             self.set_var(VAR_CART_MODE, 1),
         )?;
-        self.required_step(
+        Self::required_step(
             progress,
             "prepare: SET_VARIABLE ADDRESS=0",
             self.set_var(VAR_ADDRESS, 0),
@@ -1249,7 +1262,7 @@ impl UsbDev {
                 std::thread::sleep(Duration::from_millis(150));
             }
 
-            self.required_step(
+            Self::required_step(
                 progress,
                 "prepare: SET_MODE_DMG before CART_PWR_ON",
                 self.cmd_ack(CMD_SET_MODE_DMG),
@@ -1259,7 +1272,7 @@ impl UsbDev {
             ));
             self.bulk_write(&[CMD_CART_PWR_ON])?;
             std::thread::sleep(Duration::from_millis(200));
-            self.required_step(
+            Self::required_step(
                 progress,
                 "prepare: CART_PWR_ON ack",
                 self.expect_ack("CART_PWR_ON"),
@@ -1269,13 +1282,13 @@ impl UsbDev {
             progress.message(&format!(
                 "[debug][power] prepare: CART_PWR raw after power on = 0x{powered_after:02X}"
             ));
-            self.required_step(
+            Self::required_step(
                 progress,
                 "prepare: DMG_MBC_RESET after cart power on",
                 self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET after cart power on"),
             )?;
         } else {
-            self.required_step(
+            Self::required_step(
                 progress,
                 "prepare: DMG_MBC_RESET",
                 self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET"),
@@ -1423,5 +1436,15 @@ mod tests {
         assert_eq!(ch340_baud_params(9_600).unwrap(), (0xB282, 0x000C));
         assert_eq!(ch340_baud_params(1_000_000).unwrap(), (0xFA83, 0x0004));
         assert_eq!(ch340_baud_params(1_500_000).unwrap(), (0xFC83, 0x0003));
+    }
+
+    #[test]
+    fn gbx_cart_info_cfw_ver_holds_full_u16_range() {
+        // Firmware version 258 (0x0102) must survive roundtrip without truncation.
+        // Before fix, cfw_ver was u8: 258_u16 as u8 == 2, so the >= 12 check
+        // below would silently fail even though the device reports a recent firmware.
+        let info = GbxCartInfo { pcb_ver: 5, ofw_ver: 4, cfw_ver: 258, name: None };
+        assert_eq!(info.cfw_ver, 258);
+        assert!(info.cfw_ver >= 12);
     }
 }

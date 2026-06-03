@@ -5,5 +5,5 @@ edition = "2021"
 license.workspace = true
 
 [dependencies]
-png = "0.17"
+png = "0.18"
 thiserror = "2"

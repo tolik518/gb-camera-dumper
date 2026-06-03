@@ -252,7 +252,6 @@ pub struct Photo {
     pub width: u32,
     pub height: u32,
     pub pixels_indexed: Vec<u8>,
-    pub pixels_gray8: Vec<u8>,
     pub kind: PhotoKind,
     pub display_index: Option<usize>,
     pub physical_slot: Option<usize>,
@@ -263,6 +262,15 @@ pub struct Photo {
 pub enum StateVectorCopyKind {
     Primary,
     Echo,
+}
+
+impl std::fmt::Display for StateVectorCopyKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Primary => write!(f, "primary"),
+            Self::Echo => write!(f, "echo"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,7 +484,7 @@ impl<'a> GbcamSave<'a> {
     }
 
     pub fn album_slots(&self) -> Result<Vec<(usize, bool)>, GbcamCoreError> {
-        album_slots_from_order(&self.canonical_order()?)
+        Ok(album_slots_from_order(&self.canonical_order()?))
     }
 
     pub fn game_face(&self) -> &'a [u8] {
@@ -578,7 +586,7 @@ fn state_vector_copy(
         kind,
         order,
         magic_valid: &save[magic_offset..magic_offset + MAGIC.len()] == MAGIC,
-        stored_checksum: [save[checksum_offset], save[checksum_offset + 1]],
+        stored_checksum: save[checksum_offset..checksum_offset + 2].try_into().unwrap(),
         computed_checksum: order_table_checksum(&order),
     }
 }
@@ -612,7 +620,7 @@ pub fn state_vector_report(save: &[u8]) -> StateVectorReport {
     }
 }
 
-fn album_slots_from_order(order: &[u8; ORDER_COUNT]) -> Result<Vec<(usize, bool)>, GbcamCoreError> {
+fn album_slots_from_order(order: &[u8; ORDER_COUNT]) -> Vec<(usize, bool)> {
     let mut slots_by_display_order = [None; ORDER_COUNT];
     let mut seen_positions = [false; ORDER_COUNT];
     let mut deleted_slots = Vec::new();
@@ -628,11 +636,12 @@ fn album_slots_from_order(order: &[u8; ORDER_COUNT]) -> Result<Vec<(usize, bool)
 
     let mut slots = slots_by_display_order
         .iter()
-        .filter_map(|&slot| slot)
+        .copied()
+        .flatten()
         .map(|slot| (slot, false))
         .collect::<Vec<_>>();
     slots.extend(deleted_slots.iter().map(|&slot| (slot, true)));
-    Ok(slots)
+    slots
 }
 
 pub fn photo_slot_base(physical_slot: usize) -> Result<usize, GbcamCoreError> {
@@ -663,23 +672,19 @@ fn parse_gender_blood(value: u8) -> (Gender, BloodType) {
 }
 
 fn parse_user_profile(data: &[u8]) -> UserProfile {
-    let mut user_id = [0u8; 4];
-    user_id.copy_from_slice(&data[0..4]);
     let (gender, blood_type) = parse_gender_blood(data[0x0D]);
-    let mut birthdate_raw = [0u8; 4];
-    birthdate_raw.copy_from_slice(&data[0x0E..0x12]);
     UserProfile {
-        user_id,
+        user_id: data[0x00..0x04].try_into().unwrap(),
         username_raw: data[0x04..0x0D].to_vec(),
         gender,
         blood_type,
-        birthdate_raw,
+        birthdate_raw: data[0x0E..0x12].try_into().unwrap(),
     }
 }
 
 fn metadata_checksum(data: &[u8], checksum_offset: usize, magic_offset: usize) -> MetadataChecksum {
     MetadataChecksum {
-        stored: [data[checksum_offset], data[checksum_offset + 1]],
+        stored: data[checksum_offset..checksum_offset + 2].try_into().unwrap(),
         computed: checksum_seeded(&data[..magic_offset]),
         magic_valid: &data[magic_offset..magic_offset + MAGIC.len()] == MAGIC,
     }
@@ -695,7 +700,7 @@ fn settings_copy(
     SettingsCopy {
         primary,
         magic_valid: &save[magic_offset..magic_offset + MAGIC.len()] == MAGIC,
-        stored_checksum: [save[checksum_offset], save[checksum_offset + 1]],
+        stored_checksum: save[checksum_offset..checksum_offset + 2].try_into().unwrap(),
         computed_checksum: checksum_seeded(&save[offset..offset + SETTINGS_DATA_LEN]),
     }
 }
@@ -726,16 +731,16 @@ pub fn settings_block(save: &[u8]) -> SettingsBlock {
         tempo: data[0x0B9],
         partition_saved: data[0x0BA] == 0x01,
         counters: CameraCounters {
-            pictures_taken_raw: [data[0x0BB], data[0x0BC]],
-            pictures_erased_raw: [data[0x0BD], data[0x0BE]],
-            pictures_transferred_raw: [data[0x0BF], data[0x0C0]],
-            pictures_printed_raw: [data[0x0C1], data[0x0C2]],
-            pictures_received_raw: [data[0x0C3], data[0x0C4]],
+            pictures_taken_raw: data[0x0BB..0x0BD].try_into().unwrap(),
+            pictures_erased_raw: data[0x0BD..0x0BF].try_into().unwrap(),
+            pictures_transferred_raw: data[0x0BF..0x0C1].try_into().unwrap(),
+            pictures_printed_raw: data[0x0C1..0x0C3].try_into().unwrap(),
+            pictures_received_raw: data[0x0C3..0x0C5].try_into().unwrap(),
         },
         scores: MinigameScores {
-            space_fever_ii_raw: [data[0x0C5], data[0x0C6]],
-            ball_raw: [data[0x0C9], data[0x0CA]],
-            run_run_run_raw: [data[0x0CB], data[0x0CC]],
+            space_fever_ii_raw: data[0x0C5..0x0C7].try_into().unwrap(),
+            ball_raw: data[0x0C9..0x0CB].try_into().unwrap(),
+            run_run_run_raw: data[0x0CB..0x0CD].try_into().unwrap(),
         },
         printing_intensity: data[0x0D0],
     }
@@ -837,7 +842,7 @@ pub fn validate_save(save: &[u8]) -> SaveValidationReport {
             findings.push(ValidationFinding {
                 severity: ValidationSeverity::Error,
                 offset: Some(offset),
-                message: format!("{:?} state vector Magic marker is invalid", copy.kind),
+                message: format!("{} state vector Magic marker is invalid", copy.kind),
             });
         }
         if !copy.checksum_valid() {
@@ -845,7 +850,7 @@ pub fn validate_save(save: &[u8]) -> SaveValidationReport {
                 severity: ValidationSeverity::Error,
                 offset: Some(offset),
                 message: format!(
-                    "{:?} state vector checksum is {:02X?}, expected {:02X?}",
+                    "{} state vector checksum is {:02X?}, expected {:02X?}",
                     copy.kind, copy.stored_checksum, copy.computed_checksum
                 ),
             });
@@ -1000,20 +1005,23 @@ fn decode_tiled_image_indices(data: &[u8], tile_rows: usize, output_height: usiz
     for ty in 0..tile_rows {
         for tx in 0..TILES_X {
             let tile_offset = (ty * TILES_X + tx) * 16;
-            let mut padded_tile = [0u8; 16];
-            if let Some(available) = data.get(tile_offset..) {
-                let copy_len = available.len().min(padded_tile.len());
-                padded_tile[..copy_len].copy_from_slice(&available[..copy_len]);
-            }
-            let tile = &padded_tile;
-            let px = decode_tile(tile);
+            let px = if tile_offset + 16 <= data.len() {
+                decode_tile(&data[tile_offset..tile_offset + 16])
+            } else {
+                let mut padded = [0u8; 16];
+                if tile_offset < data.len() {
+                    let copy_len = data.len() - tile_offset;
+                    padded[..copy_len].copy_from_slice(&data[tile_offset..]);
+                }
+                decode_tile(&padded)
+            };
             for (row, px_row) in px.iter().enumerate() {
                 let y = ty * 8 + row;
                 if y >= output_height {
                     continue;
                 }
-                for (col, px) in px_row.iter().enumerate() {
-                    img[y * IMG_W + (tx * 8 + col)] = *px;
+                for (col, &px) in px_row.iter().enumerate() {
+                    img[y * IMG_W + (tx * 8 + col)] = px;
                 }
             }
         }
@@ -1030,6 +1038,9 @@ pub fn indexed_to_gray8(pixels_indexed: &[u8]) -> Vec<u8> {
 
 pub fn indexed_to_rgb8(pixels_indexed: &[u8], palette: PaletteId) -> Vec<u8> {
     let colors = palette.colors();
+    // Bottleneck: allocates len * 3 bytes (≈ 43 KB per 128×112 photo) per call.
+    // Avoidable by emitting an indexed/palette PNG instead of an RGB one, which
+    // would also reduce the zlib payload that write_palette_png has to compress.
     let mut rgb = Vec::with_capacity(pixels_indexed.len() * 3);
     for &px in pixels_indexed {
         rgb.extend_from_slice(colors.get(px as usize).unwrap_or(&colors[0]));
@@ -1040,18 +1051,19 @@ pub fn indexed_to_rgb8(pixels_indexed: &[u8], palette: PaletteId) -> Vec<u8> {
 pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
     let save_view = GbcamSave::new(save)?;
 
+    // Bottleneck: decodes all 32 photos (30 album + GameFace + LastSeen), allocating
+    // a pixels_indexed Vec per photo. Callers that only need album photos (gallery_json)
+    // still pay the decode cost for the two special-purpose images.
     let mut photos = Vec::new();
     let slots = save_view.album_slots()?;
 
     for (index, (slot, deleted)) in slots.iter().take(ORDER_COUNT).enumerate() {
         let pixels_indexed = decode_image_indices(save_view.image_data_for_slot(*slot)?);
-        let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
         photos.push(Photo {
             name: format!("IMG_PC{:02}.png", index + 1),
             width: IMG_W as u32,
             height: IMG_H as u32,
             pixels_indexed,
-            pixels_gray8,
             kind: PhotoKind::Album,
             display_index: Some(index),
             physical_slot: Some(*slot),
@@ -1061,13 +1073,11 @@ pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
 
     let pixels_indexed =
         decode_image_indices(&save[GAME_FACE_OFFSET..GAME_FACE_OFFSET + TILE_BLOCK_SIZE]);
-    let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
     photos.push(Photo {
         name: "IMG_PC31.png".to_string(),
         width: IMG_W as u32,
         height: IMG_H as u32,
         pixels_indexed,
-        pixels_gray8,
         kind: PhotoKind::GameFace,
         display_index: None,
         physical_slot: None,
@@ -1075,13 +1085,11 @@ pub fn extract_photos(save: &[u8]) -> Result<Vec<Photo>, GbcamCoreError> {
     });
     let pixels_indexed =
         decode_last_seen_image_indices(&save[LAST_SEEN_OFFSET..LAST_SEEN_OFFSET + TILE_BLOCK_SIZE]);
-    let pixels_gray8 = indexed_to_gray8(&pixels_indexed);
     photos.push(Photo {
         name: "IMG_PC32.png".to_string(),
         width: IMG_W as u32,
         height: LAST_SEEN_H as u32,
         pixels_indexed,
-        pixels_gray8,
         kind: PhotoKind::LastSeen,
         display_index: None,
         physical_slot: None,
@@ -1105,19 +1113,12 @@ pub fn album_order_after_delete(
         delete[slot] = true;
     }
 
-    // Copy existing order bytes and mark deleted slots as 0xFF.
     // Do NOT renumber remaining slots: the GB Camera ROM stores display
     // positions as-is and expects them to be preserved across deletes,
     // the same way its own firmware handles album-photo deletion.
-    let mut order = [0u8; ORDER_COUNT];
-    for (slot, byte) in order.iter_mut().enumerate() {
-        *byte = if delete[slot] {
-            0xFF
-        } else {
-            current_order[slot]
-        };
-    }
-    Ok(order)
+    Ok(std::array::from_fn(|slot| {
+        if delete[slot] { 0xFF } else { current_order[slot] }
+    }))
 }
 
 /// Compute the 2-byte checksum for the 30-byte order table.
@@ -1126,13 +1127,7 @@ pub fn album_order_after_delete(
 /// - Left byte:  (0x2F + Σ order_bytes) mod 256
 /// - Right byte: 0x15 ⊕ XOR(order_bytes)
 pub fn order_table_checksum(order: &[u8; ORDER_COUNT]) -> [u8; 2] {
-    let mut sum: u8 = 0x2F;
-    let mut xor: u8 = 0x15;
-    for &b in order {
-        sum = sum.wrapping_add(b);
-        xor ^= b;
-    }
-    [sum, xor]
+    checksum_seeded(order)
 }
 
 pub fn apply_album_delete(
@@ -1166,7 +1161,7 @@ pub fn apply_album_recover(
         }
         let position = used_positions
             .iter()
-            .position(|used| !*used)
+            .position(|&used| !used)
             .ok_or(GbcamCoreError::NoFreeDisplayPosition)?;
         order[slot] = position as u8;
         used_positions[position] = true;
@@ -1220,6 +1215,9 @@ pub fn apply_album_order(
 ) -> Result<Vec<u8>, GbcamCoreError> {
     ensure_save_size(save)?;
     let checksum = order_table_checksum(order);
+    // Bottleneck: clones the full 128 KB save on every album operation.
+    // An in-place mutation API would avoid this, but callers currently diff
+    // old vs. new without keeping a separate copy.
     let mut updated = save.to_vec();
     // Primary order table + checksum
     updated[ORDER_OFFSET_PRIMARY..ORDER_OFFSET_PRIMARY + ORDER_COUNT].copy_from_slice(order);
@@ -1260,7 +1258,7 @@ pub fn write_photos_to_dir(save: &[u8], dir: &Path) -> Result<Vec<String>, Gbcam
     let mut written = Vec::with_capacity(photos.len());
     for photo in photos {
         let path = dir.join(&photo.name);
-        write_png(&path, &photo.pixels_gray8)?;
+        write_png(&path, &indexed_to_gray8(&photo.pixels_indexed))?;
         written.push(photo.name);
     }
     Ok(written)
@@ -1537,7 +1535,7 @@ mod tests {
         assert!(!photos[0].deleted);
         assert!(photos[3].deleted);
         assert_eq!(
-            &photos[0].pixels_gray8[0..8],
+            &indexed_to_gray8(&photos[0].pixels_indexed)[0..8],
             &[0, 104, 176, 255, 0, 104, 176, 255]
         );
     }
@@ -1713,7 +1711,7 @@ mod tests {
 
         assert!(report.findings.iter().any(|finding| {
             finding.severity == ValidationSeverity::Error
-                && finding.message.contains("Primary state vector checksum")
+                && finding.message.contains("primary state vector checksum")
         }));
     }
 
@@ -1816,7 +1814,7 @@ mod tests {
         let pc01 = photos.iter().find(|p| p.name == "IMG_PC01.png").unwrap();
         let expected_pixels = decode_image(&save[PHOTO_BASE..PHOTO_BASE + PHOTO_IMAGE_SIZE]);
 
-        assert_eq!(pc01.pixels_gray8, expected_pixels);
+        assert_eq!(indexed_to_gray8(&pc01.pixels_indexed), expected_pixels);
         assert!(save[PHOTO_BASE + 2..PHOTO_BASE + 0x200]
             .iter()
             .all(|b| *b == 0xF3));

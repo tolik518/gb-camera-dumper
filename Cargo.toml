@@ -2,7 +2,6 @@
 members = [
     "crates/gbcam-core",
     "crates/gbcam-usb",
-    "crates/gbcam-cli",
     "crates/gbcam-ffi",
 ]
 resolver = "2"
