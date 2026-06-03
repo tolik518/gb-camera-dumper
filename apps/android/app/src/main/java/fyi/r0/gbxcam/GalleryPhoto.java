@@ -7,6 +7,7 @@ final class GalleryPhoto {
     final int physicalSlot;
     final int width;
     final int height;
+    final byte[] indexedPixels;
     final boolean deleted;
     final int border;
     final boolean copy;
@@ -26,12 +27,13 @@ final class GalleryPhoto {
             int physicalSlot,
             int width,
             int height,
+            byte[] indexedPixels,
             boolean deleted,
             int border,
             boolean copy,
             boolean metadataValid,
             String ownerUserId) {
-        this(name, path, displayIndex, physicalSlot, width, height,
+        this(name, path, displayIndex, physicalSlot, width, height, indexedPixels,
                 deleted, border, copy, metadataValid, ownerUserId,
                 false, "", 0, -1, "");
     }
@@ -43,6 +45,7 @@ final class GalleryPhoto {
             int physicalSlot,
             int width,
             int height,
+            byte[] indexedPixels,
             boolean deleted,
             int border,
             boolean copy,
@@ -52,7 +55,7 @@ final class GalleryPhoto {
             String mergedKind,
             int mergedSourceCount,
             int mergedSourceStartDisplayIndex) {
-        this(name, path, displayIndex, physicalSlot, width, height,
+        this(name, path, displayIndex, physicalSlot, width, height, indexedPixels,
                 deleted, border, copy, metadataValid, ownerUserId,
                 mergedRgb, mergedKind, mergedSourceCount, mergedSourceStartDisplayIndex, "");
     }
@@ -64,6 +67,7 @@ final class GalleryPhoto {
             int physicalSlot,
             int width,
             int height,
+            byte[] indexedPixels,
             boolean deleted,
             int border,
             boolean copy,
@@ -80,6 +84,7 @@ final class GalleryPhoto {
         this.physicalSlot = physicalSlot;
         this.width = width;
         this.height = height;
+        this.indexedPixels = indexedPixels;
         this.deleted = deleted;
         this.border = border;
         this.copy = copy;

@@ -541,6 +541,7 @@ fn gallery_json(
             "physicalSlot": photo.physical_slot.unwrap_or(0),
             "width": photo.width,
             "height": photo.height,
+            "indexedPixels": base64_encode(&photo.pixels_indexed),
             "deleted": photo.deleted,
         });
 
@@ -575,6 +576,32 @@ fn hex_bytes(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(b2 & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+
+    out
 }
 
 fn palette_from_jint(index: jint) -> PaletteId {
@@ -670,5 +697,13 @@ mod tests {
         let label = connected_label(&info);
         assert_eq!(label, "GBxCart RW (PCB v5, OFW R4, CFW L258)");
     }
-}
 
+    #[test]
+    fn base64_encode_matches_standard_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(&[0, 1, 2, 3]), "AAECAw==");
+    }
+}

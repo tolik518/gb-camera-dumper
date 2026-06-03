@@ -229,6 +229,7 @@ final class RgbMergeDetector {
                 out.getName(), out.getAbsolutePath(),
                 source[0].displayIndex, -1,
                 IMAGE_WIDTH, IMAGE_HEIGHT,
+                null,
                 false, 0, false, true, "",
                 true, layout.label, count, source[0].displayIndex,
                 resolvedAlgorithm);

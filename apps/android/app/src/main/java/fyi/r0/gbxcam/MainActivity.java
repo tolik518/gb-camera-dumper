@@ -59,6 +59,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private GbcamOperationRunner operationRunner;
     private boolean autoLoadAttempted;
     private int paletteIndex;
+    private String[] paletteLabels;
+    private int[][] paletteColors;
     private File pendingSaveExport;
     private final ExecutorService previewExecutor = Executors.newFixedThreadPool(3);
     private final AtomicInteger recolorGeneration = new AtomicInteger(0);
@@ -95,8 +97,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         operationRunner = new GbcamOperationRunner();
         settings = new AppSettings(this);
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
-        String[] paletteLabels = paletteLabels();
-        int[][] paletteColors = paletteColors(paletteLabels.length);
+        paletteLabels = paletteLabels();
+        paletteColors = paletteColors(paletteLabels.length);
         paletteIndex = settings.paletteIndex(defaultPaletteIndex);
         paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
         screen = new MainScreen(
@@ -160,7 +162,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, settings.exportDeleted());
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(
+                    this, gallery, paletteColorsForIndex(gallery.paletteIndex), settings.exportDeleted());
             onLog("Saved " + selected + " photo(s):\n" + result.summary());
         } catch (Exception e) {
             onLog("Save failed: " + e.toString());
@@ -175,7 +178,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         int selected = gallery.selectedCount();
         try {
-            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(this, gallery, settings.exportDeleted());
+            PhotoExporter.ExportResult result = PhotoExporter.exportSelected(
+                    this, gallery, paletteColorsForIndex(gallery.paletteIndex), settings.exportDeleted());
             if (result.imageUris.isEmpty()) {
                 onLog("Share unavailable for this Android version. Saved instead:\n" + result.summary());
                 return;
@@ -335,42 +339,33 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     @Override
     public void onPalettePreview(int paletteIndex) {
-        if (screen.gallery() == null) {
-            screen.previewPaletteIndex(paletteIndex);
-            return;
-        }
-        recolorCachedGallery(paletteIndex, false);
+        screen.previewPaletteIndex(paletteIndex);
     }
 
     @Override
     public void onPalettePreviewCanceled(int paletteIndex) {
-        if (screen.gallery() == null) {
-            screen.setPaletteIndex(this.paletteIndex);
-            return;
-        }
-        recolorCachedGallery(this.paletteIndex, false);
+        screen.setPaletteIndex(this.paletteIndex);
     }
 
     @Override
     public void onPaletteChanged(int paletteIndex) {
-        this.paletteIndex = paletteIndex;
-        settings.savePaletteIndex(paletteIndex);
+        this.paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
+        settings.savePaletteIndex(this.paletteIndex);
         GalleryState current = screen.gallery();
         if (current != null) {
-            settings.rememberBackupPalette(new File(current.savePath), paletteIndex);
+            settings.rememberBackupPalette(new File(current.savePath), this.paletteIndex);
         }
-        settings.rememberRecentPalette(paletteLabels(), paletteIndex);
-        screen.setRecentPalettes(settings.recentPalettes(paletteLabels()));
-        recolorCachedGallery();
+        settings.rememberRecentPalette(paletteLabels, this.paletteIndex);
+        screen.setRecentPalettes(settings.recentPalettes(paletteLabels));
+        onLog("Palette changed: " + paletteLabel(this.paletteIndex));
     }
 
     @Override
     public void onPaletteFavoriteToggled(int paletteIndex) {
-        String[] labels = paletteLabels();
-        if (paletteIndex < 0 || paletteIndex >= labels.length) {
+        if (paletteIndex < 0 || paletteIndex >= paletteLabels.length) {
             return;
         }
-        boolean favorite = settings.togglePaletteFavorite(labels, paletteIndex);
+        boolean favorite = settings.togglePaletteFavorite(paletteLabels, paletteIndex);
         screen.setPaletteFavorite(paletteIndex, favorite);
     }
 
@@ -1005,7 +1000,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             File f = new File(dir, String.format(Locale.US, "IMG_PC%02d.png", indices[i] + 1));
             if (f.exists()) {
                 preview[i] = new GalleryPhoto(f.getName(), f.getAbsolutePath(),
-                        indices[i], indices[i], 128, 112, false, 0, false, true, "");
+                        indices[i], indices[i], 128, 112, null, false, 0, false, true, "");
             }
         }
         return preview;
@@ -1113,7 +1108,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         matParams.setMargins(0, dp(12), 0, dp(12));
 
         ImageView image = new ImageView(this);
-        image.setImageURI(Uri.fromFile(new File(photo.path)));
+        Bitmap detailBitmap = PhotoRenderer.renderBitmap(photo, paletteColorsForIndex(paletteIndex));
+        if (detailBitmap != null) {
+            image.setImageBitmap(detailBitmap);
+        } else {
+            image.setImageURI(Uri.fromFile(new File(photo.path)));
+        }
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAlpha(photo.deleted ? 0.86f : 1.0f);
@@ -1509,6 +1509,21 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             }
         }
         return colors;
+    }
+
+    private String paletteLabel(int index) {
+        if (paletteLabels == null || paletteLabels.length == 0) {
+            return "Monochrome - Grayscale";
+        }
+        return paletteLabels[Math.max(0, Math.min(index, paletteLabels.length - 1))];
+    }
+
+    private int[] paletteColorsForIndex(int index) {
+        if (paletteColors != null && index >= 0 && index < paletteColors.length
+                && paletteColors[index] != null && paletteColors[index].length > 0) {
+            return paletteColors[index];
+        }
+        return fallbackPaletteColors(1)[0];
     }
 
     private static int[][] fallbackPaletteColors(int count) {

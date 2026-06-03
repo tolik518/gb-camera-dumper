@@ -3,7 +3,6 @@ package fyi.r0.gbxcam;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -124,10 +123,12 @@ final class MainScreen {
     private final AtomicInteger displayGeneration = new AtomicInteger(0);
 
     private static final class TileHolder {
+        final GalleryPhoto photo;
         final LinearLayout tile;
         final ImageView image;
         final TextView selectionMarker;
-        TileHolder(LinearLayout tile, ImageView image, TextView selectionMarker) {
+        TileHolder(GalleryPhoto photo, LinearLayout tile, ImageView image, TextView selectionMarker) {
+            this.photo = photo;
             this.tile = tile;
             this.image = image;
             this.selectionMarker = selectionMarker;
@@ -375,8 +376,9 @@ final class MainScreen {
 
     void showGallery(GalleryState gallery) {
         this.gallery = gallery;
+        tileHolders = null;
         int gen = displayGeneration.incrementAndGet();
-        setPaletteIndex(gallery.paletteIndex);
+        setPaletteIndexOnly(gallery.paletteIndex);
         grid.removeAllViews();
         tileHolders = new TileHolder[gallery.photos.size()];
         for (int i = 0; i < gallery.photos.size(); i++) {
@@ -414,6 +416,10 @@ final class MainScreen {
         this.paletteIndex = safePaletteIndex(paletteIndex);
         this.previewPaletteIndex = -1;
         applyPaletteIndex(this.paletteIndex);
+        if (gallery != null) {
+            gallery = gallery.withPalette(this.paletteIndex, paletteLabels[this.paletteIndex]);
+            refreshGalleryPalette(this.paletteIndex);
+        }
     }
 
     void previewPaletteIndex(int paletteIndex) {
@@ -423,6 +429,13 @@ final class MainScreen {
         }
         previewPaletteIndex = index;
         applyPaletteIndex(index);
+        refreshGalleryPalette(index);
+    }
+
+    private void setPaletteIndexOnly(int paletteIndex) {
+        this.paletteIndex = safePaletteIndex(paletteIndex);
+        this.previewPaletteIndex = -1;
+        applyPaletteIndex(this.paletteIndex);
     }
 
     private void applyPaletteIndex(int paletteIndex) {
@@ -554,21 +567,7 @@ final class MainScreen {
         image.setAdjustViewBounds(false);
         image.setAlpha(photo.deleted ? 0.72f : 1.0f);
         image.setBackgroundColor(colors.photoBackground);
-        if (bitmapExecutor != null) {
-            bitmapExecutor.execute(() -> {
-                Bitmap bmp = BitmapFactory.decodeFile(photo.path);
-                if (bmp == null || displayGeneration.get() != gen) {
-                    if (bmp != null) bmp.recycle();
-                    return;
-                }
-                ((Activity) context).runOnUiThread(() -> {
-                    if (displayGeneration.get() == gen) image.setImageBitmap(bmp);
-                    else bmp.recycle();
-                });
-            });
-        } else {
-            image.setImageBitmap(BitmapFactory.decodeFile(photo.path));
-        }
+        renderPhotoInto(photo, image, gen, paletteIndex);
         imageFrame.addView(image, new FrameLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT));
@@ -627,7 +626,7 @@ final class MainScreen {
         labelBlock.addView(meta);
         tile.addView(labelBlock, matchWidthWrapContent());
 
-        return new TileHolder(tile, image, selectionMarker);
+        return new TileHolder(photo, tile, image, selectionMarker);
     }
 
     private String photoTitle(GalleryPhoto photo) {
@@ -667,10 +666,45 @@ final class MainScreen {
         holder.tile.setBackground(tileBackground(photo.selected, photo.deleted));
         holder.tile.setContentDescription(photoTitle(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
+        holder.selectionMarker.setTextColor(accentText);
         holder.selectionMarker.setText(photo.selected ? "✓" : "");
         holder.selectionMarker.setBackground(checkBackground(photo.selected));
         holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
         holder.selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+    }
+
+    private void refreshGalleryPalette(int paletteIndex) {
+        if (tileHolders == null) {
+            return;
+        }
+
+        int gen = displayGeneration.incrementAndGet();
+        for (TileHolder holder : tileHolders) {
+            if (holder == null) {
+                continue;
+            }
+            renderPhotoInto(holder.photo, holder.image, gen, paletteIndex);
+            applySelectionToTile(holder, holder.photo);
+        }
+    }
+
+    private void renderPhotoInto(GalleryPhoto photo, ImageView image, int gen, int paletteIndex) {
+        int[] palette = paletteColorsForIndex(paletteIndex);
+        if (bitmapExecutor != null) {
+            bitmapExecutor.execute(() -> {
+                Bitmap bmp = PhotoRenderer.renderBitmap(photo, palette);
+                if (bmp == null || displayGeneration.get() != gen) {
+                    if (bmp != null) bmp.recycle();
+                    return;
+                }
+                ((Activity) context).runOnUiThread(() -> {
+                    if (displayGeneration.get() == gen) image.setImageBitmap(bmp);
+                    else bmp.recycle();
+                });
+            });
+        } else {
+            image.setImageBitmap(PhotoRenderer.renderBitmap(photo, palette));
+        }
     }
 
     private GradientDrawable tileBackground(boolean selected, boolean deleted) {

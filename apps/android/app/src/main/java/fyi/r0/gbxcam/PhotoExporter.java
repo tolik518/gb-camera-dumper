@@ -40,22 +40,30 @@ final class PhotoExporter {
     }
 
     static ExportResult exportSelected(Context context, GalleryState gallery) throws IOException {
-        return exportSelected(context, gallery, true);
+        return exportSelected(context, gallery, null, true);
     }
 
     static ExportResult exportSelected(Context context, GalleryState gallery, boolean includeDeleted) throws IOException {
-        return exportPhotos(context, gallery, true, includeDeleted);
+        return exportSelected(context, gallery, null, includeDeleted);
+    }
+
+    static ExportResult exportSelected(Context context, GalleryState gallery, int[] palette, boolean includeDeleted) throws IOException {
+        return exportPhotos(context, gallery, palette, true, includeDeleted);
     }
 
     static ExportResult exportAll(Context context, GalleryState gallery) throws IOException {
-        return exportPhotos(context, gallery, false, true);
+        return exportPhotos(context, gallery, null, false, true);
     }
 
     static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly) throws IOException {
-        return exportPhotos(context, gallery, selectedOnly, true);
+        return exportPhotos(context, gallery, null, selectedOnly, true);
     }
 
     static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly, boolean includeDeleted) throws IOException {
+        return exportPhotos(context, gallery, null, selectedOnly, includeDeleted);
+    }
+
+    static ExportResult exportPhotos(Context context, GalleryState gallery, int[] palette, boolean selectedOnly, boolean includeDeleted) throws IOException {
         int count = eligiblePhotoCount(gallery, selectedOnly, includeDeleted);
         if (count == 0) {
             throw new IOException(selectedOnly ? "No exportable photos selected." : "No exportable photos.");
@@ -66,10 +74,10 @@ final class PhotoExporter {
         String imageLocation;
         ArrayList<Uri> imageUris;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            imageUris = exportImagesToMediaStore(context, gallery, album, selectedOnly, includeDeleted);
+            imageUris = exportImagesToMediaStore(context, gallery, palette, album, selectedOnly, includeDeleted);
             imageLocation = "Pictures/" + album;
         } else {
-            File output = exportImagesToAppFolder(context, gallery, album, selectedOnly, includeDeleted);
+            File output = exportImagesToAppFolder(context, gallery, palette, album, selectedOnly, includeDeleted);
             imageUris = new ArrayList<>();
             imageLocation = output.getAbsolutePath();
         }
@@ -110,6 +118,7 @@ final class PhotoExporter {
     private static ArrayList<Uri> exportImagesToMediaStore(
             Context context,
             GalleryState gallery,
+            int[] palette,
             String album,
             boolean selectedOnly,
             boolean includeDeleted) throws IOException {
@@ -136,7 +145,7 @@ final class PhotoExporter {
                     if (out == null) {
                         throw new IOException("Could not open MediaStore output: " + photo.name);
                     }
-                    copyToStream(new File(photo.path), out);
+                    writePhoto(photo, palette, out);
                 }
 
                 values.clear();
@@ -154,6 +163,7 @@ final class PhotoExporter {
     private static File exportImagesToAppFolder(
             Context context,
             GalleryState gallery,
+            int[] palette,
             String album,
             boolean selectedOnly,
             boolean includeDeleted) throws IOException {
@@ -163,7 +173,9 @@ final class PhotoExporter {
         }
         for (GalleryPhoto photo : gallery.photos) {
             if (isExportable(photo, selectedOnly, includeDeleted)) {
-                copy(new File(photo.path), new File(out, photo.name));
+                try (FileOutputStream stream = new FileOutputStream(new File(out, photo.name))) {
+                    writePhoto(photo, palette, stream);
+                }
             }
         }
         return out;
@@ -210,6 +222,13 @@ final class PhotoExporter {
         try (FileOutputStream out = new FileOutputStream(target)) {
             copyToStream(source, out);
         }
+    }
+
+    private static void writePhoto(GalleryPhoto photo, int[] palette, OutputStream out) throws IOException {
+        if (palette != null && PhotoRenderer.writePng(photo, palette, out)) {
+            return;
+        }
+        copyToStream(new File(photo.path), out);
     }
 
     private static String safeFolderName(String label) {

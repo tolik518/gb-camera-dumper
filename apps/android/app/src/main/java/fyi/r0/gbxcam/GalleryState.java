@@ -4,6 +4,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.util.Base64;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,6 +51,7 @@ final class GalleryState {
                     item.getInt("physicalSlot"),
                     item.getInt("width"),
                     item.getInt("height"),
+                    decodeIndexedPixels(item.optString("indexedPixels", "")),
                     item.optBoolean("deleted", false),
                     item.optInt("border", 0),
                     item.optBoolean("copy", false),
@@ -68,6 +71,18 @@ final class GalleryState {
                 root.optString("paletteName", "Monochrome - Grayscale"),
                 root.optInt("validationErrors", 0),
                 root.optInt("validationWarnings", 0),
+                photos);
+    }
+
+    GalleryState withPalette(int paletteIndex, String paletteName) {
+        return new GalleryState(
+                connected,
+                savePath,
+                outputDir,
+                paletteIndex,
+                paletteName,
+                validationErrors,
+                validationWarnings,
                 photos);
     }
 
@@ -182,5 +197,16 @@ final class GalleryState {
             return photo.physicalSlot == old.physicalSlot;
         }
         return photo.mergedRgb && old.mergedRgb && photo.path.equals(old.path);
+    }
+
+    private static byte[] decodeIndexedPixels(String encoded) {
+        if (encoded == null || encoded.isEmpty()) {
+            return null;
+        }
+        try {
+            return Base64.decode(encoded, Base64.DEFAULT);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 }
