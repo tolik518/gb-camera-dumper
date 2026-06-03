@@ -1,4 +1,4 @@
-# ![logo](.github/gbcam.png) GBxCAM Viewer
+# ![logo](.github/gbxcam.png) GBxCAM Viewer
 
 An Android app to view and transfer photos from the Game Boy Camera to your Android device.  
 Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewer/releases).
@@ -12,6 +12,7 @@ Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewe
 ## Screenshots
 
 ![GBxCAM Viewer screenshot](.github/screenshot-dark.png)
+![GBxCAM Viewer screenshot](.github/screenshot-light.png)
 
 ## License
 
