@@ -439,7 +439,7 @@ final class UiStyle {
         return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private static SpannableString twoLineText(String title, String description, int titleColor, int descriptionColor) {
+    static SpannableString twoLineText(String title, String description, int titleColor, int descriptionColor) {
         SpannableString text = new SpannableString(title + "\n" + description);
         text.setSpan(new ForegroundColorSpan(titleColor), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new ForegroundColorSpan(descriptionColor), title.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);

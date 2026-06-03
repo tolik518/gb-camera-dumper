@@ -338,16 +338,6 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
-    public void onPalettePreview(int paletteIndex) {
-        screen.previewPaletteIndex(paletteIndex);
-    }
-
-    @Override
-    public void onPalettePreviewCanceled(int paletteIndex) {
-        screen.setPaletteIndex(this.paletteIndex);
-    }
-
-    @Override
     public void onPaletteChanged(int paletteIndex) {
         this.paletteIndex = Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
         settings.savePaletteIndex(this.paletteIndex);
@@ -479,6 +469,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         options.addView(rgb4Row);
         options.addView(rgb3Row);
         options.addView(algoRow);
+        options.addView(settingsActionRow(
+                "Apply current palette as app icon",
+                "Updates the launcher icon to match the selected palette. The app will briefly restart.",
+                accent,
+                () -> {
+                    dialog.dismiss();
+                    new Thread(() -> PaletteIcons.applyIfChanged(
+                            MainActivity.this, paletteIndex)).start();
+                }));
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(options);
@@ -627,6 +626,43 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         } catch (Exception ignored) {
             return "?";
         }
+    }
+
+    private View settingsActionRow(String title, String description, int accentColor, Runnable action) {
+        UiStyle.Palette colors = UiStyle.palette(this);
+        android.widget.FrameLayout row = new android.widget.FrameLayout(this);
+        row.setBackground(UiStyle.rounded(this, colors.surfaceRaised, colors.border, 10, 1));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(v -> action.run());
+
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.HORIZONTAL);
+        inner.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        inner.setPadding(dp(14), dp(10), dp(10), dp(10));
+
+        android.widget.TextView text = new android.widget.TextView(this);
+        text.setText(UiStyle.twoLineText(title, description, colors.textPrimary, colors.textSecondary));
+        text.setTextSize(12);
+        inner.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        android.widget.TextView arrow = new android.widget.TextView(this);
+        arrow.setText("›");
+        arrow.setTextColor(accentColor);
+        arrow.setTextSize(22);
+        arrow.setGravity(android.view.Gravity.CENTER);
+        arrow.setPadding(dp(8), 0, dp(4), 0);
+        inner.addView(arrow);
+
+        row.addView(inner, new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(66));
+        params.setMargins(0, 0, 0, dp(6));
+        row.setLayoutParams(params);
+        return row;
     }
 
     private View settingsPickerRow(

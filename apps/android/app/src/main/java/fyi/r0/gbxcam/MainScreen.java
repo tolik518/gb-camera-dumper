@@ -10,7 +10,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -63,10 +62,6 @@ final class MainScreen {
 
         void onPhotoOpenRequested(GalleryPhoto photo);
 
-        void onPalettePreview(int paletteIndex);
-
-        void onPalettePreviewCanceled(int paletteIndex);
-
         void onPaletteChanged(int paletteIndex);
 
         void onPaletteFavoriteToggled(int paletteIndex);
@@ -112,7 +107,6 @@ final class MainScreen {
     private boolean busy;
     private boolean logsVisible;
     private int paletteIndex;
-    private int previewPaletteIndex = -1;
     private int accent;
     private int accentPressed;
     private int accentSurface;
@@ -414,7 +408,6 @@ final class MainScreen {
 
     void setPaletteIndex(int paletteIndex) {
         this.paletteIndex = safePaletteIndex(paletteIndex);
-        this.previewPaletteIndex = -1;
         applyPaletteIndex(this.paletteIndex);
         if (gallery != null) {
             gallery = gallery.withPalette(this.paletteIndex, paletteLabels[this.paletteIndex]);
@@ -422,19 +415,8 @@ final class MainScreen {
         }
     }
 
-    void previewPaletteIndex(int paletteIndex) {
-        int index = safePaletteIndex(paletteIndex);
-        if (index == previewPaletteIndex) {
-            return;
-        }
-        previewPaletteIndex = index;
-        applyPaletteIndex(index);
-        refreshGalleryPalette(index);
-    }
-
     private void setPaletteIndexOnly(int paletteIndex) {
         this.paletteIndex = safePaletteIndex(paletteIndex);
-        this.previewPaletteIndex = -1;
         applyPaletteIndex(this.paletteIndex);
     }
 
@@ -739,7 +721,6 @@ final class MainScreen {
         }
 
         int originalIndex = paletteIndex;
-        boolean[] committed = new boolean[] { false };
         int popupWidth = Math.min(dp(340), root.getWidth() - dp(72));
         LinearLayout menu = new LinearLayout(context);
         menu.setOrientation(LinearLayout.VERTICAL);
@@ -756,20 +737,14 @@ final class MainScreen {
         popup.setOutsideTouchable(true);
         popup.setElevation(dp(8));
         popup.setAnimationStyle(android.R.style.Animation);
-        popup.setOnDismissListener(() -> {
-            if (!committed[0]) {
-                listener.onPalettePreviewCanceled(originalIndex);
-            }
-        });
-
         for (int index : paletteMenuOrder()) {
-            menu.addView(paletteMenuItem(index, originalIndex, popup, committed));
+            menu.addView(paletteMenuItem(index, originalIndex, popup));
         }
 
         popup.showAsDropDown(paletteField, paletteField.getWidth() - popupWidth, dp(6));
     }
 
-    private View paletteMenuItem(int index, int originalIndex, PopupWindow popup, boolean[] committed) {
+    private View paletteMenuItem(int index, int originalIndex, PopupWindow popup) {
         boolean selected = index == paletteIndex;
         LinearLayout item = row();
         item.setGravity(Gravity.CENTER_VERTICAL);
@@ -815,14 +790,7 @@ final class MainScreen {
         });
         item.addView(star, new LinearLayout.LayoutParams(dp(64), LinearLayout.LayoutParams.MATCH_PARENT));
 
-        item.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN && index != paletteIndex) {
-                listener.onPalettePreview(index);
-            }
-            return false;
-        });
         item.setOnClickListener(v -> {
-            committed[0] = true;
             popup.dismiss();
             setPaletteIndex(index);
             if (index != originalIndex) {

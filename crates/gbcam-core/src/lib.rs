@@ -67,6 +67,21 @@ pub struct PalettePreset {
     pub colors: [[u8; 3]; 4],
 }
 
+// Single source of truth for all palettes — used by both the Rust core and the
+// Android build system.
+//
+// The Gradle task `generatePaletteIcons` (apps/android/app/build.gradle) parses
+// this array at build time to generate:
+//   • one adaptive launcher icon per palette (4-stripe background from colors[0..3])
+//   • one activity-alias per palette (for dynamic icon switching)
+//   • PaletteIcons.java (component names + apply helper)
+//
+// Formatting rules the parser relies on:
+//   • Each PalettePreset must be a single `PalettePreset { … }` block with no
+//     nested braces.
+//   • `label` must be a single-line string literal.
+//   • `colors` must contain exactly four [r, g, b] triples (light → dark).
+//   • colors[3] is used as the darkest stripe / icon accent in the launcher icon.
 pub const PALETTE_PRESETS: &[PalettePreset] = &[
     PalettePreset {
         label: "CRT - Amber",
