@@ -20,6 +20,10 @@ final class GalleryPhoto {
     final String mergedAlgorithm;
     boolean selected;
 
+    static String mergeIdentity(String kind, int sourceStartDisplayIndex, int sourceCount) {
+        return nullToEmpty(kind) + ":" + sourceStartDisplayIndex + ":" + sourceCount;
+    }
+
     GalleryPhoto(
             String name,
             String path,
@@ -95,5 +99,41 @@ final class GalleryPhoto {
         this.mergedSourceCount = mergedSourceCount;
         this.mergedSourceStartDisplayIndex = mergedSourceStartDisplayIndex;
         this.mergedAlgorithm = mergedAlgorithm;
+    }
+
+    boolean isAlbumBacked() {
+        return physicalSlot >= 0;
+    }
+
+    boolean isActiveAlbumPhoto() {
+        return !deleted && isAlbumBacked();
+    }
+
+    boolean isDeletedAlbumPhoto() {
+        return deleted && isAlbumBacked();
+    }
+
+    boolean isManualMerge() {
+        return mergedRgb && path != null && path.contains("rgb-merged-manual");
+    }
+
+    boolean isMergeableSource() {
+        return !deleted && !mergedRgb && isAlbumBacked();
+    }
+
+    String mergeIdentity() {
+        return mergeIdentity(mergedKind, mergedSourceStartDisplayIndex, mergedSourceCount);
+    }
+
+    GalleryPhoto withDeleted(boolean deleted) {
+        return new GalleryPhoto(
+                name, path, displayIndex, physicalSlot,
+                width, height, indexedPixels, deleted, border, copy,
+                metadataValid, ownerUserId, mergedRgb, mergedKind, mergedSourceCount,
+                mergedSourceStartDisplayIndex, mergedAlgorithm);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 }

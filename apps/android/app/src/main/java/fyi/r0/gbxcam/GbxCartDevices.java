@@ -3,6 +3,7 @@ package fyi.r0.gbxcam;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 
+import java.util.Locale;
 import java.util.Map;
 
 final class GbxCartDevices {
@@ -13,6 +14,9 @@ final class GbxCartDevices {
     }
 
     static UsbDevice find(UsbManager usbManager) {
+        if (usbManager == null) {
+            return null;
+        }
         for (Map.Entry<String, UsbDevice> entry : usbManager.getDeviceList().entrySet()) {
             UsbDevice device = entry.getValue();
             if (device.getVendorId() == VID_WCH && device.getProductId() == PID_CH340) {
@@ -26,7 +30,7 @@ final class GbxCartDevices {
         if (device == null) {
             return "null";
         }
-        return String.format(
+        return String.format(Locale.US,
                 "VID=0x%04X PID=0x%04X interfaces=%d deviceName=%s",
                 device.getVendorId(),
                 device.getProductId(),

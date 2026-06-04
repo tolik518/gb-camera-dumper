@@ -109,7 +109,7 @@ final class RgbMergeDetector {
             String order,
             File outputRoot,
             String defaultAlgorithm) {
-        if (count != 3 && count != 4) return null;
+        if (!hasValidSources(sources, count)) return null;
         MergeLayout layout = count == 3 ? layoutFromOrder3(order) : layoutFromOrder4(order);
         if (layout == null) return null;
         ImageData[] images = new ImageData[count];
@@ -120,10 +120,7 @@ final class RgbMergeDetector {
         File mergeDir = new File(outputRoot, "rgb-merged-manual");
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
         String resolvedAlgorithm = resolveAlgorithm(defaultAlgorithm, layout.clearIndex >= 0);
-        // Use physical slot numbers (not display indices) so the filename stays stable
-        // even when photos are deleted and the album is renumbered on reload.
-        File out = new File(mergeDir, String.format(Locale.US, "MANUAL_s%s_n%d_%s.png",
-                slotKey(sources, count), count, layout.label));
+        File out = uniqueManualMergeFile(mergeDir, sources, count, layout.label, resolvedAlgorithm);
         if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
         return new GalleryPhoto(
                 out.getName(), out.getAbsolutePath(),
@@ -168,10 +165,7 @@ final class RgbMergeDetector {
      * Safe to call from a background thread.
      */
     static Bitmap previewMerge(GalleryPhoto[] sourcePhotos, String order, int count, String algorithm) {
-        if (sourcePhotos == null || sourcePhotos.length < count) return null;
-        for (int i = 0; i < count; i++) {
-            if (sourcePhotos[i] == null) return null;
-        }
+        if (!hasValidSources(sourcePhotos, count)) return null;
         MergeLayout layout = count == 3 ? layoutFromOrder3(order) : layoutFromOrder4(order);
         if (layout == null) return null;
         ImageData[] images = new ImageData[count];
@@ -194,6 +188,9 @@ final class RgbMergeDetector {
         if (requested == null || requested.isEmpty()) {
             return hasClear ? ALGO_NORM_CLEAR_LUM : ALGO_NORM;
         }
+        if (!isAlgorithmId(requested)) {
+            return hasClear ? ALGO_NORM_CLEAR_LUM : ALGO_NORM;
+        }
         if (!hasClear) {
             if (ALGO_CLEAR_LUM.equals(requested))      return ALGO_BASIC;
             if (ALGO_NORM_CLEAR_LUM.equals(requested)) return ALGO_NORM;
@@ -210,6 +207,43 @@ final class RgbMergeDetector {
             sb.append(String.format(Locale.US, "%02d", sources[i].physicalSlot + 1));
         }
         return sb.toString();
+    }
+
+    private static File uniqueManualMergeFile(
+            File mergeDir, GalleryPhoto[] sources, int count, String order, String algorithm) {
+        // Use physical slot numbers (not display indices) so the source part stays stable
+        // even when photos are deleted and the album is renumbered on reload.
+        String base = String.format(Locale.US, "MANUAL_s%s_n%d_%s_%s",
+                slotKey(sources, count), count, order, safeFilePart(algorithm));
+        for (int attempt = 0; attempt < 100; attempt++) {
+            String suffix = Long.toString(System.currentTimeMillis(), 36)
+                    + "-" + Long.toString(System.nanoTime(), 36);
+            if (attempt > 0) suffix += "-" + attempt;
+            File out = new File(mergeDir, base + "_" + suffix + ".png");
+            if (!out.exists()) return out;
+        }
+        return new File(mergeDir, base + "_" + System.nanoTime() + ".png");
+    }
+
+    private static String safeFilePart(String value) {
+        if (value == null || value.isEmpty()) return "merge";
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private static boolean hasValidSources(GalleryPhoto[] sources, int count) {
+        if (count != 3 && count != 4) return false;
+        if (sources == null || sources.length < count) return false;
+        for (int i = 0; i < count; i++) {
+            if (sources[i] == null) return false;
+        }
+        return true;
+    }
+
+    private static boolean isAlgorithmId(String requested) {
+        for (String id : ALGORITHM_IDS) {
+            if (id.equals(requested)) return true;
+        }
+        return false;
     }
 
     private static void deleteOldMergedFiles(File mergeDir) {
@@ -237,6 +271,7 @@ final class RgbMergeDetector {
                     || photo.displayIndex != photos.get(start).displayIndex + offset) {
                 return null;
             }
+            if (start + offset >= sourcePhotos.size()) return null;
             source[offset] = photo;
             images[offset] = ImageData.from(sourcePhotos.get(start + offset));
             if (images[offset] == null) return null;
@@ -255,7 +290,7 @@ final class RgbMergeDetector {
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
 
         // Resolve algorithm
-        String identity = layout.label + ":" + source[0].displayIndex + ":" + count;
+        String identity = GalleryPhoto.mergeIdentity(layout.label, source[0].displayIndex, count);
         String requested = (algorithmOverrides != null && algorithmOverrides.containsKey(identity))
                 ? algorithmOverrides.get(identity)
                 : defaultAlgorithm;
@@ -347,12 +382,11 @@ final class RgbMergeDetector {
         Bitmap merged = Bitmap.createBitmap(IMAGE_WIDTH, IMAGE_HEIGHT, Bitmap.Config.ARGB_8888);
         merged.setPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
         try (FileOutputStream stream = new FileOutputStream(out)) {
-            boolean ok = merged.compress(Bitmap.CompressFormat.PNG, 100, stream);
-            merged.recycle();
-            return ok;
+            return merged.compress(Bitmap.CompressFormat.PNG, 100, stream);
         } catch (Exception e) {
-            merged.recycle();
             return false;
+        } finally {
+            merged.recycle();
         }
     }
 
@@ -578,21 +612,24 @@ final class RgbMergeDetector {
             Bitmap bitmap = BitmapFactory.decodeFile(photo.path);
             if (bitmap == null) return null;
             Bitmap scaled = bitmap;
-            if (bitmap.getWidth() != IMAGE_WIDTH || bitmap.getHeight() != IMAGE_HEIGHT) {
-                scaled = Bitmap.createScaledBitmap(bitmap, IMAGE_WIDTH, IMAGE_HEIGHT, true);
+            try {
+                if (bitmap.getWidth() != IMAGE_WIDTH || bitmap.getHeight() != IMAGE_HEIGHT) {
+                    scaled = Bitmap.createScaledBitmap(bitmap, IMAGE_WIDTH, IMAGE_HEIGHT, true);
+                }
+                int[] pixels = new int[IMAGE_WIDTH * IMAGE_HEIGHT];
+                scaled.getPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
+                int[] gray = new int[pixels.length];
+                for (int i = 0; i < pixels.length; i++) {
+                    int c = pixels[i];
+                    gray[i] = Math.round(0.299f * ((c >> 16) & 0xFF)
+                            + 0.587f * ((c >> 8) & 0xFF)
+                            + 0.114f * (c & 0xFF));
+                }
+                return new ImageData(gray, blur(gray), pHash(gray), dHash(gray));
+            } finally {
+                if (scaled != bitmap) scaled.recycle();
+                bitmap.recycle();
             }
-            int[] pixels = new int[IMAGE_WIDTH * IMAGE_HEIGHT];
-            scaled.getPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
-            int[] gray = new int[pixels.length];
-            for (int i = 0; i < pixels.length; i++) {
-                int c = pixels[i];
-                gray[i] = Math.round(0.299f * ((c >> 16) & 0xFF)
-                        + 0.587f * ((c >> 8) & 0xFF)
-                        + 0.114f * (c & 0xFF));
-            }
-            if (scaled != bitmap) scaled.recycle();
-            bitmap.recycle();
-            return new ImageData(gray, blur(gray), pHash(gray), dHash(gray));
         }
     }
 

@@ -24,6 +24,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -123,6 +124,7 @@ final class MainScreen {
     private int accentText;
 
     private boolean showMeta = true;
+    private boolean reserveCaptionSpace;
     private Executor bitmapExecutor;
     private TileHolder[] tileHolders;
     private final AtomicInteger displayGeneration = new AtomicInteger(0);
@@ -132,13 +134,14 @@ final class MainScreen {
         final LinearLayout tile;
         final ImageView image;
         final TextView selectionMarker;
-        final TextView meta;
-        TileHolder(GalleryPhoto photo, LinearLayout tile, ImageView image, TextView selectionMarker, TextView meta) {
+        final LinearLayout captionBlock;
+        TileHolder(GalleryPhoto photo, LinearLayout tile, ImageView image, TextView selectionMarker,
+                   LinearLayout captionBlock) {
             this.photo = photo;
             this.tile = tile;
             this.image = image;
             this.selectionMarker = selectionMarker;
-            this.meta = meta;
+            this.captionBlock = captionBlock;
         }
     }
 
@@ -361,6 +364,7 @@ final class MainScreen {
         int gen = displayGeneration.incrementAndGet();
         setPaletteIndexOnly(gallery.paletteIndex);
         grid.removeAllViews();
+        reserveCaptionSpace = hasAnyPhotoMeta(gallery);
         tileHolders = new TileHolder[gallery.photos.size()];
         for (int i = 0; i < gallery.photos.size(); i++) {
             GalleryPhoto photo = gallery.photos.get(i);
@@ -630,10 +634,11 @@ final class MainScreen {
 
     void setShowMeta(boolean show) {
         showMeta = show;
-        if (tileHolders == null) return;
-        int vis = show ? View.VISIBLE : View.GONE;
+        if (tileHolders == null) {
+            return;
+        }
         for (TileHolder holder : tileHolders) {
-            if (holder != null && holder.meta != null) holder.meta.setVisibility(vis);
+            applyCaptionVisibility(holder);
         }
     }
 
@@ -679,10 +684,9 @@ final class MainScreen {
         int selected = gallery == null ? 0 : gallery.selectedCount();
         int selectedActive = gallery == null ? 0 : gallery.selectedActiveCount();
         int selectedDeleted = gallery == null ? 0 : gallery.selectedDeletedCount();
-        int selectedDeletedManuals = gallery == null ? 0 : gallery.selectedDeletedManualMergeCount();
         int selectedManualMerges = gallery == null ? 0 : gallery.selectedManualMergeCount();
         boolean showDelete = selectedActive > 0 || selectedManualMerges > 0;
-        boolean showRecover = selectedDeleted > 0 || selectedDeletedManuals > 0;
+        boolean showRecover = selectedDeleted > 0;
         int total = gallery == null ? 0 : gallery.photos.size();
 
         loadButton.setEnabled(!busy);
@@ -739,7 +743,7 @@ final class MainScreen {
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(6));
         tile.setBackground(tileBackground(photo.selected, photo.deleted));
-        tile.setContentDescription(photoTitle(photo)
+        tile.setContentDescription(photoAccessibilityLabel(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
 
         View.OnClickListener tileClick = v -> {
@@ -809,34 +813,17 @@ final class MainScreen {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout labelBlock = new LinearLayout(context);
-        labelBlock.setOrientation(LinearLayout.VERTICAL);
-        labelBlock.setGravity(Gravity.CENTER_VERTICAL);
-        labelBlock.setPadding(dp(4), dp(7), dp(4), 0);
-        labelBlock.setOnClickListener(tileClick);
-        TextView label = new TextView(context);
-        label.setText(photoTitle(photo));
-        label.setTextColor(colors.textPrimary);
-        label.setTextSize(12);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
-        TextView meta = new TextView(context);
-        meta.setText(photoMeta(photo));
-        meta.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f) : colors.textMuted);
-        meta.setTextSize(10);
-        meta.setIncludeFontPadding(false);
-        meta.setVisibility(showMeta ? View.VISIBLE : View.GONE);
-        labelBlock.addView(label);
-        labelBlock.addView(meta);
-        tile.addView(labelBlock, matchWidthWrapContent());
+        LinearLayout captionBlock = captionBlock(photo, tileClick);
+        tile.addView(captionBlock, matchWidthWrapContent());
 
-        return new TileHolder(photo, tile, image, selectionMarker, meta);
+        return new TileHolder(photo, tile, image, selectionMarker, captionBlock);
     }
 
     private String photoTitle(GalleryPhoto photo) {
         if (photo.mergedRgb) {
             return (photo.deleted ? "Deleted " : "Merged ") + mergedKindLabel(photo);
         }
-        return (photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1);
+        return (photo.deleted ? "Deleted " : "Photo ") + String.format(Locale.US, "%02d", photo.displayIndex + 1);
     }
 
     private String mergedKindLabel(GalleryPhoto photo) {
@@ -846,15 +833,86 @@ final class MainScreen {
     private String photoMeta(GalleryPhoto photo) {
         if (photo.mergedRgb) {
             if (photo.deleted) return "Deleted merge · recoverable";
-            boolean manual = photo.path.contains("rgb-merged-manual");
-            String prefix = manual ? "Manual merge" : "Auto-merged";
-            int start = photo.mergedSourceStartDisplayIndex + 1;
-            int end = start + Math.max(0, photo.mergedSourceCount - 1);
-            return photo.mergedSourceCount > 0
-                    ? prefix + " " + String.format("%02d-%02d", start, end)
-                    : prefix;
+            String prefix = photo.isManualMerge() ? "Manual" : "Auto";
+            StringBuilder meta = new StringBuilder(prefix);
+            if (photo.mergedAlgorithm != null && !photo.mergedAlgorithm.isEmpty()) {
+                meta.append(' ').append(compactAlgorithmLabel(photo.mergedAlgorithm));
+            }
+            if (photo.mergedSourceCount > 0) {
+                meta.append(' ').append(mergedSourceRange(photo));
+            }
+            return meta.toString();
         }
-        return photo.deleted ? "Recoverable slot " + (photo.physicalSlot + 1) : "Slot " + (photo.physicalSlot + 1);
+        return photo.deleted ? "Recoverable" : "";
+    }
+
+    private boolean hasAnyPhotoMeta(GalleryState gallery) {
+        for (GalleryPhoto photo : gallery.photos) {
+            if (!photoMeta(photo).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private LinearLayout captionBlock(GalleryPhoto photo, View.OnClickListener tileClick) {
+        LinearLayout block = new LinearLayout(context);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setGravity(Gravity.CENTER_VERTICAL);
+        block.setPadding(dp(4), dp(6), dp(4), 0);
+        block.setOnClickListener(tileClick);
+
+        TextView caption = new TextView(context);
+        caption.setText(photoMeta(photo));
+        caption.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f)
+                : photo.mergedRgb ? colors.textPrimary : colors.textMuted);
+        caption.setTextSize(10);
+        caption.setIncludeFontPadding(false);
+        caption.setSingleLine(true);
+        caption.setEllipsize(TextUtils.TruncateAt.END);
+        caption.setMinHeight(dp(13));
+        block.addView(caption);
+
+        block.setVisibility(captionVisibility());
+        return block;
+    }
+
+    private void applyCaptionVisibility(TileHolder holder) {
+        if (holder == null || holder.captionBlock == null) {
+            return;
+        }
+        holder.captionBlock.setVisibility(captionVisibility());
+    }
+
+    private int captionVisibility() {
+        return showMeta && reserveCaptionSpace ? View.VISIBLE : View.GONE;
+    }
+
+    private String photoAccessibilityLabel(GalleryPhoto photo) {
+        StringBuilder label = new StringBuilder(photoTitle(photo));
+        if (photo.mergedRgb) {
+            String meta = photoMeta(photo);
+            if (!meta.isEmpty()) label.append(", ").append(meta);
+        } else if (photo.isAlbumBacked()) {
+            label.append(", slot ").append(photo.physicalSlot + 1);
+        }
+        return label.toString();
+    }
+
+    private String mergedSourceRange(GalleryPhoto photo) {
+        int start = photo.mergedSourceStartDisplayIndex + 1;
+        int end = start + Math.max(0, photo.mergedSourceCount - 1);
+        return String.format(Locale.US, "%02d-%02d", start, end);
+    }
+
+    private String compactAlgorithmLabel(String id) {
+        if (RgbMergeDetector.ALGO_BASIC.equals(id)) return "Basic";
+        if (RgbMergeDetector.ALGO_CLEAR_LUM.equals(id)) return "Clear";
+        if (RgbMergeDetector.ALGO_NORM.equals(id)) return "Norm";
+        if (RgbMergeDetector.ALGO_NORM_CLEAR_LUM.equals(id)) return "N+Clr";
+        if (RgbMergeDetector.ALGO_SAT_BOOST.equals(id)) return "Sat";
+        if (RgbMergeDetector.ALGO_ADAPTIVE.equals(id)) return "Adapt";
+        return id;
     }
 
     private void togglePhotoSelection(GalleryPhoto photo) {
@@ -874,7 +932,7 @@ final class MainScreen {
 
     private void applySelectionToTile(TileHolder holder, GalleryPhoto photo) {
         holder.tile.setBackground(tileBackground(photo.selected, photo.deleted));
-        holder.tile.setContentDescription(photoTitle(photo)
+        holder.tile.setContentDescription(photoAccessibilityLabel(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
         holder.selectionMarker.setTextColor(accentText);
         holder.selectionMarker.setText(photo.selected ? "✓" : "");

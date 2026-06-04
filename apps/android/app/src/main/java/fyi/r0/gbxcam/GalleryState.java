@@ -99,17 +99,7 @@ final class GalleryState {
     int selectedManualMergeCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && !photo.deleted && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    int selectedDeletedManualMergeCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.deleted && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
+            if (photo.selected && photo.isManualMerge()) {
                 count++;
             }
         }
@@ -119,7 +109,7 @@ final class GalleryState {
     int selectedMergeableCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && !photo.deleted && !photo.mergedRgb && photo.physicalSlot >= 0) {
+            if (photo.selected && photo.isMergeableSource()) {
                 count++;
             }
         }
@@ -129,7 +119,7 @@ final class GalleryState {
     int selectedActiveCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && isAlbumBackedActive(photo)) {
+            if (photo.selected && photo.isActiveAlbumPhoto()) {
                 count++;
             }
         }
@@ -139,31 +129,17 @@ final class GalleryState {
     int selectedDeletedCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.deleted && photo.physicalSlot >= 0) {
+            if (photo.selected && photo.isDeletedAlbumPhoto()) {
                 count++;
             }
         }
         return count;
     }
 
-    String selectedPhysicalSlotsCsv() {
-        StringBuilder csv = new StringBuilder();
-        for (GalleryPhoto photo : photos) {
-            if (!photo.selected) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-        return csv.toString();
-    }
-
     String selectedPhysicalSlotsCsv(boolean deleted) {
         StringBuilder csv = new StringBuilder();
         for (GalleryPhoto photo : photos) {
-            if (!photo.selected || photo.deleted != deleted || photo.physicalSlot < 0) {
+            if (!photo.selected || photo.deleted != deleted || !photo.isAlbumBacked()) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -177,7 +153,7 @@ final class GalleryState {
     String activePhysicalSlotsCsv() {
         StringBuilder csv = new StringBuilder();
         for (GalleryPhoto photo : photos) {
-            if (photo.deleted || photo.physicalSlot < 0) {
+            if (!photo.isActiveAlbumPhoto()) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -197,7 +173,7 @@ final class GalleryState {
 
     private void appendActiveSlots(StringBuilder csv, boolean selected) {
         for (GalleryPhoto photo : photos) {
-            if (photo.deleted || photo.physicalSlot < 0 || photo.selected != selected) {
+            if (!photo.isActiveAlbumPhoto() || photo.selected != selected) {
                 continue;
             }
             if (csv.length() > 0) {
@@ -218,12 +194,8 @@ final class GalleryState {
         }
     }
 
-    private static boolean isAlbumBackedActive(GalleryPhoto photo) {
-        return !photo.deleted && photo.physicalSlot >= 0;
-    }
-
     private static boolean sameSelectionIdentity(GalleryPhoto photo, GalleryPhoto old) {
-        if (photo.physicalSlot >= 0 && old.physicalSlot >= 0) {
+        if (photo.isAlbumBacked() && old.isAlbumBacked()) {
             return photo.physicalSlot == old.physicalSlot;
         }
         return photo.mergedRgb && old.mergedRgb && photo.path.equals(old.path);

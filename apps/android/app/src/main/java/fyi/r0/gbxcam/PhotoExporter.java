@@ -21,6 +21,11 @@ import java.util.Date;
 import java.util.Locale;
 
 final class PhotoExporter {
+    private static final int BUFFER_SIZE = 8192;
+    private static final String BACKUP_SAVE_NAME = "GAMEBOYCAMERA.sav";
+    private static final String IMAGE_MIME_PNG = "image/png";
+    private static final String IMAGE_MIME_JPEG = "image/jpeg";
+
     private PhotoExporter() {
     }
 
@@ -28,11 +33,13 @@ final class PhotoExporter {
         final String imageLocation;
         final String backupLocation;
         final ArrayList<Uri> imageUris;
+        final int imageCount;
 
-        ExportResult(String imageLocation, String backupLocation, ArrayList<Uri> imageUris) {
+        ExportResult(String imageLocation, String backupLocation, ArrayList<Uri> imageUris, int imageCount) {
             this.imageLocation = imageLocation;
             this.backupLocation = backupLocation;
             this.imageUris = imageUris;
+            this.imageCount = imageCount;
         }
 
         String summary() {
@@ -70,8 +77,8 @@ final class PhotoExporter {
             throw new IOException(selectedOnly ? "No exportable photos selected." : "No exportable photos.");
         }
 
-        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        String album = "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
+        String stamp = timestamp();
+        String album = albumPath(gallery, stamp);
         String imageLocation;
         ArrayList<Uri> imageUris;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -84,8 +91,8 @@ final class PhotoExporter {
         }
 
         File backupDir = appExportDir(context, stamp);
-        copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
-        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris);
+        copyFile(new File(gallery.savePath), new File(backupDir, BACKUP_SAVE_NAME));
+        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris, count);
     }
 
     /**
@@ -101,23 +108,24 @@ final class PhotoExporter {
         int count = eligiblePhotoCount(gallery, true, includeDeleted);
         if (count == 0) throw new IOException("No exportable photos selected.");
 
-        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        String album = "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
+        int safeScale = Math.max(1, scale);
+        String stamp = timestamp();
+        String album = albumPath(gallery, stamp);
         String imageLocation;
         ArrayList<Uri> imageUris;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            imageUris = exportScaledToMediaStore(context, gallery, palette, album, includeDeleted, scale);
+            imageUris = exportScaledToMediaStore(context, gallery, palette, album, includeDeleted, safeScale);
             imageLocation = "Pictures/" + album;
         } else {
-            File output = exportScaledToAppFolder(context, gallery, palette, album, includeDeleted, scale);
+            File output = exportScaledToAppFolder(context, gallery, palette, album, includeDeleted, safeScale);
             imageUris = new ArrayList<>();
             imageLocation = output.getAbsolutePath();
         }
 
         File backupDir = appExportDir(context, stamp);
-        copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
-        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris);
+        copyFile(new File(gallery.savePath), new File(backupDir, BACKUP_SAVE_NAME));
+        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris, count);
     }
 
     private static ArrayList<Uri> exportScaledToMediaStore(
@@ -127,10 +135,10 @@ final class PhotoExporter {
         ArrayList<Uri> uris = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
             if (!isExportable(photo, true, includeDeleted)) continue;
-            String jpegName = photo.name.replaceFirst("\\.png$", ".jpg");
+            String jpegName = jpegName(photo.name);
             ContentValues values = new ContentValues();
             values.put(MediaStore.Images.Media.DISPLAY_NAME, jpegName);
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.MIME_TYPE, IMAGE_MIME_JPEG);
             values.put(MediaStore.Images.Media.RELATIVE_PATH,
                     Environment.DIRECTORY_PICTURES + "/" + album);
             values.put(MediaStore.Images.Media.IS_PENDING, 1);
@@ -157,11 +165,11 @@ final class PhotoExporter {
     private static File exportScaledToAppFolder(
             Context context, GalleryState gallery, int[] palette,
             String album, boolean includeDeleted, int scale) throws IOException {
-        File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
-        if (!out.mkdirs() && !out.isDirectory()) throw new IOException("Cannot create dir: " + out);
+        File out = ensureDir(new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
+                "Cannot create dir");
         for (GalleryPhoto photo : gallery.photos) {
             if (!isExportable(photo, true, includeDeleted)) continue;
-            String jpegName = photo.name.replaceFirst("\\.png$", ".jpg");
+            String jpegName = jpegName(photo.name);
             try (FileOutputStream stream = new FileOutputStream(new File(out, jpegName))) {
                 writeScaledJpeg(photo, palette, scale, stream);
             }
@@ -189,7 +197,7 @@ final class PhotoExporter {
     }
 
     static void copyToStream(File source, OutputStream out) throws IOException {
-        byte[] buffer = new byte[8192];
+        byte[] buffer = new byte[BUFFER_SIZE];
         try (FileInputStream in = new FileInputStream(source)) {
             int read;
             while ((read = in.read(buffer)) != -1) {
@@ -209,7 +217,7 @@ final class PhotoExporter {
     }
 
     static void copyStream(InputStream in, OutputStream out) throws IOException {
-        byte[] buffer = new byte[8192];
+        byte[] buffer = new byte[BUFFER_SIZE];
         int read;
         while ((read = in.read(buffer)) != -1) {
             out.write(buffer, 0, read);
@@ -232,7 +240,7 @@ final class PhotoExporter {
 
             ContentValues values = new ContentValues();
             values.put(MediaStore.Images.Media.DISPLAY_NAME, photo.name);
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            values.put(MediaStore.Images.Media.MIME_TYPE, IMAGE_MIME_PNG);
             values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/" + album);
             values.put(MediaStore.Images.Media.IS_PENDING, 1);
 
@@ -268,10 +276,8 @@ final class PhotoExporter {
             String album,
             boolean selectedOnly,
             boolean includeDeleted) throws IOException {
-        File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
-        if (!out.mkdirs() && !out.isDirectory()) {
-            throw new IOException("Could not create export directory: " + out);
-        }
+        File out = ensureDir(new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
+                "Could not create export directory");
         for (GalleryPhoto photo : gallery.photos) {
             if (isExportable(photo, selectedOnly, includeDeleted)) {
                 try (FileOutputStream stream = new FileOutputStream(new File(out, photo.name))) {
@@ -301,11 +307,7 @@ final class PhotoExporter {
 
     private static File appExportDir(Context context, String stamp) throws IOException {
         File root = new File(appFilesDir(context, null), "exports");
-        File out = new File(root, "gbxcam-" + stamp);
-        if (!out.mkdirs() && !out.isDirectory()) {
-            throw new IOException("Could not create backup directory: " + out);
-        }
-        return out;
+        return ensureDir(new File(root, "gbxcam-" + stamp), "Could not create backup directory");
     }
 
     private static File appFilesDir(Context context, String type) {
@@ -319,12 +321,6 @@ final class PhotoExporter {
         return new File(context.getFilesDir(), type);
     }
 
-    private static void copy(File source, File target) throws IOException {
-        try (FileOutputStream out = new FileOutputStream(target)) {
-            copyToStream(source, out);
-        }
-    }
-
     private static void writePhoto(GalleryPhoto photo, int[] palette, OutputStream out) throws IOException {
         if (palette != null && PhotoRenderer.writePng(photo, palette, out)) {
             return;
@@ -333,6 +329,28 @@ final class PhotoExporter {
     }
 
     private static String safeFolderName(String label) {
-        return label.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
+        String safe = label == null ? "" : label.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
+        return safe.isEmpty() ? "Palette" : safe;
+    }
+
+    private static String timestamp() {
+        return new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
+    }
+
+    private static String albumPath(GalleryState gallery, String stamp) {
+        return "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
+    }
+
+    private static File ensureDir(File dir, String errorPrefix) throws IOException {
+        if (!dir.mkdirs() && !dir.isDirectory()) {
+            throw new IOException(errorPrefix + ": " + dir);
+        }
+        return dir;
+    }
+
+    private static String jpegName(String name) {
+        String base = name == null || name.isEmpty() ? "photo.png" : name;
+        String converted = base.replaceFirst("(?i)\\.png$", ".jpg");
+        return converted.equals(base) ? base + ".jpg" : converted;
     }
 }

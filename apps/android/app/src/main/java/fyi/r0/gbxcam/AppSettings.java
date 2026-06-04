@@ -109,15 +109,18 @@ final class AppSettings {
     }
 
     String rgb4Order() {
-        return prefs.getString(KEY_RGB4_ORDER, DEFAULT_RGB4_ORDER);
+        return validChoice(prefs.getString(KEY_RGB4_ORDER, DEFAULT_RGB4_ORDER),
+                RGB4_ORDERS, DEFAULT_RGB4_ORDER);
     }
 
     String rgb3Order() {
-        return prefs.getString(KEY_RGB3_ORDER, DEFAULT_RGB3_ORDER);
+        return validChoice(prefs.getString(KEY_RGB3_ORDER, DEFAULT_RGB3_ORDER),
+                RGB3_ORDERS, DEFAULT_RGB3_ORDER);
     }
 
     String mergeAlgorithm() {
-        return prefs.getString(KEY_DEFAULT_MERGE_ALGO, RgbMergeDetector.ALGO_NORM_CLEAR_LUM);
+        return validChoice(prefs.getString(KEY_DEFAULT_MERGE_ALGO, RgbMergeDetector.ALGO_NORM_CLEAR_LUM),
+                RgbMergeDetector.ALGORITHM_IDS, RgbMergeDetector.ALGO_NORM_CLEAR_LUM);
     }
 
     void saveSettings(boolean autoLoad, boolean loadCache, boolean showLogs,
@@ -130,14 +133,17 @@ final class AppSettings {
                 .putBoolean(KEY_CONFIRM_ALBUM_WRITES, confirmAlbumWrites)
                 .putBoolean(KEY_EXPORT_DELETED_PHOTOS, exportDeleted)
                 .putBoolean(KEY_AUTO_RGB_MERGE, autoRgbMerge)
-                .putString(KEY_RGB4_ORDER, rgb4Order)
-                .putString(KEY_RGB3_ORDER, rgb3Order)
-                .putString(KEY_DEFAULT_MERGE_ALGO, mergeAlgorithm)
+                .putString(KEY_RGB4_ORDER, validChoice(rgb4Order, RGB4_ORDERS, DEFAULT_RGB4_ORDER))
+                .putString(KEY_RGB3_ORDER, validChoice(rgb3Order, RGB3_ORDERS, DEFAULT_RGB3_ORDER))
+                .putString(KEY_DEFAULT_MERGE_ALGO, validChoice(
+                        mergeAlgorithm,
+                        RgbMergeDetector.ALGORITHM_IDS,
+                        RgbMergeDetector.ALGO_NORM_CLEAR_LUM))
                 .apply();
     }
 
     Set<String> locallyDeletedSlots() {
-        return prefs.getStringSet(KEY_LOCALLY_DELETED_SLOTS, new HashSet<>());
+        return new HashSet<>(prefs.getStringSet(KEY_LOCALLY_DELETED_SLOTS, new HashSet<>()));
     }
 
     void addLocallyDeletedSlots(Set<String> slots) {
@@ -168,12 +174,13 @@ final class AppSettings {
     }
 
     void saveMergeAlgorithmOverride(GalleryPhoto photo, String algorithm) {
-        String identity = photo.mergedKind + ":" + photo.mergedSourceStartDisplayIndex + ":" + photo.mergedSourceCount;
-        prefs.edit().putString(KEY_MERGE_ALGO_OVERRIDE_PREFIX + identity, algorithm).apply();
+        prefs.edit().putString(KEY_MERGE_ALGO_OVERRIDE_PREFIX + photo.mergeIdentity(),
+                validChoice(algorithm, RgbMergeDetector.ALGORITHM_IDS, mergeAlgorithm())).apply();
     }
 
     boolean[] paletteFavorites(String[] labels) {
-        Set<String> favorites = prefs.getStringSet(KEY_PALETTE_FAVORITES, new HashSet<>());
+        Set<String> favorites = new HashSet<>(
+                prefs.getStringSet(KEY_PALETTE_FAVORITES, new HashSet<>()));
         boolean[] result = new boolean[labels.length];
         for (int i = 0; i < labels.length; i++) {
             result[i] = favorites.contains(labels[i]);
@@ -262,5 +269,16 @@ final class AppSettings {
                 + save.lastModified()
                 + ":"
                 + save.length();
+    }
+
+    private static String validChoice(String value, String[] valid, String fallback) {
+        if (value != null) {
+            for (String option : valid) {
+                if (option.equals(value)) {
+                    return value;
+                }
+            }
+        }
+        return fallback;
     }
 }
