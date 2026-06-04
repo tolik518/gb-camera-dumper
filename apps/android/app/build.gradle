@@ -52,7 +52,7 @@ tasks.register("generatePaletteIcons") {
 
     doLast {
         def outDir = paletteIconsDir.get().asFile
-        def defaultPaletteIndex = 3
+        def defaultPaletteIndex = 1
 
         def presets = parsePalettePresets()
         if (presets.isEmpty()) throw new Exception("No PalettePreset entries found in Rust source.")

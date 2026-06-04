@@ -24,10 +24,12 @@ final class AppSettings {
     private static final String KEY_CONFIRM_ALBUM_WRITES = "confirm-album-writes";
     private static final String KEY_EXPORT_DELETED_PHOTOS = "export-deleted-photos";
     private static final String KEY_AUTO_RGB_MERGE = "auto-rgb-merge";
+    private static final String KEY_SHOW_STARTUP_POPUP = "show-startup-popup";
     private static final String KEY_RGB4_ORDER = "rgb4-order";
     private static final String KEY_RGB3_ORDER = "rgb3-order";
     private static final String KEY_DEFAULT_MERGE_ALGO = "default-merge-algo";
     private static final String KEY_MERGE_ALGO_OVERRIDE_PREFIX = "merge-algo-override:";
+    private static final String KEY_LOCALLY_DELETED_SLOTS = "locally-deleted-slots";
 
     static final String DEFAULT_RGB4_ORDER = "CRGB";
     static final String DEFAULT_RGB3_ORDER = "RGB";
@@ -57,7 +59,7 @@ final class AppSettings {
     }
 
     boolean autoLoad() {
-        return prefs.getBoolean(KEY_AUTO_LOAD_CAMERA, true);
+        return prefs.getBoolean(KEY_AUTO_LOAD_CAMERA, false);
     }
 
     boolean loadCache() {
@@ -78,6 +80,14 @@ final class AppSettings {
 
     boolean autoRgbMerge() {
         return prefs.getBoolean(KEY_AUTO_RGB_MERGE, true);
+    }
+
+    boolean showStartupPopup() {
+        return prefs.getBoolean(KEY_SHOW_STARTUP_POPUP, true);
+    }
+
+    void saveShowStartupPopup(boolean show) {
+        prefs.edit().putBoolean(KEY_SHOW_STARTUP_POPUP, show).apply();
     }
 
     String rgb4Order() {
@@ -106,6 +116,20 @@ final class AppSettings {
                 .putString(KEY_RGB3_ORDER, rgb3Order)
                 .putString(KEY_DEFAULT_MERGE_ALGO, mergeAlgorithm)
                 .apply();
+    }
+
+    Set<String> locallyDeletedSlots() {
+        return prefs.getStringSet(KEY_LOCALLY_DELETED_SLOTS, new HashSet<>());
+    }
+
+    void addLocallyDeletedSlots(Set<String> slots) {
+        Set<String> existing = new HashSet<>(locallyDeletedSlots());
+        existing.addAll(slots);
+        prefs.edit().putStringSet(KEY_LOCALLY_DELETED_SLOTS, existing).apply();
+    }
+
+    void clearLocallyDeletedSlots() {
+        prefs.edit().remove(KEY_LOCALLY_DELETED_SLOTS).apply();
     }
 
     Map<String, String> mergeAlgorithmOverrides() {

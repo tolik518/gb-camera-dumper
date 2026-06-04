@@ -18,7 +18,6 @@ import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
-import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -28,6 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 final class MainScreen {
     interface Listener {
+        void onManualMergeRequested();
+
         void onLoadRequested();
 
         void onSelectAllRequested();
@@ -80,7 +81,6 @@ final class MainScreen {
     private final TextView empty;
     private final TextView logs;
     private final TextView logTitle;
-    private final ProgressBar progress;
     private final GridLayout grid;
     private final LinearLayout loadingRow;
     private final ScrollView logScroll;
@@ -89,23 +89,22 @@ final class MainScreen {
     private final TextView paletteValue;
     private final Button loadButton;
     private final Button selectAllButton;
+    private final Button selectModeButton;
     private final Button deselectAllButton;
     private final Button saveButton;
     private final Button shareButton;
-    private final Button backupsButton;
-    private final Button importSaveButton;
-    private final Button exportSaveButton;
-    private final Button aboutButton;
     private final Button settingsButton;
     private final Button deleteButton;
     private final Button recoverButton;
     private final Button moveFirstButton;
     private final Button compactButton;
     private final Button clearAlbumButton;
+    private final Button mergeButton;
 
     private GalleryState gallery;
     private boolean busy;
     private boolean logsVisible;
+    private boolean selectMode;
     private int paletteIndex;
     private int accent;
     private int accentPressed;
@@ -157,9 +156,9 @@ final class MainScreen {
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(colors.textPrimary);
-        title.setContentDescription("Toggle logs");
-        title.setOnClickListener(v -> toggleLogs());
-        titleBlock.setOnClickListener(v -> toggleLogs());
+        title.setContentDescription("About");
+        title.setOnClickListener(v -> listener.onAboutRequested());
+        titleBlock.setOnClickListener(v -> listener.onAboutRequested());
         titleBlock.setClickable(true);
         subtitle = new TextView(context);
         subtitle.setText("Load the camera to view photos.");
@@ -178,14 +177,20 @@ final class MainScreen {
                 dp(136),
                 dp(44));
         loadParams.setMargins(dp(14), 0, 0, 0);
+        settingsButton = smallButton("⚙", v -> listener.onSettingsRequested());
+        settingsButton.setTextSize(18);
+        settingsButton.setContentDescription("Settings");
+        LinearLayout.LayoutParams settingsHeaderParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        settingsHeaderParams.setMargins(dp(8), 0, 0, 0);
+        header.addView(settingsButton, settingsHeaderParams);
+        loadParams.setMargins(dp(8), 0, 0, 0);
         header.addView(loadButton, loadParams);
         root.addView(header, matchWidthWrapContent());
 
         loadingRow = row();
         loadingRow.setGravity(Gravity.CENTER_VERTICAL);
-        progress = new ProgressBar(context);
-        progress.setIndeterminate(true);
-        loadingRow.addView(progress);
+        GifView loadingGif = new GifView(context, R.raw.gbcam_logo);
+        loadingRow.addView(loadingGif, new LinearLayout.LayoutParams(dp(128), dp(64)));
         TextView loadingText = new TextView(context);
         loadingText.setText("Working with GBxCart RW...");
         loadingText.setTextColor(colors.textSecondary);
@@ -253,10 +258,16 @@ final class MainScreen {
         selectionParams.setMargins(0, 0, dp(8), 0);
         actions.addView(selection, selectionParams);
         selectAllButton = smallButton("Select all", v -> listener.onSelectAllRequested());
+        selectModeButton = smallButton("Select", v -> {
+            selectMode = true;
+            updateAllTileSelectModeAppearance();
+            updateActions();
+        });
         deselectAllButton = smallButton("Deselect", v -> listener.onDeselectAllRequested());
         saveButton = smallButton("Save", v -> listener.onSaveSelectedRequested());
         shareButton = smallButton("Share", v -> listener.onShareSelectedRequested());
         addActionButton(actions, selectAllButton);
+        addActionButton(actions, selectModeButton);
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
         addActionButton(actions, shareButton);
@@ -274,27 +285,16 @@ final class MainScreen {
         clearAlbumButton = smallButton("Clear album", v -> listener.onClearAlbumRequested());
         clearAlbumButton.setTextColor(colors.danger);
         clearAlbumButton.setBackground(buttonBackground(colors.surfaceRaised, blend(colors.danger, colors.background, 0.82f), colors.disabledBackground, colors.danger));
+        mergeButton = smallButton("Merge to RGB", v -> listener.onManualMergeRequested());
+        mergeButton.setTextColor(accent);
+        mergeButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         addActionButton(albumActions, moveFirstButton);
         addActionButton(albumActions, recoverButton);
         addActionButton(albumActions, deleteButton);
+        addActionButton(albumActions, mergeButton);
         addActionButton(albumActions, compactButton);
         addActionButton(albumActions, clearAlbumButton);
         root.addView(wrapHorizontal(albumActions), matchWidthWrapContent());
-
-        LinearLayout fileActions = toolbarRow("Files");
-        backupsButton = smallButton("Backups", v -> listener.onBackupsRequested());
-        importSaveButton = smallButton("Import save", v -> listener.onImportSaveRequested());
-        exportSaveButton = smallButton("Export save", v -> listener.onExportSaveRequested());
-        aboutButton = smallButton("About", v -> listener.onAboutRequested());
-        settingsButton = smallButton("⚙", v -> listener.onSettingsRequested());
-        settingsButton.setTextSize(18);
-        settingsButton.setContentDescription("Settings");
-        addActionButton(fileActions, backupsButton);
-        addActionButton(fileActions, importSaveButton);
-        addActionButton(fileActions, exportSaveButton);
-        addActionButton(fileActions, aboutButton);
-        addActionButton(fileActions, settingsButton);
-        root.addView(wrapHorizontal(fileActions), matchWidthWrapContent());
 
         LinearLayout libraryHeader = row();
         libraryHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -370,6 +370,7 @@ final class MainScreen {
 
     void showGallery(GalleryState gallery) {
         this.gallery = gallery;
+        if (selectMode && gallery.selectedCount() == 0) selectMode = false;
         tileHolders = null;
         int gen = displayGeneration.incrementAndGet();
         setPaletteIndexOnly(gallery.paletteIndex);
@@ -390,7 +391,6 @@ final class MainScreen {
     void setBusy(boolean busy, String message) {
         this.busy = busy;
         loadingRow.setVisibility(busy ? View.VISIBLE : View.GONE);
-        progress.setVisibility(busy ? View.VISIBLE : View.GONE);
         if (message != null) {
             subtitle.setText(message);
         }
@@ -440,10 +440,6 @@ final class MainScreen {
         return Math.max(0, Math.min(paletteIndex, paletteLabels.length - 1));
     }
 
-    private void toggleLogs() {
-        setLogsVisible(!logsVisible);
-    }
-
     private void setLogsVisible(boolean visible) {
         logsVisible = visible;
         int visibility = visible ? View.VISIBLE : View.GONE;
@@ -463,40 +459,51 @@ final class MainScreen {
         return accent;
     }
 
+    boolean isSelectMode() {
+        return selectMode;
+    }
+
     void selectAll(boolean selected) {
         if (gallery == null) return;
-        for (int i = 0; i < gallery.photos.size(); i++) {
-            GalleryPhoto photo = gallery.photos.get(i);
-            photo.selected = selected;
-            if (tileHolders != null && i < tileHolders.length) {
-                applySelectionToTile(tileHolders[i], photo);
+        if (selected) {
+            selectMode = true;
+            for (int i = 0; i < gallery.photos.size(); i++) {
+                GalleryPhoto photo = gallery.photos.get(i);
+                photo.selected = true;
+                if (tileHolders != null && i < tileHolders.length) {
+                    applySelectionToTile(tileHolders[i], photo);
+                }
             }
+            updateActions();
+        } else {
+            for (GalleryPhoto photo : gallery.photos) photo.selected = false;
+            exitSelectMode();
         }
-        updateActions();
     }
 
     void updateActions() {
         int selected = gallery == null ? 0 : gallery.selectedCount();
         int selectedActive = gallery == null ? 0 : gallery.selectedActiveCount();
         int selectedDeleted = gallery == null ? 0 : gallery.selectedDeletedCount();
+        int selectedManualMerges = gallery == null ? 0 : gallery.selectedManualMergeCount();
+        boolean showDelete = selectedActive > 0 || selectedManualMerges > 0;
         int total = gallery == null ? 0 : gallery.photos.size();
         selection.setText(total == 0 ? "No photos" : selected == 0 ? "0 selected" : selected + " of " + total + " selected");
 
         loadButton.setEnabled(!busy);
         selectAllButton.setEnabled(!busy && total > 0 && selected < total);
         selectAllButton.setVisibility(total > 0 && selected < total ? View.VISIBLE : View.GONE);
+        selectModeButton.setEnabled(!busy && total > 0);
+        selectModeButton.setVisibility(!selectMode && total > 0 ? View.VISIBLE : View.GONE);
         deselectAllButton.setEnabled(!busy && selected > 0);
         deselectAllButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
         saveButton.setEnabled(!busy && selected > 0);
         saveButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
         shareButton.setEnabled(!busy && selected > 0);
         shareButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
-        backupsButton.setEnabled(!busy);
-        importSaveButton.setEnabled(!busy);
-        exportSaveButton.setEnabled(!busy && gallery != null);
         settingsButton.setEnabled(!busy);
-        deleteButton.setEnabled(!busy && selectedActive > 0);
-        deleteButton.setVisibility(selectedActive > 0 ? View.VISIBLE : View.GONE);
+        deleteButton.setEnabled(!busy && showDelete);
+        deleteButton.setVisibility(showDelete ? View.VISIBLE : View.GONE);
         recoverButton.setEnabled(!busy && selectedDeleted > 0);
         recoverButton.setVisibility(selectedDeleted > 0 ? View.VISIBLE : View.GONE);
         moveFirstButton.setEnabled(!busy && selectedActive > 0);
@@ -505,22 +512,26 @@ final class MainScreen {
         compactButton.setVisibility(gallery != null ? View.VISIBLE : View.GONE);
         clearAlbumButton.setEnabled(!busy && total > 0);
         clearAlbumButton.setVisibility(total > 0 ? View.VISIBLE : View.GONE);
+        int selectedMergeable = gallery == null ? 0 : gallery.selectedMergeableCount();
+        boolean canMerge = !busy && (selectedMergeable == 3 || selectedMergeable == 4);
+        mergeButton.setEnabled(canMerge);
+        mergeButton.setVisibility(canMerge ? View.VISIBLE : View.GONE);
+        mergeButton.setText(selectedMergeable == 4 ? "Merge to CRGB" : "Merge to RGB");
         paletteField.setEnabled(!busy);
         paletteField.setAlpha(busy ? 0.42f : 1.0f);
         setButtonAvailability(loadButton, !busy);
         setButtonAvailability(selectAllButton, !busy && total > 0 && selected < total);
+        setButtonAvailability(selectModeButton, !busy && total > 0);
         setButtonAvailability(deselectAllButton, !busy && selected > 0);
         setButtonAvailability(saveButton, !busy && selected > 0);
         setButtonAvailability(shareButton, !busy && selected > 0);
-        setButtonAvailability(backupsButton, !busy);
-        setButtonAvailability(importSaveButton, !busy);
-        setButtonAvailability(exportSaveButton, !busy && gallery != null);
         setButtonAvailability(settingsButton, !busy);
         setButtonAvailability(recoverButton, !busy && selectedDeleted > 0);
         setButtonAvailability(moveFirstButton, !busy && selectedActive > 0);
         setButtonAvailability(compactButton, !busy && gallery != null);
         setButtonAvailability(clearAlbumButton, !busy && total > 0);
-        deleteButton.setTextColor(!busy && selectedActive > 0 ? Color.WHITE : colors.disabledText);
+        setButtonAvailability(mergeButton, canMerge);
+        deleteButton.setTextColor(!busy && showDelete ? Color.WHITE : colors.disabledText);
     }
 
     private TileHolder photoTile(GalleryPhoto photo, int gen) {
@@ -530,20 +541,25 @@ final class MainScreen {
         tile.setBackground(tileBackground(photo.selected, photo.deleted));
         tile.setContentDescription(photoTitle(photo)
                 + (photo.selected ? ", selected" : ", not selected"));
-        tile.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
-        tile.setOnLongClickListener(v -> {
+
+        View.OnClickListener tileClick = v -> {
+            if (selectMode) togglePhotoSelection(photo);
+            else listener.onPhotoOpenRequested(photo);
+        };
+        View.OnLongClickListener tileLongPress = v -> {
+            if (!selectMode) {
+                selectMode = true;
+                updateAllTileSelectModeAppearance();
+            }
             togglePhotoSelection(photo);
             return true;
-        });
-
-        View.OnClickListener toggleSelection = v -> togglePhotoSelection(photo);
+        };
+        tile.setOnClickListener(tileClick);
+        tile.setOnLongClickListener(tileLongPress);
 
         FrameLayout imageFrame = new CameraImageFrame(context);
-        imageFrame.setOnClickListener(v -> listener.onPhotoOpenRequested(photo));
-        imageFrame.setOnLongClickListener(v -> {
-            togglePhotoSelection(photo);
-            return true;
-        });
+        imageFrame.setOnClickListener(tileClick);
+        imageFrame.setOnLongClickListener(tileLongPress);
         ImageView image = new ImageView(context);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
@@ -562,8 +578,12 @@ final class MainScreen {
         selectionMarker.setGravity(Gravity.CENTER);
         selectionMarker.setBackground(checkBackground(photo.selected));
         selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
-        selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
-        selectionMarker.setOnClickListener(toggleSelection);
+        if (selectMode) {
+            selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+        } else {
+            selectionMarker.setAlpha(0f);
+        }
+        selectionMarker.setOnClickListener(tileClick);
         FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(26), dp(26));
         checkParams.gravity = Gravity.TOP | Gravity.START;
         checkParams.setMargins(dp(6), dp(6), 0, 0);
@@ -593,7 +613,7 @@ final class MainScreen {
         labelBlock.setOrientation(LinearLayout.VERTICAL);
         labelBlock.setGravity(Gravity.CENTER_VERTICAL);
         labelBlock.setPadding(dp(4), dp(7), dp(4), 0);
-        labelBlock.setOnClickListener(toggleSelection);
+        labelBlock.setOnClickListener(tileClick);
         TextView label = new TextView(context);
         label.setText(photoTitle(photo));
         label.setTextColor(colors.textPrimary);
@@ -624,11 +644,13 @@ final class MainScreen {
 
     private String photoMeta(GalleryPhoto photo) {
         if (photo.mergedRgb) {
+            boolean manual = photo.path.contains("rgb-merged-manual");
+            String prefix = manual ? "Manual merge" : "Auto-merged";
             int start = photo.mergedSourceStartDisplayIndex + 1;
             int end = start + Math.max(0, photo.mergedSourceCount - 1);
             return photo.mergedSourceCount > 0
-                    ? "Auto-merged " + String.format("%02d-%02d", start, end)
-                    : "Auto-merged";
+                    ? prefix + " " + String.format("%02d-%02d", start, end)
+                    : prefix;
         }
         return photo.deleted ? "Recoverable slot " + (photo.physicalSlot + 1) : "Slot " + (photo.physicalSlot + 1);
     }
@@ -641,7 +663,11 @@ final class MainScreen {
         if (tileHolders != null && idx >= 0 && idx < tileHolders.length) {
             applySelectionToTile(tileHolders[idx], photo);
         }
-        updateActions();
+        if (selectMode && gallery.selectedCount() == 0) {
+            exitSelectMode();
+        } else {
+            updateActions();
+        }
     }
 
     private void applySelectionToTile(TileHolder holder, GalleryPhoto photo) {
@@ -651,8 +677,25 @@ final class MainScreen {
         holder.selectionMarker.setTextColor(accentText);
         holder.selectionMarker.setText(photo.selected ? "✓" : "");
         holder.selectionMarker.setBackground(checkBackground(photo.selected));
-        holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+        if (selectMode) {
+            holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+        } else {
+            holder.selectionMarker.setAlpha(0f);
+        }
         holder.selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+    }
+
+    private void exitSelectMode() {
+        selectMode = false;
+        updateAllTileSelectModeAppearance();
+        updateActions();
+    }
+
+    private void updateAllTileSelectModeAppearance() {
+        if (tileHolders == null) return;
+        for (TileHolder holder : tileHolders) {
+            if (holder != null) applySelectionToTile(holder, holder.photo);
+        }
     }
 
     private void refreshGalleryPalette(int paletteIndex) {
@@ -862,6 +905,10 @@ final class MainScreen {
         if (recoverButton != null) {
             recoverButton.setTextColor(accent);
             recoverButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
+        }
+        if (mergeButton != null) {
+            mergeButton.setTextColor(accent);
+            mergeButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         }
     }
 

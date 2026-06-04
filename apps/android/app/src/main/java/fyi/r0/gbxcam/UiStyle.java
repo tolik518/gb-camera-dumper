@@ -87,7 +87,11 @@ final class UiStyle {
             int accent) {
         Palette colors = palette(context);
         CheckBox box = new CheckBox(context);
-        box.setText(twoLineText(title, description, colors.textPrimary, colors.textSecondary));
+        if (description != null && !description.isEmpty()) {
+            box.setText(twoLineText(title, description, colors.textPrimary, colors.textSecondary));
+        } else {
+            box.setText(title);
+        }
         box.setTextColor(colors.textPrimary);
         box.setTextSize(12);
         box.setChecked(checked);

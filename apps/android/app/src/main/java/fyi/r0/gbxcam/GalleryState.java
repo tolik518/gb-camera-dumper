@@ -96,6 +96,26 @@ final class GalleryState {
         return count;
     }
 
+    int selectedManualMergeCount() {
+        int count = 0;
+        for (GalleryPhoto photo : photos) {
+            if (photo.selected && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    int selectedMergeableCount() {
+        int count = 0;
+        for (GalleryPhoto photo : photos) {
+            if (photo.selected && !photo.deleted && !photo.mergedRgb && photo.physicalSlot >= 0) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     int selectedActiveCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {

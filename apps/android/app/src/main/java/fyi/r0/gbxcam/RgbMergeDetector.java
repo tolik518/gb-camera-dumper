@@ -103,6 +103,35 @@ final class RgbMergeDetector {
                 output);
     }
 
+    static GalleryPhoto manualMerge(
+            GalleryPhoto[] sources,
+            int count,
+            String order,
+            File outputRoot,
+            String defaultAlgorithm) {
+        if (count != 3 && count != 4) return null;
+        MergeLayout layout = count == 3 ? layoutFromOrder3(order) : layoutFromOrder4(order);
+        if (layout == null) return null;
+        ImageData[] images = new ImageData[count];
+        for (int i = 0; i < count; i++) {
+            images[i] = ImageData.from(sources[i]);
+            if (images[i] == null) return null;
+        }
+        File mergeDir = new File(outputRoot, "rgb-merged-manual");
+        if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
+        String resolvedAlgorithm = resolveAlgorithm(defaultAlgorithm, layout.clearIndex >= 0);
+        File out = new File(mergeDir, String.format(Locale.US, "MANUAL_from%02d_n%d_%s.png",
+                sources[0].displayIndex + 1, count, layout.label));
+        if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
+        return new GalleryPhoto(
+                out.getName(), out.getAbsolutePath(),
+                sources[0].displayIndex, -1,
+                IMAGE_WIDTH, IMAGE_HEIGHT,
+                null, false, 0, false, true, "",
+                true, layout.label, count, sources[0].displayIndex,
+                resolvedAlgorithm);
+    }
+
     /** Returns the algorithm IDs valid for the given set size. */
     static String[] compatibleAlgorithmIds(boolean hasClear) {
         if (hasClear) return ALGORITHM_IDS;
