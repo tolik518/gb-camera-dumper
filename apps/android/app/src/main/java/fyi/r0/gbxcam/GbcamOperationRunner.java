@@ -15,7 +15,11 @@ final class GbcamOperationRunner {
     interface Callback {
         void onLog(String message);
 
+        void onProgress(String message);
+
         void onBusyChanged(boolean busy, String message);
+
+        void onError(String message);
 
         void onGalleryLoaded(GalleryState gallery);
     }
@@ -36,7 +40,7 @@ final class GbcamOperationRunner {
                     connection.getFileDescriptor(),
                     outputDir.getAbsolutePath(),
                     paletteIndex,
-                    message -> postLog(callback, message));
+                    makeProgress(callback));
             return GalleryState.fromJson(json);
         });
     }
@@ -56,7 +60,7 @@ final class GbcamOperationRunner {
                     outputDir.getAbsolutePath(),
                     slots,
                     paletteIndex,
-                    message -> postLog(callback, message));
+                    makeProgress(callback));
             return GalleryState.fromJson(json);
         });
     }
@@ -76,7 +80,7 @@ final class GbcamOperationRunner {
                     outputDir.getAbsolutePath(),
                     slots,
                     paletteIndex,
-                    message -> postLog(callback, message));
+                    makeProgress(callback));
             return GalleryState.fromJson(json);
         });
     }
@@ -97,7 +101,7 @@ final class GbcamOperationRunner {
                     outputDir.getAbsolutePath(),
                     physicalSlotsCsv,
                     paletteIndex,
-                    message -> postLog(callback, message));
+                    makeProgress(callback));
             return GalleryState.fromJson(json);
         });
     }
@@ -128,7 +132,8 @@ final class GbcamOperationRunner {
                 main.post(() -> callback.onGalleryLoaded(gallery));
             } catch (Throwable t) {
                 Log.e(TAG, "USB operation failed", t);
-                postLog(callback, "Error: " + t.toString());
+                String errorMsg = t.getMessage() != null ? t.getMessage() : t.toString();
+                main.post(() -> callback.onError("Error: " + errorMsg));
             } finally {
                 if (connection != null) {
                     connection.close();
@@ -138,8 +143,11 @@ final class GbcamOperationRunner {
         });
     }
 
-    private void postLog(Callback callback, String message) {
-        main.post(() -> callback.onLog(message));
+    private NativeGbcam.Progress makeProgress(Callback callback) {
+        return message -> main.post(() -> {
+            callback.onLog(message);
+            callback.onProgress(message);
+        });
     }
 
     private interface UsbWork {

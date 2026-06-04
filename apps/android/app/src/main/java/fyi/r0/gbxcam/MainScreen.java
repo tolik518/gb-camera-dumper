@@ -1,6 +1,7 @@
 package fyi.r0.gbxcam;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -11,6 +12,7 @@ import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -82,7 +84,6 @@ final class MainScreen {
     private final TextView logs;
     private final TextView logTitle;
     private final GridLayout grid;
-    private final LinearLayout loadingRow;
     private final ScrollView logScroll;
     private final FrameLayout paletteField;
     private final LinearLayout paletteSwatch;
@@ -102,9 +103,19 @@ final class MainScreen {
     private final Button mergeButton;
 
     private GalleryState gallery;
+    private boolean deviceConnected;
     private boolean busy;
     private boolean logsVisible;
     private boolean selectMode;
+    private Dialog busyDialog;
+    private LinearLayout busyContent;
+    private GifView busyGif;
+    private TextView busyProgressText;
+    private TextView busyStatusText;
+    private TextView busySlowText;
+    private Runnable busySlowReveal;
+    private boolean busyHasError = false;
+    private int lastBusyPercent = -1;
     private int paletteIndex;
     private int accent;
     private int accentPressed;
@@ -186,17 +197,6 @@ final class MainScreen {
         loadParams.setMargins(dp(8), 0, 0, 0);
         header.addView(loadButton, loadParams);
         root.addView(header, matchWidthWrapContent());
-
-        loadingRow = row();
-        loadingRow.setGravity(Gravity.CENTER_VERTICAL);
-        GifView loadingGif = new GifView(context, R.raw.gbcam_logo);
-        loadingRow.addView(loadingGif, new LinearLayout.LayoutParams(dp(128), dp(64)));
-        TextView loadingText = new TextView(context);
-        loadingText.setText("Working with GBxCart RW...");
-        loadingText.setTextColor(colors.textSecondary);
-        loadingText.setPadding(dp(16), 0, 0, 0);
-        loadingRow.addView(loadingText);
-        root.addView(loadingRow, matchWidthWrapContent());
 
         LinearLayout paletteRow = row();
         paletteRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -384,17 +384,207 @@ final class MainScreen {
         }
         empty.setVisibility(gallery.photos.isEmpty() ? View.VISIBLE : View.GONE);
         grid.setVisibility(gallery.photos.isEmpty() ? View.GONE : View.VISIBLE);
-        subtitle.setText(gallery.connected + " · " + gallery.photos.size() + " photo(s)");
+        subtitle.setText((deviceConnected ? "Connected" : "Cached") + " · " + gallery.photos.size() + " photo(s)");
+        updateActions();
+    }
+
+    void setDeviceConnected(boolean connected) {
+        this.deviceConnected = connected;
+        if (gallery != null) {
+            String status = connected ? "Connected" : "Disconnected";
+            subtitle.setText(status + " · " + gallery.photos.size() + " photo(s)");
+        }
         updateActions();
     }
 
     void setBusy(boolean busy, String message) {
         this.busy = busy;
-        loadingRow.setVisibility(busy ? View.VISIBLE : View.GONE);
-        if (message != null) {
-            subtitle.setText(message);
+        if (busy) {
+            showBusyDialog(message);
+        } else if (!busyHasError) {
+            dismissBusyDialog();
         }
         updateActions();
+    }
+
+    private void showBusyDialog(String message) {
+        dismissBusyDialog();
+        UiStyle.Palette colors = UiStyle.palette(context);
+        Dialog dialog = UiStyle.baseDialog(context);
+        dialog.setCancelable(false);
+
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(dp(32), dp(28), dp(32), dp(28));
+        content.setBackground(UiStyle.rounded(context, colors.surface, colors.borderStrong, 14, 1));
+
+        GifView gif = new GifView(context, R.raw.gbcam_logo);
+        content.addView(gif, new LinearLayout.LayoutParams(dp(128), dp(64)));
+        busyGif = gif;
+
+        if (message != null && !message.isEmpty()) {
+            TextView text = new TextView(context);
+            text.setText(message);
+            text.setTextColor(colors.textSecondary);
+            text.setTextSize(13);
+            text.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            textParams.setMargins(0, dp(12), 0, 0);
+            content.addView(text, textParams);
+        }
+
+        TextView warnText = new TextView(context);
+        warnText.setText("⚠ DO NOT DISCONNECT");
+        warnText.setTextColor(colors.danger);
+        warnText.setTypeface(Typeface.DEFAULT_BOLD);
+        warnText.setTextSize(11);
+        warnText.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams warnParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        warnParams.setMargins(0, dp(10), 0, 0);
+        content.addView(warnText, warnParams);
+
+        busyProgressText = new TextView(context);
+        busyProgressText.setTextSize(32);
+        busyProgressText.setTypeface(Typeface.DEFAULT_BOLD);
+        busyProgressText.setTextColor(accent);
+        busyProgressText.setGravity(Gravity.CENTER);
+        busyProgressText.setText("0%");
+        busyProgressText.setVisibility(View.VISIBLE);
+        lastBusyPercent = 0;
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        progressParams.setMargins(0, dp(8), 0, 0);
+        content.addView(busyProgressText, progressParams);
+
+        busyStatusText = new TextView(context);
+        busyStatusText.setTextSize(11);
+        busyStatusText.setTextColor(colors.textMuted);
+        busyStatusText.setGravity(Gravity.CENTER);
+        busyStatusText.setSingleLine(true);
+        busyStatusText.setEllipsize(TextUtils.TruncateAt.END);
+        busyStatusText.setVisibility(View.INVISIBLE);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        statusParams.setMargins(0, dp(6), 0, 0);
+        content.addView(busyStatusText, statusParams);
+
+        busySlowText = new TextView(context);
+        busySlowText.setText("Please stand by... Game Boy Camera cartridges run on battery-backed SRAM from the '90s — they write one byte at a time. Vintage hardware, vintage speed. 🎮");
+        busySlowText.setTextColor(colors.textMuted);
+        busySlowText.setTextSize(11);
+        busySlowText.setGravity(Gravity.CENTER);
+        busySlowText.setVisibility(View.INVISIBLE);
+        LinearLayout.LayoutParams slowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        slowParams.setMargins(0, dp(10), 0, 0);
+        content.addView(busySlowText, slowParams);
+
+        busySlowReveal = () -> {
+            if (busySlowText != null) {
+                busySlowText.setVisibility(View.VISIBLE);
+            }
+        };
+        root.postDelayed(busySlowReveal, 20_000);
+
+        busyContent = content;
+        dialog.setContentView(content);
+        UiStyle.sizeDialog(dialog, context, 48, 340);
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+        busyDialog = dialog;
+    }
+
+    private void dismissBusyDialog() {
+        if (busySlowReveal != null) {
+            root.removeCallbacks(busySlowReveal);
+        }
+        if (busyDialog != null) {
+            busyDialog.dismiss();
+            busyDialog = null;
+        }
+        busyContent = null;
+        busyGif = null;
+        busyProgressText = null;
+        busyStatusText = null;
+        busySlowText = null;
+        busySlowReveal = null;
+        busyHasError = false;
+        lastBusyPercent = -1;
+    }
+
+    void showBusyError(String errorMessage) {
+        if (busyContent == null || busyHasError) return;
+        busyHasError = true;
+        if (busyGif != null) {
+            busyGif.setVisibility(View.GONE);
+        }
+        if (busyProgressText != null) {
+            busyProgressText.setVisibility(View.GONE);
+        }
+
+        UiStyle.Palette colors = UiStyle.palette(context);
+
+        TextView errorText = new TextView(context);
+        errorText.setText(errorMessage);
+        errorText.setTextColor(colors.danger);
+        errorText.setTextSize(13);
+        errorText.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams errorParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        errorParams.setMargins(0, dp(12), 0, 0);
+        busyContent.addView(errorText, errorParams);
+
+        Button dismissButton = UiStyle.button(context, "Dismiss", Color.WHITE, colors.danger, colors.danger);
+        dismissButton.setBackground(UiStyle.dangerButtonBackground(context));
+        LinearLayout.LayoutParams dismissParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
+        dismissParams.setMargins(0, dp(16), 0, 0);
+        dismissButton.setOnClickListener(v -> {
+            dismissBusyDialog();
+            updateActions();
+        });
+        busyContent.addView(dismissButton, dismissParams);
+        if (busyDialog != null) {
+            UiStyle.sizeDialog(busyDialog, context, 48, 340);
+        }
+    }
+
+    void updateBusyProgress(String message) {
+        if (busyProgressText == null || busyHasError) return;
+        int percent = parsePercent(message);
+        if (percent > lastBusyPercent) {
+            lastBusyPercent = percent;
+            busyProgressText.setText(percent + "%");
+            busyProgressText.setVisibility(View.VISIBLE);
+        }
+        if (busyStatusText != null && !message.startsWith("[debug]")) {
+            busyStatusText.setText(message);
+            busyStatusText.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private static final java.util.regex.Pattern PERCENT_PATTERN =
+            java.util.regex.Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
+
+    private static int parsePercent(String message) {
+        if (message == null) return -1;
+        java.util.regex.Matcher m = PERCENT_PATTERN.matcher(message);
+        if (m.find()) {
+            try {
+                int current = Integer.parseInt(m.group(1));
+                int total   = Integer.parseInt(m.group(2));
+                // Require denominator >= 5 to exclude small step-count patterns like "1/3"
+                if (total >= 5 && current <= total) {
+                    return Math.min(100, (int) (100.0 * current / total));
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+        return -1;
     }
 
     void appendLog(String message) {
@@ -451,6 +641,10 @@ final class MainScreen {
         setLogsVisible(visible);
     }
 
+    boolean isBusy() {
+        return busy;
+    }
+
     GalleryState gallery() {
         return gallery;
     }
@@ -485,8 +679,10 @@ final class MainScreen {
         int selected = gallery == null ? 0 : gallery.selectedCount();
         int selectedActive = gallery == null ? 0 : gallery.selectedActiveCount();
         int selectedDeleted = gallery == null ? 0 : gallery.selectedDeletedCount();
+        int selectedDeletedManuals = gallery == null ? 0 : gallery.selectedDeletedManualMergeCount();
         int selectedManualMerges = gallery == null ? 0 : gallery.selectedManualMergeCount();
         boolean showDelete = selectedActive > 0 || selectedManualMerges > 0;
+        boolean showRecover = selectedDeleted > 0 || selectedDeletedManuals > 0;
         int total = gallery == null ? 0 : gallery.photos.size();
         selection.setText(total == 0 ? "No photos" : selected == 0 ? "0 selected" : selected + " of " + total + " selected");
 
@@ -504,14 +700,14 @@ final class MainScreen {
         settingsButton.setEnabled(!busy);
         deleteButton.setEnabled(!busy && showDelete);
         deleteButton.setVisibility(showDelete ? View.VISIBLE : View.GONE);
-        recoverButton.setEnabled(!busy && selectedDeleted > 0);
-        recoverButton.setVisibility(selectedDeleted > 0 ? View.VISIBLE : View.GONE);
-        moveFirstButton.setEnabled(!busy && selectedActive > 0);
-        moveFirstButton.setVisibility(selectedActive > 0 ? View.VISIBLE : View.GONE);
-        compactButton.setEnabled(!busy && gallery != null);
-        compactButton.setVisibility(gallery != null ? View.VISIBLE : View.GONE);
-        clearAlbumButton.setEnabled(!busy && total > 0);
-        clearAlbumButton.setVisibility(total > 0 ? View.VISIBLE : View.GONE);
+        recoverButton.setEnabled(!busy && showRecover);
+        recoverButton.setVisibility(showRecover ? View.VISIBLE : View.GONE);
+        moveFirstButton.setEnabled(!busy && deviceConnected && selectedActive > 0);
+        moveFirstButton.setVisibility(deviceConnected && selectedActive > 0 ? View.VISIBLE : View.GONE);
+        compactButton.setEnabled(false);
+        compactButton.setVisibility(View.GONE);
+        clearAlbumButton.setEnabled(!busy && deviceConnected && total > 0);
+        clearAlbumButton.setVisibility(deviceConnected && total > 0 ? View.VISIBLE : View.GONE);
         int selectedMergeable = gallery == null ? 0 : gallery.selectedMergeableCount();
         boolean canMerge = !busy && (selectedMergeable == 3 || selectedMergeable == 4);
         mergeButton.setEnabled(canMerge);
@@ -526,10 +722,10 @@ final class MainScreen {
         setButtonAvailability(saveButton, !busy && selected > 0);
         setButtonAvailability(shareButton, !busy && selected > 0);
         setButtonAvailability(settingsButton, !busy);
-        setButtonAvailability(recoverButton, !busy && selectedDeleted > 0);
-        setButtonAvailability(moveFirstButton, !busy && selectedActive > 0);
-        setButtonAvailability(compactButton, !busy && gallery != null);
-        setButtonAvailability(clearAlbumButton, !busy && total > 0);
+        setButtonAvailability(recoverButton, !busy && showRecover);
+        setButtonAvailability(moveFirstButton, !busy && deviceConnected && selectedActive > 0);
+        setButtonAvailability(compactButton, false);
+        setButtonAvailability(clearAlbumButton, !busy && deviceConnected && total > 0);
         setButtonAvailability(mergeButton, canMerge);
         deleteButton.setTextColor(!busy && showDelete ? Color.WHITE : colors.disabledText);
     }
@@ -633,7 +829,7 @@ final class MainScreen {
 
     private String photoTitle(GalleryPhoto photo) {
         if (photo.mergedRgb) {
-            return "Merged " + mergedKindLabel(photo);
+            return (photo.deleted ? "Deleted " : "Merged ") + mergedKindLabel(photo);
         }
         return (photo.deleted ? "Deleted " : "Photo ") + String.format("%02d", photo.displayIndex + 1);
     }
@@ -644,6 +840,7 @@ final class MainScreen {
 
     private String photoMeta(GalleryPhoto photo) {
         if (photo.mergedRgb) {
+            if (photo.deleted) return "Deleted merge · recoverable";
             boolean manual = photo.path.contains("rgb-merged-manual");
             String prefix = manual ? "Manual merge" : "Auto-merged";
             int start = photo.mergedSourceStartDisplayIndex + 1;

@@ -5,7 +5,7 @@ use gbxcam_core::{
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
-use jni::sys::{jint, jstring};
+use jni::sys::{jboolean, jint, jstring};
 use jni::strings::JNIString;
 use jni::Env;
 use std::ffi::CString;
@@ -318,6 +318,27 @@ impl Progress for JniProgress<'_, '_> {
             total_bytes / 1024
         ));
     }
+
+    fn write_progress(&mut self, done: usize, total: usize) {
+        self.emit(&format!("Writing: {done}/{total}"));
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_isGameBoyCameraInserted(
+    _env: jni::EnvUnowned,
+    _class: JClass,
+    fd: jint,
+) -> jboolean {
+    let ok = UsbDev::connect(fd as std::os::unix::io::RawFd, &mut NoJniProgress)
+        .and_then(|(dev, _info)| {
+            let report = dev.read_cartridge_report();
+            dev.finish_operation(report.is_ok(), &mut NoJniProgress);
+            report
+        })
+        .map(|r| r.mapper == 0xFC) // 0xFC = MAPPER_MAC_GBD
+        .unwrap_or(false);
+    ok as jboolean
 }
 
 struct NoJniProgress;

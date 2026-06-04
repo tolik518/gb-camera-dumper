@@ -99,7 +99,17 @@ final class GalleryState {
     int selectedManualMergeCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
+            if (photo.selected && !photo.deleted && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    int selectedDeletedManualMergeCount() {
+        int count = 0;
+        for (GalleryPhoto photo : photos) {
+            if (photo.selected && photo.deleted && photo.mergedRgb && photo.path.contains("rgb-merged-manual")) {
                 count++;
             }
         }
@@ -129,7 +139,7 @@ final class GalleryState {
     int selectedDeletedCount() {
         int count = 0;
         for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.deleted) {
+            if (photo.selected && photo.deleted && photo.physicalSlot >= 0) {
                 count++;
             }
         }

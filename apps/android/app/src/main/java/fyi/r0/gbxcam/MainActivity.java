@@ -9,12 +9,19 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Spannable;
+import android.text.SpannableString;
+import android.text.style.StyleSpan;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
@@ -27,10 +34,12 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -73,9 +82,46 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private final Map<String, Boolean> emptyImageCache = new HashMap<>();
     private final List<GalleryPhoto> manualMerges = new ArrayList<>();
 
+    private TextView startupStep1Label;
+    private TextView startupStep2Label;
+    private int startupStepDoneColor;
+    private int startupStepDefaultColor;
+    private boolean startupStep2Checking;
+    private final Handler startupHandler = new Handler(Looper.getMainLooper());
+    private final Runnable startupCartridgeCheckRunnable = this::doStartupCartridgeCheck;
+
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction())) {
+                boolean found = refreshDevice();
+                screen.setDeviceConnected(found);
+                if (found && settings.autoLoad() && !autoLoadAttempted) {
+                    autoLoadCamera();
+                }
+                if (found && startupStep1Label != null) {
+                    startupStep1Label.setTextColor(startupStepDoneColor);
+                    startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+                    startupStep2Checking = false;
+                    doStartupCartridgeCheck();
+                }
+                return;
+            }
+
+            if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
+                if (selectedDevice != null && GbxCartDevices.find(usbManager) == null) {
+                    selectedDevice = null;
+                    pendingAction = null;
+                    onLog("GBxCart RW disconnected.");
+                    screen.setDeviceConnected(false);
+                }
+                if (startupStep1Label != null) startupStep1Label.setTextColor(startupStepDefaultColor);
+                if (startupStep2Label != null) startupStep2Label.setTextColor(startupStepDefaultColor);
+                startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+                startupStep2Checking = false;
+                return;
+            }
+
             if (!ACTION_USB_PERMISSION.equals(intent.getAction())) {
                 return;
             }
@@ -123,7 +169,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         registerUsbReceiver();
         onLog("Rust core loaded: " + NativeGbcam.version());
-        if (refreshDevice() && settings.autoLoad()) {
+        boolean deviceFound = refreshDevice();
+        screen.setDeviceConnected(deviceFound);
+        if (deviceFound && settings.autoLoad()) {
             autoLoadCamera();
         } else if (settings.loadCache()) {
             loadCachedGallery();
@@ -153,7 +201,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (refreshDevice() && settings.autoLoad() && !autoLoadAttempted) {
+        boolean deviceFound = refreshDevice();
+        screen.setDeviceConnected(deviceFound);
+        if (deviceFound && settings.autoLoad() && !autoLoadAttempted) {
             autoLoadCamera();
         }
     }
@@ -193,6 +243,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                         insertAt = i;
                     }
                 }
+                if (insertAt < 0) {
+                    onLog("Manual merge aborted: source photos not found in gallery.");
+                    return;
+                }
                 photos.add(insertAt + 1, merged);
                 addToManualMerges(merged);
                 screen.showGallery(new GalleryState(
@@ -207,6 +261,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     @Override
     public void onLoadRequested() {
+        if (GbxCartDevices.find(usbManager) == null) {
+            Toast.makeText(this,
+                    "No GBxCart RW connected. Plug in the cartridge reader and try again.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
     }
 
@@ -313,87 +373,147 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         int manualCount = gallery.selectedManualMergeCount();
         if (activeCount == 0 && manualCount == 0) return;
 
-        boolean cartridgeConnected = GbxCartDevices.find(usbManager) != null;
-
         String detail;
         if (activeCount > 0 && manualCount > 0) {
-            detail = "Remove " + activeCount + " photo(s) and " + manualCount + " merged image(s) from the local gallery?"
-                    + (cartridgeConnected ? " You'll be asked about the cartridge next." : "");
+            detail = "Mark " + activeCount + " photo(s) and " + manualCount
+                    + " merged image(s) as deleted? They stay recoverable.";
         } else if (activeCount > 0) {
-            detail = "Remove " + activeCount + " photo(s) from the local gallery?"
-                    + (cartridgeConnected ? " You'll be asked about the cartridge next." : "");
+            detail = "Mark " + activeCount + " photo(s) as deleted? They stay recoverable from the cartridge.";
         } else {
-            detail = "Remove " + manualCount + " merged image(s) from this device?";
+            detail = "Mark " + manualCount + " merged image(s) as deleted? They stay recoverable.";
         }
 
-        UiStyle.confirmDialog(this, "Delete selected?", detail, "Delete", () -> {
+        boolean cameraAvailable = GbxCartDevices.find(usbManager) != null;
+
+        Runnable doDelete = () -> {
             GalleryState g = screen.gallery();
             if (g == null) return;
-            final GalleryState forCartridge = g;
-
-            GalleryState after = g.selectedManualMergeCount() > 0
-                    ? removeSelectedManualMerges(g) : g;
-            if (activeCount > 0) {
-                after = removeSelectedActiveLocally(after);
+            GalleryState after = g.selectedManualMergeCount() > 0 ? markSelectedManualMergesDeleted(g) : g;
+            if (after.selectedActiveCount() > 0) {
+                if (cameraAvailable) {
+                    runWithPermission(() -> {
+                        GalleryState current = screen.gallery();
+                        if (current != null)
+                            operationRunner.deletePhotos(usbManager, selectedDevice, current, dumpsDir(), paletteIndex, MainActivity.this);
+                    });
+                } else {
+                    after = markSelectedCameraPhotosDeletedLocally(after);
+                    screen.showGallery(after);
+                }
+            } else {
+                screen.showGallery(after);
             }
-            screen.showGallery(after);
+        };
 
-            if (activeCount == 0 || !cartridgeConnected) return;
-
-            UiStyle.confirmDialog(this, "Delete from cartridge?",
-                    "Also delete " + activeCount + " photo(s) from the camera cartridge?"
-                            + " A save backup is kept in the app dumps folder.",
-                    "Delete from cartridge",
-                    () -> runWithPermission(() ->
-                            operationRunner.deletePhotos(usbManager, selectedDevice, forCartridge, dumpsDir(), paletteIndex, MainActivity.this)));
-        });
+        if (settings.confirmAlbumWrites()) {
+            UiStyle.confirmDialog(this, "Delete selected?", detail, "Delete", doDelete);
+        } else {
+            doDelete.run();
+        }
     }
 
-    private GalleryState removeSelectedActiveLocally(GalleryState gallery) {
-        List<GalleryPhoto> photos = new ArrayList<>();
-        Set<String> deletedSlots = new HashSet<>();
-        for (GalleryPhoto p : gallery.photos) {
-            if (!p.selected || p.deleted || p.mergedRgb || p.physicalSlot < 0) {
-                photos.add(p);
-            } else {
-                deletedSlots.add(String.valueOf(p.physicalSlot));
+    private GalleryState markSelectedManualMergesDeleted(GalleryState gallery) {
+        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+        boolean changed = false;
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (!p.selected || p.deleted || !p.mergedRgb || !p.path.contains("rgb-merged-manual")) continue;
+            GalleryPhoto deleted = new GalleryPhoto(p.name, p.path, p.displayIndex, p.physicalSlot,
+                    p.width, p.height, p.indexedPixels, true, p.border, p.copy,
+                    p.metadataValid, p.ownerUserId, p.mergedRgb, p.mergedKind, p.mergedSourceCount,
+                    p.mergedSourceStartDisplayIndex, p.mergedAlgorithm);
+            photos.set(i, deleted);
+            for (int j = 0; j < manualMerges.size(); j++) {
+                if (manualMerges.get(j).path.equals(p.path)) { manualMerges.set(j, deleted); break; }
             }
+            changed = true;
         }
-        if (!deletedSlots.isEmpty()) {
-            settings.addLocallyDeletedSlots(deletedSlots);
-        }
+        if (changed) saveManualMerges();
         return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
                 gallery.paletteIndex, gallery.paletteName,
                 gallery.validationErrors, gallery.validationWarnings, photos);
     }
 
-    private GalleryState filterLocallyDeletedPhotos(GalleryState gallery) {
+    private GalleryState recoverSelectedManualMerges(GalleryState gallery) {
+        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+        boolean changed = false;
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (!p.selected || !p.deleted || !p.mergedRgb || !p.path.contains("rgb-merged-manual")) continue;
+            GalleryPhoto recovered = new GalleryPhoto(p.name, p.path, p.displayIndex, p.physicalSlot,
+                    p.width, p.height, p.indexedPixels, false, p.border, p.copy,
+                    p.metadataValid, p.ownerUserId, p.mergedRgb, p.mergedKind, p.mergedSourceCount,
+                    p.mergedSourceStartDisplayIndex, p.mergedAlgorithm);
+            photos.set(i, recovered);
+            for (int j = 0; j < manualMerges.size(); j++) {
+                if (manualMerges.get(j).path.equals(p.path)) { manualMerges.set(j, recovered); break; }
+            }
+            changed = true;
+        }
+        if (changed) saveManualMerges();
+        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
+                gallery.paletteIndex, gallery.paletteName,
+                gallery.validationErrors, gallery.validationWarnings, photos);
+    }
+
+    private GalleryState markSelectedCameraPhotosDeletedLocally(GalleryState gallery) {
+        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+        Set<String> newSlots = new HashSet<>();
+        boolean changed = false;
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (!p.selected || p.deleted || p.mergedRgb || p.physicalSlot < 0) continue;
+            photos.set(i, new GalleryPhoto(p.name, p.path, p.displayIndex, p.physicalSlot,
+                    p.width, p.height, p.indexedPixels, true, p.border, p.copy,
+                    p.metadataValid, p.ownerUserId, false, "", 0, -1, ""));
+            newSlots.add(String.valueOf(p.physicalSlot));
+            changed = true;
+        }
+        if (!changed) return gallery;
+        settings.addLocallyDeletedSlots(newSlots);
+        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
+                gallery.paletteIndex, gallery.paletteName,
+                gallery.validationErrors, gallery.validationWarnings, photos);
+    }
+
+    private GalleryState recoverSelectedCameraPhotosLocally(GalleryState gallery) {
+        Set<String> localDeleted = settings.locallyDeletedSlots();
+        if (localDeleted.isEmpty()) return gallery;
+        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+        Set<String> toRestore = new HashSet<>();
+        boolean changed = false;
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (!p.selected || !p.deleted || p.mergedRgb || p.physicalSlot < 0) continue;
+            if (!localDeleted.contains(String.valueOf(p.physicalSlot))) continue;
+            photos.set(i, new GalleryPhoto(p.name, p.path, p.displayIndex, p.physicalSlot,
+                    p.width, p.height, p.indexedPixels, false, p.border, p.copy,
+                    p.metadataValid, p.ownerUserId, false, "", 0, -1, ""));
+            toRestore.add(String.valueOf(p.physicalSlot));
+            changed = true;
+        }
+        if (!changed) return gallery;
+        settings.removeLocallyDeletedSlots(toRestore);
+        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
+                gallery.paletteIndex, gallery.paletteName,
+                gallery.validationErrors, gallery.validationWarnings, photos);
+    }
+
+    private GalleryState applyLocallyDeletedSlots(GalleryState gallery) {
         Set<String> deleted = settings.locallyDeletedSlots();
         if (deleted.isEmpty()) return gallery;
-        List<GalleryPhoto> photos = new ArrayList<>();
-        for (GalleryPhoto p : gallery.photos) {
-            if (p.physicalSlot >= 0 && deleted.contains(String.valueOf(p.physicalSlot))) continue;
-            photos.add(p);
+        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+        boolean changed = false;
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (p.deleted || p.mergedRgb || p.physicalSlot < 0) continue;
+            if (!deleted.contains(String.valueOf(p.physicalSlot))) continue;
+            photos.set(i, new GalleryPhoto(p.name, p.path, p.displayIndex, p.physicalSlot,
+                    p.width, p.height, p.indexedPixels, true, p.border, p.copy,
+                    p.metadataValid, p.ownerUserId, false, "", 0, -1, ""));
+            changed = true;
         }
-        if (photos.size() == gallery.photos.size()) return gallery;
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
-    }
-
-    private GalleryState removeSelectedManualMerges(GalleryState gallery) {
-        List<GalleryPhoto> photos = new ArrayList<>();
-        for (GalleryPhoto p : gallery.photos) {
-            if (p.selected && p.mergedRgb && p.path.contains("rgb-merged-manual")) {
-                for (int i = manualMerges.size() - 1; i >= 0; i--) {
-                    if (manualMerges.get(i).path.equals(p.path)) { manualMerges.remove(i); break; }
-                }
-                new File(p.path).delete();
-            } else {
-                photos.add(p);
-            }
-        }
-        saveManualMerges();
+        if (!changed) return gallery;
         return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
                 gallery.paletteIndex, gallery.paletteName,
                 gallery.validationErrors, gallery.validationWarnings, photos);
@@ -402,18 +522,42 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     @Override
     public void onRecoverSelectedRequested() {
         GalleryState gallery = screen.gallery();
-        if (gallery == null || gallery.selectedDeletedCount() == 0) {
-            return;
+        if (gallery == null) return;
+        int deletedCount = gallery.selectedDeletedCount();
+        int deletedManualCount = gallery.selectedDeletedManualMergeCount();
+        if (deletedCount == 0 && deletedManualCount == 0) return;
+
+        String detail;
+        if (deletedCount > 0 && deletedManualCount > 0) {
+            detail = "Restore " + deletedCount + " deleted slot(s) and " + deletedManualCount
+                    + " merged image(s)? A save backup is kept in the app dumps folder.";
+        } else if (deletedCount > 0) {
+            detail = "Restore " + deletedCount + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.";
+        } else {
+            detail = "Restore " + deletedManualCount + " deleted merged image(s)?";
         }
 
-        confirmOrRun(
-                "Recover deleted photos?",
-                "This restores " + gallery.selectedDeletedCount() + " deleted slot(s) into the camera album. A save backup is kept in the app dumps folder.",
-                "Recover",
-                () -> runWithPermission(() -> {
-                    GalleryState g = screen.gallery();
-                    if (g != null) operationRunner.recoverPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, this);
-                }));
+        boolean cameraAvailable = GbxCartDevices.find(usbManager) != null;
+
+        confirmOrRun("Recover deleted?", detail, "Recover", () -> {
+            GalleryState g = screen.gallery();
+            if (g == null) return;
+            GalleryState after = g.selectedDeletedManualMergeCount() > 0 ? recoverSelectedManualMerges(g) : g;
+            if (after.selectedDeletedCount() > 0) {
+                if (cameraAvailable) {
+                    runWithPermission(() -> {
+                        GalleryState current = screen.gallery();
+                        if (current != null)
+                            operationRunner.recoverPhotos(usbManager, selectedDevice, current, dumpsDir(), paletteIndex, MainActivity.this);
+                    });
+                } else {
+                    after = recoverSelectedCameraPhotosLocally(after);
+                    screen.showGallery(after);
+                }
+            } else {
+                screen.showGallery(after);
+            }
+        });
     }
 
     @Override
@@ -503,6 +647,11 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
+    public void onProgress(String message) {
+        screen.updateBusyProgress(message);
+    }
+
+    @Override
     public void onLog(String message) {
         Log.i(TAG, message);
         screen.appendLog(message);
@@ -514,6 +663,12 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     @Override
+    public void onError(String message) {
+        onLog(message);
+        screen.showBusyError(message);
+    }
+
+    @Override
     public void onGalleryLoaded(GalleryState gallery) {
         settings.clearLocallyDeletedSlots();
         gallery = applyAutoRgbMerge(gallery);
@@ -521,6 +676,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         gallery = injectManualMerges(gallery);
         rememberBackupPalette(new File(gallery.savePath), gallery.paletteIndex);
         screen.showGallery(gallery);
+        if (startupStep2Label != null) startupStep2Label.setTextColor(startupStepDoneColor);
         onLog("Loaded " + gallery.photos.size() + " camera photo(s).");
         if (gallery.validationErrors > 0 || gallery.validationWarnings > 0) {
             onLog("Save validation: " + gallery.validationErrors + " error(s), "
@@ -529,6 +685,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void showStartupPopup() {
+        startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+        startupStep2Checking = false;
         Dialog dialog = UiStyle.baseDialog(this);
         UiStyle.Palette colors = UiStyle.palette(this);
         int accent = screen.accentColor();
@@ -538,10 +696,34 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         LinearLayout steps = new LinearLayout(this);
         steps.setOrientation(LinearLayout.VERTICAL);
         steps.setPadding(0, dp(12), 0, 0);
-        steps.addView(connectionStep("1", "Insert the Game Boy Camera cartridge into GBxCart RW.", colors, accent));
-        steps.addView(connectionStep("2", "Connect GBxCart RW to your phone via USB (USB-C to USB-C cable).", colors, accent));
-        steps.addView(connectionStep("3", "Tap \"Load Camera\".", colors, accent));
+        startupStepDoneColor = Color.rgb(76, 175, 80);
+        startupStepDefaultColor = colors.textPrimary;
+
+        startupStep1Label = new TextView(this);
+        startupStep2Label = new TextView(this);
+        TextView step3Label = new TextView(this);
+        steps.addView(connectionStep("1", boldSpan("Connect GBxCart RW to your phone via USB (USB-C to USB-C cable).", "USB-C to USB-C"), startupStep1Label, colors, accent));
+        steps.addView(connectionStep("2", boldSpan("Insert the Game Boy Camera cartridge into GBxCart RW.", "Game Boy Camera"), startupStep2Label, colors, accent));
+        steps.addView(connectionStep("3", "Tap \"Load Camera\".", step3Label, colors, accent));
+
+        if (selectedDevice != null) {
+            startupStep1Label.setTextColor(startupStepDoneColor);
+            if (screen.gallery() != null) {
+                startupStep2Label.setTextColor(startupStepDoneColor);
+            }
+            doStartupCartridgeCheck();
+        }
         content.addView(steps, matchWidthWrapContent());
+
+        TextView cartWarning = new TextView(this);
+        cartWarning.setText("⚠ Only the Game Boy Camera cartridge is supported. Other cartridges will be rejected.");
+        cartWarning.setTextColor(colors.danger);
+        cartWarning.setTextSize(11);
+        cartWarning.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams warnParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        warnParams.setMargins(0, dp(4), 0, 0);
+        content.addView(cartWarning, warnParams);
 
         CheckBox dontShow = UiStyle.settingsCheckBox(
                 this, "Don't show on startup", "", false, accent);
@@ -553,9 +735,17 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         Button loadCamera = UiStyle.button(this, "Load Camera", accent, colors.surfaceRaised, accent);
         loadCamera.setOnClickListener(v -> {
+            if (GbxCartDevices.find(usbManager) == null) {
+                onLoadRequested(); // shows toast; popup stays open
+                return;
+            }
             if (dontShow.isChecked()) {
                 settings.saveShowStartupPopup(false);
             }
+            startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+            startupStep1Label = null;
+            startupStep2Label = null;
+            startupStep2Checking = false;
             dialog.dismiss();
             onLoadRequested();
         });
@@ -564,12 +754,54 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         okParams.setMargins(0, dp(10), 0, 0);
         content.addView(loadCamera, okParams);
 
+        dialog.setOnDismissListener(d -> {
+            startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+            startupStep1Label = null;
+            startupStep2Label = null;
+            startupStep2Checking = false;
+        });
         dialog.setContentView(content);
         UiStyle.sizeDialog(dialog, this, 32, 480);
         dialog.show();
     }
 
-    private View connectionStep(String number, String text, UiStyle.Palette colors, int accent) {
+    private void doStartupCartridgeCheck() {
+        if (startupStep2Label == null || selectedDevice == null || startupStep2Checking) return;
+        if (screen != null && screen.isBusy()) {
+            startupHandler.postDelayed(startupCartridgeCheckRunnable, 5_000);
+            return;
+        }
+        startupStep2Checking = true;
+        UsbDeviceConnection conn = usbManager.openDevice(selectedDevice);
+        if (conn == null) {
+            startupStep2Checking = false;
+            return;
+        }
+        int fd = conn.getFileDescriptor();
+        new Thread(() -> {
+            boolean isCamera = NativeGbcam.isGameBoyCameraInserted(fd);
+            conn.close();
+            runOnUiThread(() -> {
+                startupStep2Checking = false;
+                if (startupStep2Label == null) return;
+                startupStep2Label.setTextColor(isCamera ? startupStepDoneColor : startupStepDefaultColor);
+                if (startupStep2Label.isAttachedToWindow()) {
+                    startupHandler.postDelayed(startupCartridgeCheckRunnable, 12_000);
+                }
+            });
+        }).start();
+    }
+
+    private static SpannableString boldSpan(String text, String substring) {
+        SpannableString s = new SpannableString(text);
+        int i = text.indexOf(substring);
+        if (i >= 0) {
+            s.setSpan(new StyleSpan(Typeface.BOLD), i, i + substring.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return s;
+    }
+
+    private View connectionStep(String number, CharSequence text, TextView label, UiStyle.Palette colors, int accent) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.TOP);
@@ -587,7 +819,6 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         badge.setBackground(UiStyle.rounded(this, colors.surfaceRaised, accent, 999, 1));
         row.addView(badge, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
-        TextView label = new TextView(this);
         label.setText(text);
         label.setTextColor(colors.textPrimary);
         label.setTextSize(13);
@@ -780,6 +1011,17 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(0, dp(8), 0, 0);
+
+        GalleryState connectedGallery = screen.gallery();
+        if (connectedGallery != null && selectedDevice != null) {
+            body.addView(aboutSection("Connected Device", colors));
+            TextView deviceInfo = new TextView(this);
+            deviceInfo.setText(connectedGallery.connected);
+            deviceInfo.setTextColor(colors.textPrimary);
+            deviceInfo.setTextSize(13);
+            deviceInfo.setPadding(0, dp(6), 0, dp(6));
+            body.addView(deviceInfo);
+        }
 
         body.addView(aboutSection("Feedback", colors));
         body.addView(aboutRow("Report a bug", "518@returnnull.de",
@@ -1024,8 +1266,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     private void runWithPermission(Runnable action) {
         if (!refreshDevice()) {
+            screen.setDeviceConnected(false);
             return;
         }
+        screen.setDeviceConnected(true);
 
         if (!usbManager.hasPermission(selectedDevice)) {
             pendingAction = action;
@@ -1063,7 +1307,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                     save.getAbsolutePath(),
                     dumpsDir().getAbsolutePath(),
                     paletteIndex));
-            gallery = filterLocallyDeletedPhotos(gallery);
+            gallery = applyLocallyDeletedSlots(gallery);
             gallery = applyAutoRgbMerge(gallery);
             loadManualMerges();
             gallery = injectManualMerges(gallery);
@@ -1293,7 +1537,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         List<File> found = new ArrayList<>();
         for (int i = 1; i <= 30; i++) {
             File f = new File(dir, String.format(Locale.US, "IMG_PC%02d.png", i));
-            if (f.exists() && !decodeAndCheckEmpty(f.getAbsolutePath())) {
+            if (f.exists() && !isEmptyImage(f.getAbsolutePath())) {
                 found.add(f);
             }
         }
@@ -1637,7 +1881,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                         previous.outputDir,
                         paletteIndex));
                 if (recolorGeneration.get() != generation) return;
-                gallery = filterLocallyDeletedPhotos(gallery);
+                gallery = applyLocallyDeletedSlots(gallery);
                 gallery = applyAutoRgbMerge(gallery);
                 gallery = injectManualMerges(gallery);
                 gallery.copySelectionFrom(previous);
@@ -1682,6 +1926,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 obj.put("mergedSourceCount", m.mergedSourceCount);
                 obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex);
                 obj.put("mergedAlgorithm", m.mergedAlgorithm != null ? m.mergedAlgorithm : "");
+                obj.put("deleted", m.deleted);
                 arr.put(obj);
             }
             File dir = dumpsDir();
@@ -1698,12 +1943,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         File f = new File(dumpsDir(), "manual-merges.json");
         if (!f.isFile()) return;
         try {
-            byte[] bytes = new byte[(int) f.length()];
+            String json;
             try (FileInputStream in = new FileInputStream(f)) {
-                //noinspection ResultOfMethodCallIgnored
-                in.read(bytes);
+                ByteArrayOutputStream buf = new ByteArrayOutputStream();
+                byte[] chunk = new byte[4096];
+                int n;
+                while ((n = in.read(chunk)) != -1) buf.write(chunk, 0, n);
+                json = buf.toString("UTF-8");
             }
-            JSONArray arr = new JSONArray(new String(bytes, "UTF-8"));
+            JSONArray arr = new JSONArray(json);
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 String path = obj.getString("path");
@@ -1715,14 +1963,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                         -1,
                         128, 112,
                         null,
-                        false, 0, false, true, "",
+                        obj.optBoolean("deleted", false), 0, false, true, "",
                         true,
                         obj.optString("mergedKind", ""),
                         obj.optInt("mergedSourceCount", 0),
                         obj.optInt("mergedSourceStartDisplayIndex", -1),
                         obj.optString("mergedAlgorithm", "")));
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to load manual merges", e);
         }
     }
 
@@ -1734,9 +1983,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private GalleryState injectManualMerges(GalleryState gallery) {
-        if (manualMerges.isEmpty()) return gallery;
+        List<GalleryPhoto> merges = new ArrayList<>(manualMerges); // snapshot for background-thread safety
+        if (merges.isEmpty()) return gallery;
         List<GalleryPhoto> photos = null;
-        for (GalleryPhoto m : manualMerges) {
+        for (GalleryPhoto m : merges) {
             if (!new File(m.path).exists()) continue;
             int endIdx = m.mergedSourceStartDisplayIndex + m.mergedSourceCount - 1;
             int insertAt = -1;
@@ -1779,13 +2029,15 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             runOnUiThread(() -> {
                 if (updated == null) { onLog("Merge algo update failed."); return; }
                 addToManualMerges(updated);
-                List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
+                GalleryState current = screen.gallery();
+                if (current == null) return;
+                List<GalleryPhoto> photos = new ArrayList<>(current.photos);
                 for (int i = 0; i < photos.size(); i++) {
                     if (photos.get(i).path.equals(photo.path)) { photos.set(i, updated); break; }
                 }
-                screen.showGallery(new GalleryState(gallery.connected, gallery.savePath,
-                        gallery.outputDir, gallery.paletteIndex, gallery.paletteName,
-                        gallery.validationErrors, gallery.validationWarnings, photos));
+                screen.showGallery(new GalleryState(current.connected, current.savePath,
+                        current.outputDir, current.paletteIndex, current.paletteName,
+                        current.validationErrors, current.validationWarnings, photos));
                 onLog("Merge algorithm updated: " + RgbMergeDetector.algorithmShortLabel(algorithm));
             });
         }).start();
@@ -1827,10 +2079,14 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private boolean isEmptyImage(GalleryPhoto photo) {
-        Boolean cached = emptyImageCache.get(photo.path);
+        return isEmptyImage(photo.path);
+    }
+
+    private boolean isEmptyImage(String path) {
+        Boolean cached = emptyImageCache.get(path);
         if (cached != null) return cached;
-        boolean empty = decodeAndCheckEmpty(photo.path);
-        emptyImageCache.put(photo.path, empty);
+        boolean empty = decodeAndCheckEmpty(path);
+        emptyImageCache.put(path, empty);
         return empty;
     }
 
@@ -1987,6 +2243,8 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     private void registerUsbReceiver() {
         IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {

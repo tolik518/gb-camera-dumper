@@ -128,6 +128,12 @@ final class AppSettings {
         prefs.edit().putStringSet(KEY_LOCALLY_DELETED_SLOTS, existing).apply();
     }
 
+    void removeLocallyDeletedSlots(Set<String> slots) {
+        Set<String> existing = new HashSet<>(locallyDeletedSlots());
+        existing.removeAll(slots);
+        prefs.edit().putStringSet(KEY_LOCALLY_DELETED_SLOTS, existing).apply();
+    }
+
     void clearLocallyDeletedSlots() {
         prefs.edit().remove(KEY_LOCALLY_DELETED_SLOTS).apply();
     }

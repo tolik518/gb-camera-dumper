@@ -57,6 +57,7 @@ pub trait Progress {
     fn message(&mut self, _message: &str) {}
     fn cartridge_header(&mut self, _report: &CartridgeReport) {}
     fn sram_progress(&mut self, _done_bytes: usize, _total_bytes: usize) {}
+    fn write_progress(&mut self, _done: usize, _total: usize) {}
 }
 
 pub struct NoProgress;
@@ -1094,6 +1095,7 @@ impl UsbDev {
         let echo_cs_in_chunk = echo_cs_off - aligned_off; // 0xFA
 
         let checksum = order_table_checksum(order);
+        let write_total = order.len() * 2 + 4; // primary(30) + cs(2) + echo(30) + echo_cs(2)
 
         progress.message(&format!(
             "[debug][delete] order write plan: primary=0x{ORDER_OFFSET_PRIMARY:05X}, checksum=0x{ORDER_CHECKSUM_OFFSET:05X}, echo=0x{ORDER_OFFSET:05X}, echo_cs=0x{ORDER_ECHO_CHECKSUM_OFFSET:05X}, bank={bank}, aligned_off=0x{aligned_off:04X}"
@@ -1108,6 +1110,7 @@ impl UsbDev {
         ));
 
         for attempt in 1..=3 {
+            let mut written = 0usize;
             progress.message(&format!(
                 "[debug][delete] attempt {attempt}/3: enable SRAM bank {bank}"
             ));
@@ -1133,6 +1136,8 @@ impl UsbDev {
                 let address = 0xA000 + primary_off as u32 + i as u32;
                 self.sram_write_byte(address, value, progress)?;
                 std::thread::sleep(Duration::from_millis(2));
+                written += 1;
+                progress.write_progress(written, write_total);
             }
 
             // Write primary checksum (2 bytes at 0x11D5)
@@ -1142,8 +1147,12 @@ impl UsbDev {
             ));
             self.sram_write_byte(0xA000 + cs_off as u32, checksum[0], progress)?;
             std::thread::sleep(Duration::from_millis(2));
+            written += 1;
+            progress.write_progress(written, write_total);
             self.sram_write_byte(0xA000 + cs_off as u32 + 1, checksum[1], progress)?;
             std::thread::sleep(Duration::from_millis(2));
+            written += 1;
+            progress.write_progress(written, write_total);
 
             // Write echo order table (30 bytes at 0x11D7)
             progress.message(&format!(
@@ -1153,6 +1162,8 @@ impl UsbDev {
                 let address = 0xA000 + echo_off as u32 + i as u32;
                 self.sram_write_byte(address, value, progress)?;
                 std::thread::sleep(Duration::from_millis(2));
+                written += 1;
+                progress.write_progress(written, write_total);
             }
 
             // Write echo checksum (2 bytes at 0x11FA)
@@ -1162,8 +1173,12 @@ impl UsbDev {
             ));
             self.sram_write_byte(0xA000 + echo_cs_off as u32, checksum[0], progress)?;
             std::thread::sleep(Duration::from_millis(2));
+            written += 1;
+            progress.write_progress(written, write_total);
             self.sram_write_byte(0xA000 + echo_cs_off as u32 + 1, checksum[1], progress)?;
             std::thread::sleep(Duration::from_millis(2));
+            written += 1;
+            progress.write_progress(written, write_total);
 
             progress.message("[debug][delete] all writes sent; waiting 250 ms before verification");
             std::thread::sleep(Duration::from_millis(250));
@@ -1395,19 +1410,16 @@ fn last_usb_error(context: &'static str) -> GbcamUsbError {
 }
 
 fn header_mismatch_error(header: &[u8], mapper: u8) -> GbcamUsbError {
-    let mut msg = format!(
-        "mapper 0x{:02X} != 0xFC. title={:?}, rom_size=0x{:02X}, ram_size=0x{:02X}, checksum=0x{:02X}{:02X}",
-        mapper,
-        title_from_header(header),
-        header[0x148],
-        header[0x149],
-        header[0x14E],
-        header[0x14F]
-    );
-    if shifted_header_hint(header) {
-        msg.push_str("; header looks 8-byte shifted, likely wrong DMG read method");
-    }
-    GbcamUsbError::Protocol(msg)
+    let title = title_from_header(header);
+    let hint = if shifted_header_hint(header) {
+        " The cartridge header looks shifted — try reseating it."
+    } else {
+        ""
+    };
+    GbcamUsbError::Protocol(format!(
+        "Wrong cartridge: \"{title:?}\" (mapper 0x{mapper:02X}) is not a Game Boy Camera. \
+        Insert the Game Boy Camera cartridge and try again.{hint}"
+    ))
 }
 
 #[cfg(test)]

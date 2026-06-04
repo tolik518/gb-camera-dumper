@@ -49,4 +49,6 @@ final class NativeGbcam {
     static native String loadGalleryFromSave(String savePath, String outputDir, int paletteIndex);
 
     static native String dumpFromFd(int fd, String outputDir, boolean eraseAfter);
+
+    static native boolean isGameBoyCameraInserted(int fd);
 }
