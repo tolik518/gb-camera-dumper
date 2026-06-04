@@ -120,8 +120,10 @@ final class RgbMergeDetector {
         File mergeDir = new File(outputRoot, "rgb-merged-manual");
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
         String resolvedAlgorithm = resolveAlgorithm(defaultAlgorithm, layout.clearIndex >= 0);
-        File out = new File(mergeDir, String.format(Locale.US, "MANUAL_from%02d_n%d_%s.png",
-                sources[0].displayIndex + 1, count, layout.label));
+        // Use physical slot numbers (not display indices) so the filename stays stable
+        // even when photos are deleted and the album is renumbered on reload.
+        File out = new File(mergeDir, String.format(Locale.US, "MANUAL_s%s_n%d_%s.png",
+                slotKey(sources, count), count, layout.label));
         if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
         return new GalleryPhoto(
                 out.getName(), out.getAbsolutePath(),
@@ -200,6 +202,15 @@ final class RgbMergeDetector {
     }
 
     // --- Detection internals ---------------------------------------------------
+
+    private static String slotKey(GalleryPhoto[] sources, int count) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (i > 0) sb.append('-');
+            sb.append(String.format(Locale.US, "%02d", sources[i].physicalSlot + 1));
+        }
+        return sb.toString();
+    }
 
     private static void deleteOldMergedFiles(File mergeDir) {
         File[] files = mergeDir.listFiles((dir, name) -> name.startsWith("RGB_") && name.endsWith(".png"));

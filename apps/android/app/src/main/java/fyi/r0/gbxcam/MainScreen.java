@@ -79,7 +79,7 @@ final class MainScreen {
     private final UiStyle.Palette colors;
     private final LinearLayout root;
     private final TextView subtitle;
-    private final TextView selection;
+    private HorizontalScrollView albumActionsWrapper;
     private final TextView empty;
     private final TextView logs;
     private final TextView logTitle;
@@ -122,6 +122,7 @@ final class MainScreen {
     private int accentSurface;
     private int accentText;
 
+    private boolean showMeta = true;
     private Executor bitmapExecutor;
     private TileHolder[] tileHolders;
     private final AtomicInteger displayGeneration = new AtomicInteger(0);
@@ -131,11 +132,13 @@ final class MainScreen {
         final LinearLayout tile;
         final ImageView image;
         final TextView selectionMarker;
-        TileHolder(GalleryPhoto photo, LinearLayout tile, ImageView image, TextView selectionMarker) {
+        final TextView meta;
+        TileHolder(GalleryPhoto photo, LinearLayout tile, ImageView image, TextView selectionMarker, TextView meta) {
             this.photo = photo;
             this.tile = tile;
             this.image = image;
             this.selectionMarker = selectionMarker;
+            this.meta = meta;
         }
     }
 
@@ -167,12 +170,7 @@ final class MainScreen {
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(colors.textPrimary);
-        title.setContentDescription("About");
-        title.setOnClickListener(v -> listener.onAboutRequested());
-        titleBlock.setOnClickListener(v -> listener.onAboutRequested());
-        titleBlock.setClickable(true);
         subtitle = new TextView(context);
-        subtitle.setText("Load the camera to view photos.");
         subtitle.setTextSize(14);
         subtitle.setTextColor(colors.textSecondary);
         titleBlock.addView(title);
@@ -244,33 +242,24 @@ final class MainScreen {
         setPaletteIndex(defaultPaletteIndex);
 
         LinearLayout actions = toolbarRow("Selection");
-        selection = new TextView(context);
-        selection.setGravity(Gravity.CENTER);
-        selection.setTextSize(12);
-        selection.setTextColor(colors.textSecondary);
-        selection.setSingleLine(true);
-        selection.setIncludeFontPadding(false);
-        selection.setPadding(dp(10), 0, dp(10), 0);
-        selection.setBackground(rounded(colors.surface, colors.border, 6, 1));
-        LinearLayout.LayoutParams selectionParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(36));
-        selectionParams.setMargins(0, 0, dp(8), 0);
-        actions.addView(selection, selectionParams);
         selectAllButton = smallButton("Select all", v -> listener.onSelectAllRequested());
         selectModeButton = smallButton("Select", v -> {
             selectMode = true;
             updateAllTileSelectModeAppearance();
             updateActions();
         });
-        deselectAllButton = smallButton("Deselect", v -> listener.onDeselectAllRequested());
+        deselectAllButton = smallButton("Deselect all", v -> listener.onDeselectAllRequested());
         saveButton = smallButton("Save", v -> listener.onSaveSelectedRequested());
         shareButton = smallButton("Share", v -> listener.onShareSelectedRequested());
+        deleteButton = smallButton("Delete", v -> listener.onDeleteSelectedRequested());
+        deleteButton.setTextColor(Color.WHITE);
+        deleteButton.setBackground(dangerButtonBackground());
         addActionButton(actions, selectAllButton);
         addActionButton(actions, selectModeButton);
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
         addActionButton(actions, shareButton);
+        addActionButton(actions, deleteButton);
         root.addView(wrapHorizontal(actions), matchWidthWrapContent());
 
         LinearLayout albumActions = toolbarRow("Album tools");
@@ -278,9 +267,6 @@ final class MainScreen {
         recoverButton = smallButton("Recover deleted", v -> listener.onRecoverSelectedRequested());
         recoverButton.setTextColor(accent);
         recoverButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
-        deleteButton = smallButton("Delete", v -> listener.onDeleteSelectedRequested());
-        deleteButton.setTextColor(Color.WHITE);
-        deleteButton.setBackground(dangerButtonBackground());
         compactButton = smallButton("Compact gaps", v -> listener.onCompactAlbumRequested());
         clearAlbumButton = smallButton("Clear album", v -> listener.onClearAlbumRequested());
         clearAlbumButton.setTextColor(colors.danger);
@@ -290,11 +276,11 @@ final class MainScreen {
         mergeButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         addActionButton(albumActions, moveFirstButton);
         addActionButton(albumActions, recoverButton);
-        addActionButton(albumActions, deleteButton);
         addActionButton(albumActions, mergeButton);
         addActionButton(albumActions, compactButton);
         addActionButton(albumActions, clearAlbumButton);
-        root.addView(wrapHorizontal(albumActions), matchWidthWrapContent());
+        albumActionsWrapper = wrapHorizontal(albumActions);
+        root.addView(albumActionsWrapper, matchWidthWrapContent());
 
         LinearLayout libraryHeader = row();
         libraryHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -322,7 +308,7 @@ final class MainScreen {
         grid.setPadding(0, dp(2), 0, 0);
 
         empty = new TextView(context);
-        empty.setText("No camera photos loaded yet.");
+        empty.setText("No photos loaded yet");
         empty.setGravity(Gravity.CENTER);
         empty.setTextColor(colors.textMuted);
         empty.setPadding(0, dp(80), 0, dp(80));
@@ -384,15 +370,16 @@ final class MainScreen {
         }
         empty.setVisibility(gallery.photos.isEmpty() ? View.VISIBLE : View.GONE);
         grid.setVisibility(gallery.photos.isEmpty() ? View.GONE : View.VISIBLE);
-        subtitle.setText((deviceConnected ? "Connected" : "Cached") + " · " + gallery.photos.size() + " photo(s)");
+        subtitle.setText((deviceConnected ? "Connected" : "Cached") + " · " + photoCount(gallery.photos.size()));
         updateActions();
     }
 
     void setDeviceConnected(boolean connected) {
         this.deviceConnected = connected;
         if (gallery != null) {
-            String status = connected ? "Connected" : "Disconnected";
-            subtitle.setText(status + " · " + gallery.photos.size() + " photo(s)");
+            subtitle.setText((connected ? "Connected" : "Cached") + " · " + photoCount(gallery.photos.size()));
+        } else {
+            subtitle.setText(connected ? "Device connected — tap Load Camera" : "Connect GBxCart to load photos");
         }
         updateActions();
     }
@@ -641,6 +628,19 @@ final class MainScreen {
         setLogsVisible(visible);
     }
 
+    void setShowMeta(boolean show) {
+        showMeta = show;
+        if (tileHolders == null) return;
+        int vis = show ? View.VISIBLE : View.GONE;
+        for (TileHolder holder : tileHolders) {
+            if (holder != null && holder.meta != null) holder.meta.setVisibility(vis);
+        }
+    }
+
+    String getLogs() {
+        return logs.getText().toString();
+    }
+
     boolean isBusy() {
         return busy;
     }
@@ -684,7 +684,6 @@ final class MainScreen {
         boolean showDelete = selectedActive > 0 || selectedManualMerges > 0;
         boolean showRecover = selectedDeleted > 0 || selectedDeletedManuals > 0;
         int total = gallery == null ? 0 : gallery.photos.size();
-        selection.setText(total == 0 ? "No photos" : selected == 0 ? "0 selected" : selected + " of " + total + " selected");
 
         loadButton.setEnabled(!busy);
         selectAllButton.setEnabled(!busy && total > 0 && selected < total);
@@ -728,6 +727,11 @@ final class MainScreen {
         setButtonAvailability(clearAlbumButton, !busy && deviceConnected && total > 0);
         setButtonAvailability(mergeButton, canMerge);
         deleteButton.setTextColor(!busy && showDelete ? Color.WHITE : colors.disabledText);
+        boolean anyAlbumAction = moveFirstButton.getVisibility() == View.VISIBLE
+                || recoverButton.getVisibility() == View.VISIBLE
+                || mergeButton.getVisibility() == View.VISIBLE
+                || clearAlbumButton.getVisibility() == View.VISIBLE;
+        if (albumActionsWrapper != null) albumActionsWrapper.setVisibility(anyAlbumAction ? View.VISIBLE : View.GONE);
     }
 
     private TileHolder photoTile(GalleryPhoto photo, int gen) {
@@ -820,11 +824,12 @@ final class MainScreen {
         meta.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f) : colors.textMuted);
         meta.setTextSize(10);
         meta.setIncludeFontPadding(false);
+        meta.setVisibility(showMeta ? View.VISIBLE : View.GONE);
         labelBlock.addView(label);
         labelBlock.addView(meta);
         tile.addView(labelBlock, matchWidthWrapContent());
 
-        return new TileHolder(photo, tile, image, selectionMarker);
+        return new TileHolder(photo, tile, image, selectionMarker, meta);
     }
 
     private String photoTitle(GalleryPhoto photo) {
@@ -1226,6 +1231,10 @@ final class MainScreen {
 
     private int dp(int value) {
         return UiStyle.dp(context, value);
+    }
+
+    private static String photoCount(int n) {
+        return n + (n == 1 ? " photo" : " photos");
     }
 
     private static final class CameraImageFrame extends FrameLayout {

@@ -3,6 +3,7 @@ package fyi.r0.gbxcam;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -85,6 +86,106 @@ final class PhotoExporter {
         File backupDir = appExportDir(context, stamp);
         copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
         return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris);
+    }
+
+    /**
+     * Exports selected photos as JPEG at the given pixel scale for sharing.
+     * Nearest-neighbor scaling preserves the pixel-art look.
+     */
+    static ExportResult exportSelectedScaled(
+            Context context,
+            GalleryState gallery,
+            int[] palette,
+            boolean includeDeleted,
+            int scale) throws IOException {
+        int count = eligiblePhotoCount(gallery, true, includeDeleted);
+        if (count == 0) throw new IOException("No exportable photos selected.");
+
+        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
+        String album = "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
+        String imageLocation;
+        ArrayList<Uri> imageUris;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            imageUris = exportScaledToMediaStore(context, gallery, palette, album, includeDeleted, scale);
+            imageLocation = "Pictures/" + album;
+        } else {
+            File output = exportScaledToAppFolder(context, gallery, palette, album, includeDeleted, scale);
+            imageUris = new ArrayList<>();
+            imageLocation = output.getAbsolutePath();
+        }
+
+        File backupDir = appExportDir(context, stamp);
+        copy(new File(gallery.savePath), new File(backupDir, "GAMEBOYCAMERA.sav"));
+        return new ExportResult(imageLocation, backupDir.getAbsolutePath(), imageUris);
+    }
+
+    private static ArrayList<Uri> exportScaledToMediaStore(
+            Context context, GalleryState gallery, int[] palette,
+            String album, boolean includeDeleted, int scale) throws IOException {
+        ContentResolver resolver = context.getContentResolver();
+        ArrayList<Uri> uris = new ArrayList<>();
+        for (GalleryPhoto photo : gallery.photos) {
+            if (!isExportable(photo, true, includeDeleted)) continue;
+            String jpegName = photo.name.replaceFirst("\\.png$", ".jpg");
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, jpegName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                    Environment.DIRECTORY_PICTURES + "/" + album);
+            values.put(MediaStore.Images.Media.IS_PENDING, 1);
+
+            Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new IOException("Could not create MediaStore image: " + photo.name);
+            try {
+                try (OutputStream out = resolver.openOutputStream(uri)) {
+                    if (out == null) throw new IOException("Could not open output: " + photo.name);
+                    writeScaledJpeg(photo, palette, scale, out);
+                }
+                values.clear();
+                values.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(uri, values, null, null);
+                uris.add(uri);
+            } catch (IOException | RuntimeException e) {
+                resolver.delete(uri, null, null);
+                throw e;
+            }
+        }
+        return uris;
+    }
+
+    private static File exportScaledToAppFolder(
+            Context context, GalleryState gallery, int[] palette,
+            String album, boolean includeDeleted, int scale) throws IOException {
+        File out = new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album);
+        if (!out.mkdirs() && !out.isDirectory()) throw new IOException("Cannot create dir: " + out);
+        for (GalleryPhoto photo : gallery.photos) {
+            if (!isExportable(photo, true, includeDeleted)) continue;
+            String jpegName = photo.name.replaceFirst("\\.png$", ".jpg");
+            try (FileOutputStream stream = new FileOutputStream(new File(out, jpegName))) {
+                writeScaledJpeg(photo, palette, scale, stream);
+            }
+        }
+        return out;
+    }
+
+    private static void writeScaledJpeg(
+            GalleryPhoto photo, int[] palette, int scale, OutputStream out) throws IOException {
+        Bitmap bitmap = PhotoRenderer.renderBitmap(photo, palette);
+        if (bitmap == null) throw new IOException("Could not render: " + photo.name);
+        try {
+            Bitmap toWrite = scale > 1
+                    ? Bitmap.createScaledBitmap(
+                            bitmap, bitmap.getWidth() * scale, bitmap.getHeight() * scale,
+                            false)  // false = nearest-neighbour, keeps pixel-art crispness
+                    : bitmap;
+            if (!toWrite.compress(Bitmap.CompressFormat.JPEG, 95, out)) {
+                throw new IOException("Could not encode: " + photo.name);
+            }
+            if (toWrite != bitmap) toWrite.recycle();
+        } finally {
+            bitmap.recycle();
+        }
     }
 
     static void copyToStream(File source, OutputStream out) throws IOException {

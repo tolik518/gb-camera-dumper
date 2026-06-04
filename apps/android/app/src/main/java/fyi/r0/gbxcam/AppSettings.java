@@ -30,6 +30,8 @@ final class AppSettings {
     private static final String KEY_DEFAULT_MERGE_ALGO = "default-merge-algo";
     private static final String KEY_MERGE_ALGO_OVERRIDE_PREFIX = "merge-algo-override:";
     private static final String KEY_LOCALLY_DELETED_SLOTS = "locally-deleted-slots";
+    private static final String KEY_SHOW_PHOTO_META = "show-photo-meta";
+    private static final String KEY_SHARE_MULTIPLIER = "share-multiplier";
 
     static final String DEFAULT_RGB4_ORDER = "CRGB";
     static final String DEFAULT_RGB3_ORDER = "RGB";
@@ -88,6 +90,22 @@ final class AppSettings {
 
     void saveShowStartupPopup(boolean show) {
         prefs.edit().putBoolean(KEY_SHOW_STARTUP_POPUP, show).apply();
+    }
+
+    boolean showPhotoMeta() {
+        return prefs.getBoolean(KEY_SHOW_PHOTO_META, false);
+    }
+
+    void saveShowPhotoMeta(boolean show) {
+        prefs.edit().putBoolean(KEY_SHOW_PHOTO_META, show).apply();
+    }
+
+    int shareMultiplier() {
+        return prefs.getInt(KEY_SHARE_MULTIPLIER, 4);
+    }
+
+    void saveShareMultiplier(int multiplier) {
+        prefs.edit().putInt(KEY_SHARE_MULTIPLIER, multiplier).apply();
     }
 
     String rgb4Order() {

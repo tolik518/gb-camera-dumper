@@ -29,12 +29,40 @@ final class UiStyle {
     private UiStyle() {
     }
 
+    interface Logger {
+        void log(String message);
+    }
+
+    private static Logger logger;
+
+    static void setLogger(Logger l) {
+        logger = l;
+    }
+
+    static final class LoggingButton extends Button {
+        LoggingButton(Context context) {
+            super(context);
+        }
+
+        @Override
+        public boolean performClick() {
+            if (logger != null) {
+                CharSequence cd = getContentDescription();
+                String label = (cd != null && cd.length() > 0)
+                        ? cd.toString()
+                        : getText() != null ? getText().toString() : "";
+                if (!label.isEmpty()) logger.log("Button: " + label);
+            }
+            return super.performClick();
+        }
+    }
+
     static Palette palette(Context context) {
         return Palette.from(context);
     }
 
     static Button button(Context context, String text, int textColor, int fillColor, int strokeColor) {
-        Button button = new Button(context);
+        Button button = new LoggingButton(context);
         button.setText(text);
         button.setAllCaps(false);
         button.setTextSize(13);
