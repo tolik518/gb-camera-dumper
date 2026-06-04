@@ -22,5 +22,6 @@ This project is licensed under the [GNU General Public License v3.0 or later](LI
 
 ## Screenshots
 
-(my camera has a very bad scratch, so the photos dont look  great)
-<img src=".github/screenshot-dark.jpg" alt="GBxCAM Viewer dark screenshot" width="49%"/> <img src=".github/screenshot-light.jpg" alt="GBxCAM Viewer light screenshot" width="49%"/>
+(my camera has a very bad scratch, so the photos dont look  great)  
+
+<img src=".github/screenshot-dark.jpg" alt="GBxCAM Viewer dark screenshot" width="40%"/> <img src=".github/screenshot-light.jpg" alt="GBxCAM Viewer light screenshot" width="40%"/>
