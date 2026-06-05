@@ -6,7 +6,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
@@ -19,7 +18,6 @@ import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -28,7 +26,7 @@ import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
-final class MainScreen {
+final class MainScreen implements PaletteMenu.Host {
     interface Listener {
         void onManualMergeRequested();
 
@@ -980,117 +978,30 @@ final class MainScreen {
         if (busy) {
             return;
         }
-
-        int originalIndex = paletteIndex;
-        int popupWidth = Math.min(dp(340), root.getWidth() - dp(72));
-        LinearLayout menu = new LinearLayout(context);
-        menu.setOrientation(LinearLayout.VERTICAL);
-        ScrollView menuScroll = new ScrollView(context);
-        menuScroll.setBackground(rounded(colors.surfaceRaised, colors.borderStrong, 8, 1));
-        menuScroll.addView(menu);
-
-        PopupWindow popup = new PopupWindow(
-                menuScroll,
-                popupWidth,
-                Math.min(dp(48) * paletteLabels.length, dp(336)),
-                true);
-        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popup.setOutsideTouchable(true);
-        popup.setElevation(dp(8));
-        popup.setAnimationStyle(android.R.style.Animation);
-        for (int index : paletteMenuOrder()) {
-            menu.addView(paletteMenuItem(index, originalIndex, popup));
-        }
-
-        popup.showAsDropDown(paletteField, paletteField.getWidth() - popupWidth, dp(6));
+        new PaletteMenu(context, colors, this).show(paletteField, root.getWidth());
     }
 
-    private View paletteMenuItem(int index, int originalIndex, PopupWindow popup) {
-        boolean selected = index == paletteIndex;
-        LinearLayout item = row();
-        item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(12), 0, dp(12), 0);
-        item.setBackgroundColor(selected ? accentSurface : colors.surfaceRaised);
-        item.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48)));
+    // --- PaletteMenu.Host ------------------------------------------------------
 
-        LinearLayout swatch = paletteSwatch(dp(56), dp(20));
-        setSwatchColors(swatch, paletteColorsForIndex(index));
-        item.addView(swatch, new LinearLayout.LayoutParams(dp(56), dp(20)));
+    @Override public String[] paletteLabels() { return paletteLabels; }
 
-        TextView label = new TextView(context);
-        label.setSingleLine(true);
-        label.setEllipsize(TextUtils.TruncateAt.END);
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setIncludeFontPadding(false);
-        label.setTextSize(13);
-        label.setText(paletteLabels[index]);
-        label.setTextColor(selected ? accent : colors.textPrimary);
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                1);
-        labelParams.setMargins(dp(10), 0, 0, 0);
-        item.addView(label, labelParams);
+    @Override public boolean[] paletteFavorites() { return paletteFavorites; }
 
-        TextView star = new TextView(context);
-        star.setText(paletteFavorites[index] ? "★" : "☆");
-        star.setTextSize(22);
-        star.setGravity(Gravity.CENTER);
-        star.setMinWidth(dp(56));
-        star.setMinHeight(dp(48));
-        star.setPadding(dp(8), 0, dp(8), 0);
-        star.setTextColor(paletteFavorites[index] ? accent : colors.textSecondary);
-        star.setContentDescription((paletteFavorites[index] ? "Remove favorite: " : "Add favorite: ") + paletteLabels[index]);
-        star.setOnClickListener(v -> {
-            listener.onPaletteFavoriteToggled(index);
-            star.setText(paletteFavorites[index] ? "★" : "☆");
-            star.setTextColor(paletteFavorites[index] ? accent : colors.textSecondary);
-            star.setContentDescription((paletteFavorites[index] ? "Remove favorite: " : "Add favorite: ") + paletteLabels[index]);
-        });
-        item.addView(star, new LinearLayout.LayoutParams(dp(64), LinearLayout.LayoutParams.MATCH_PARENT));
+    @Override public int[] recentPalettes() { return recentPalettes; }
 
-        item.setOnClickListener(v -> {
-            popup.dismiss();
-            setPaletteIndex(index);
-            if (index != originalIndex) {
-                listener.onPaletteChanged(index);
-            }
-        });
-        return item;
-    }
+    @Override public int currentPaletteIndex() { return paletteIndex; }
 
-    private int[] paletteMenuOrder() {
-        int[] order = new int[paletteLabels.length];
-        boolean[] added = new boolean[paletteLabels.length];
-        int count = 0;
+    @Override public int[] colorsForIndex(int index) { return paletteColorsForIndex(index); }
 
-        for (int i = 0; i < paletteFavorites.length; i++) {
-            if (paletteFavorites[i]) {
-                order[count++] = i;
-                added[i] = true;
-            }
-        }
+    @Override public int accent() { return accent; }
 
-        if (recentPalettes != null) {
-            for (int recent : recentPalettes) {
-                int index = safePaletteIndex(recent);
-                if (!added[index]) {
-                    order[count++] = index;
-                    added[index] = true;
-                }
-            }
-        }
+    @Override public int accentSurface() { return accentSurface; }
 
-        for (int i = 0; i < paletteLabels.length; i++) {
-            if (!added[i]) {
-                order[count++] = i;
-            }
-        }
+    @Override public void applyPalette(int index) { setPaletteIndex(index); }
 
-        return order;
-    }
+    @Override public void paletteChanged(int index) { listener.onPaletteChanged(index); }
+
+    @Override public void toggleFavorite(int index) { listener.onPaletteFavoriteToggled(index); }
 
     private LinearLayout paletteSwatch(int width, int height) {
         LinearLayout swatch = row();
