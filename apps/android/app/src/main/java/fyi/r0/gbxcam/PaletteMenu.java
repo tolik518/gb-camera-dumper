@@ -47,8 +47,12 @@ final class PaletteMenu {
     /** Shows the menu anchored to {@code anchor}; {@code rootWidth} bounds the popup width. */
     void show(View anchor, int rootWidth) {
         String[] labels = host.paletteLabels();
+        if (labels.length == 0) {
+            return;
+        }
         int originalIndex = host.currentPaletteIndex();
-        int popupWidth = Math.min(dp(340), rootWidth - dp(72));
+        int availableWidth = rootWidth > 0 ? rootWidth - dp(72) : anchor.getWidth();
+        int popupWidth = Math.max(dp(220), Math.min(dp(340), Math.max(availableWidth, anchor.getWidth())));
         LinearLayout menu = new LinearLayout(context);
         menu.setOrientation(LinearLayout.VERTICAL);
         ScrollView menuScroll = new ScrollView(context);
@@ -58,7 +62,7 @@ final class PaletteMenu {
         PopupWindow popup = new PopupWindow(
                 menuScroll,
                 popupWidth,
-                Math.min(dp(48) * labels.length, dp(336)),
+                Math.max(dp(48), Math.min(dp(48) * labels.length, dp(336))),
                 true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);

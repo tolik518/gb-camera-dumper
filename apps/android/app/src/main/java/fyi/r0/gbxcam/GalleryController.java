@@ -662,19 +662,53 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
 
     @Override
     public void shareSinglePhoto(GalleryPhoto photo) {
-        GalleryState gallery = screen.gallery();
-        if (gallery == null) return;
+        if (screen.gallery() == null) return;
         ShareSizeDialog.show(activity, settings, scale -> {
+            GalleryState gallery = screen.gallery();
+            GalleryPhoto target = findCurrentPhoto(photo, gallery);
+            if (target == null) {
+                onLog("Share failed: photo is no longer in the current gallery.");
+                return;
+            }
             // Save and temporarily replace selection so exportSelectedScaled picks up just this photo.
             boolean[] prev = new boolean[gallery.photos.size()];
             for (int i = 0; i < gallery.photos.size(); i++) {
                 prev[i] = gallery.photos.get(i).selected;
-                gallery.photos.get(i).selected = (gallery.photos.get(i) == photo);
+                gallery.photos.get(i).selected = (gallery.photos.get(i) == target);
             }
             doShareSelected(gallery, scale);
             for (int i = 0; i < gallery.photos.size(); i++) gallery.photos.get(i).selected = prev[i];
             screen.showGallery(gallery);
         });
+    }
+
+    private static GalleryPhoto findCurrentPhoto(GalleryPhoto photo, GalleryState gallery) {
+        if (photo == null || gallery == null) return null;
+        for (GalleryPhoto current : gallery.photos) {
+            if (current == photo) {
+                return current;
+            }
+        }
+        for (GalleryPhoto current : gallery.photos) {
+            if (samePhotoIdentity(current, photo)) {
+                return current;
+            }
+        }
+        return null;
+    }
+
+    private static boolean samePhotoIdentity(GalleryPhoto left, GalleryPhoto right) {
+        if (left.mergedRgb || right.mergedRgb) {
+            return left.mergedRgb == right.mergedRgb
+                    && left.path != null
+                    && left.path.equals(right.path);
+        }
+        if (left.isAlbumBacked() && right.isAlbumBacked()) {
+            return left.physicalSlot == right.physicalSlot;
+        }
+        return left.displayIndex == right.displayIndex
+                && left.name != null
+                && left.name.equals(right.name);
     }
 
     private void recolorCachedGallery(int paletteIndex, boolean logChange) {
