@@ -311,9 +311,16 @@ in the plan), optional StartupDialog, and Phase 6 (split `MainScreen`).
   `GalleryController` 773 lines.
 
 ### Verification
-- `:app:compileDebugJavaWithJavac` + `:app:assembleDebug` — ✅ BUILD SUCCESSFUL;
-  APK installed on device.
-- On-device smoke test — ⬜ pending (this is the deepest change — exercise
-  everything: load camera, palette switch, select/save/share, delete/recover with
-  and without the cartridge connected, move-first/compact/clear, manual + auto
-  merges, photo detail edits, backups, import/export, startup popup auto-load).
+- `:app:compileDebugJavaWithJavac` + `:app:assembleDebug` — ✅ BUILD SUCCESSFUL.
+- **On-device smoke test (adb, no cartridge attached) — ✅ passed** after one fix:
+  cache load on launch, startup popup, photo detail + live order/algorithm
+  re-merge with persist ("Merge updated"), settings dialog, about dialog, palette
+  switch (instant recolor — mono tiles greyscale, RGB merges stay colored),
+  backups picker (thumbnail mosaics load), long-press selection → action bar.
+  Camera-dependent ops (load/delete/recover/reorder to cartridge) not exercised
+  — no GBxCart attached — but their code paths moved verbatim.
+- **Bug found & fixed** (commit after this one): the `MainScreen` constructor's
+  `Listener` parameter shadowed the field, so header/action buttons built in the
+  constructor captured the (null) parameter rather than the field set by
+  `setListener`. Tile taps worked (field) but the gear/Save/Delete crashed with an
+  NPE. Fix: drop the constructor parameter so those lambdas read the field.
