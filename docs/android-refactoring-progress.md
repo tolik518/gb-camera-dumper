@@ -16,7 +16,8 @@ run by the user before release.
 | 1 | Leaf helpers (AppFiles, PaletteCatalog) + dead code | ✅ done |
 | 2 | UsbDeviceController | ✅ done |
 | 3 | ManualMergeStore + BackupRepository | ✅ done |
-| 4 | GalleryPipeline + GalleryController | ⬜ pending |
+| 4a | GalleryPipeline (decode transform chain) | ✅ done |
+| 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
 | 6 | MainScreen split | ⬜ pending |
 
@@ -152,8 +153,36 @@ controller, leaving `MainActivity` as the host of the UI reactions.
 
 ---
 
-## ⏸ Paused after Phase 3 for on-device testing
+## Phase 3 on-device test
 
-Per the agreed plan, stopping here (low/medium-risk phases done) before the
-high-risk Phase 4 (controller + pipeline extraction). Please run
-`just android-apk-install` on a device and smoke-test the flows listed above.
+User smoke-tested connection + palette switching on device — OK. Continued.
+
+---
+
+## Phase 4a — Extract GalleryPipeline
+
+Phase 4 is split into two reviewable commits (4a pipeline, 4b controller) because
+the controller is large and entangled with dialogs (Phase 5).
+
+**Goal:** dedup the decode-side transform chain that was open-coded in the three
+load paths (`onGalleryLoaded`, `loadCachedGallery`, `recolorCachedGallery`).
+
+### Changes
+- New `GalleryPipeline(settings, emptyImages, logger)` owns `applyLocallyDeletedSlots`,
+  `applyAutoRgbMerge`, `filterEmptyDeletedPhotos`, and `monoSourcePhotos`. The shared
+  entry point is `process(raw, applyLocallyDeleted)`:
+  - camera read → `process(g, false)` (locally-deleted set was just cleared);
+  - cache / recolor → `process(g, true)` (re-apply locally-deleted).
+- Manual merges are deliberately **not** in the pipeline: the camera/cache paths
+  call `mergeStore.load()` then `mergeStore.inject(...)`, while the recolor path
+  injects on the UI thread (to see the latest in-memory state). The
+  `recolorGeneration` guards and the bg/UI thread split are preserved exactly.
+- `monoSourcePhotos` is exposed (the detail-view preview merge uses it).
+
+### Result
+- `MainActivity` 2183 → 2118 lines; new `GalleryPipeline` 108 lines.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
+- On-device smoke test — ⬜ pending (verify: camera load, cache load on restart,
+  backup load, palette recolor, auto-RGB-merge appears, manual merges still inject).

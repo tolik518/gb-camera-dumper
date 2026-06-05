@@ -68,6 +68,7 @@ public class MainActivity extends Activity
     private final EmptyImageCache emptyImages = new EmptyImageCache();
     private ManualMergeStore mergeStore;
     private BackupRepository backups;
+    private GalleryPipeline pipeline;
     private boolean destroyed;
 
     private TextView startupStep1Label;
@@ -135,6 +136,7 @@ public class MainActivity extends Activity
         settings = new AppSettings(this);
         mergeStore = new ManualMergeStore(this);
         backups = new BackupRepository(this, settings, emptyImages);
+        pipeline = new GalleryPipeline(settings, emptyImages, this::onLog);
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
         palettes = PaletteCatalog.load();
         paletteIndex = settings.paletteIndex(defaultPaletteIndex);
@@ -483,22 +485,6 @@ public class MainActivity extends Activity
         return gallery.withPhotos(photos);
     }
 
-    private GalleryState applyLocallyDeletedSlots(GalleryState gallery) {
-        Set<String> deleted = settings.locallyDeletedSlots();
-        if (deleted.isEmpty()) return gallery;
-        List<GalleryPhoto> photos = new ArrayList<>(gallery.photos);
-        boolean changed = false;
-        for (int i = 0; i < photos.size(); i++) {
-            GalleryPhoto p = photos.get(i);
-            if (!p.isActiveAlbumPhoto() || p.mergedRgb) continue;
-            if (!deleted.contains(String.valueOf(p.physicalSlot))) continue;
-            photos.set(i, p.withDeleted(true));
-            changed = true;
-        }
-        if (!changed) return gallery;
-        return gallery.withPhotos(photos);
-    }
-
     @Override
     public void onRecoverSelectedRequested() {
         GalleryState gallery = screen.gallery();
@@ -643,8 +629,9 @@ public class MainActivity extends Activity
     @Override
     public void onGalleryLoaded(GalleryState gallery) {
         if (destroyed) return;
+        // Fresh camera read: clear the locally-deleted set rather than re-applying it.
         settings.clearLocallyDeletedSlots();
-        gallery = applyAutoRgbMerge(gallery);
+        gallery = pipeline.process(gallery, false);
         mergeStore.load();
         gallery = mergeStore.inject(gallery);
         backups.rememberPalette(new File(gallery.savePath), gallery.paletteIndex);
@@ -1281,8 +1268,7 @@ public class MainActivity extends Activity
                     save.getAbsolutePath(),
                     dumpsDir().getAbsolutePath(),
                     paletteIndex));
-            gallery = applyLocallyDeletedSlots(gallery);
-            gallery = applyAutoRgbMerge(gallery);
+            gallery = pipeline.process(gallery, true);
             mergeStore.load();
             gallery = mergeStore.inject(gallery);
             backups.rememberPalette(save, paletteIndex);
@@ -1891,7 +1877,7 @@ public class MainActivity extends Activity
         previewExecutor.submit(() -> {
             Bitmap preview = null;
             try {
-                List<GalleryPhoto> monoPhotos = monoSourcePhotos(gallery);
+                List<GalleryPhoto> monoPhotos = pipeline.monoSourcePhotos(gallery);
                 int startIdx = mergedPhoto.mergedSourceStartDisplayIndex;
                 int count = mergedPhoto.mergedSourceCount;
 
@@ -2009,8 +1995,7 @@ public class MainActivity extends Activity
                         previous.outputDir,
                         paletteIndex));
                 if (recolorGeneration.get() != generation) return;
-                gallery = applyLocallyDeletedSlots(gallery);
-                gallery = applyAutoRgbMerge(gallery);
+                gallery = pipeline.process(gallery, true);
                 // mergeStore.inject and copySelectionFrom run on the UI thread so they
                 // always see the latest manual-merge state (e.g. a merge added while this
                 // background recolor was in flight).
@@ -2081,55 +2066,6 @@ public class MainActivity extends Activity
                 onLog("Merge updated: " + order + " / " + RgbMergeDetector.algorithmShortLabel(algorithm));
             });
         });
-    }
-
-    private GalleryState applyAutoRgbMerge(GalleryState gallery) {
-        gallery = filterEmptyDeletedPhotos(gallery);
-        if (!settings.autoRgbMerge()) {
-            return gallery;
-        }
-        List<GalleryPhoto> sourcePhotos = monoSourcePhotos(gallery);
-        GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, sourcePhotos, new File(gallery.outputDir),
-                settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(), settings.mergeAlgorithmOverrides());
-        int added = merged.photos.size() - gallery.photos.size();
-        if (added > 0) {
-            onLog("Auto-merged " + added + " RGB " + plural(added, "set") + ".");
-        }
-        return merged;
-    }
-
-    private GalleryState filterEmptyDeletedPhotos(GalleryState gallery) {
-        List<GalleryPhoto> filtered = null;
-        for (int i = 0; i < gallery.photos.size(); i++) {
-            GalleryPhoto photo = gallery.photos.get(i);
-            if (photo.deleted && emptyImages.isEmpty(photo.path)) {
-                if (filtered == null) {
-                    filtered = new ArrayList<>(gallery.photos.subList(0, i));
-                }
-            } else if (filtered != null) {
-                filtered.add(photo);
-            }
-        }
-        if (filtered == null) return gallery;
-        return gallery.withPhotos(filtered);
-    }
-
-    private List<GalleryPhoto> monoSourcePhotos(GalleryState gallery) {
-        int monoPaletteIndex = NativeGbcam.defaultPaletteIndex();
-        if (gallery.paletteIndex == monoPaletteIndex) {
-            return gallery.photos;
-        }
-        try {
-            File monoDir = new File(gallery.outputDir, "rgb-merge-mono");
-            GalleryState mono = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
-                    gallery.savePath,
-                    monoDir.getAbsolutePath(),
-                    monoPaletteIndex));
-            // Apply the same empty-deleted filter so indices align with the main gallery.
-            return filterEmptyDeletedPhotos(mono).photos;
-        } catch (Exception e) {
-            return gallery.photos;
-        }
     }
 
     @Override
