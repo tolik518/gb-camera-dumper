@@ -18,7 +18,9 @@ run by the user before release.
 | 3 | ManualMergeStore + BackupRepository | ✅ done |
 | 4a | GalleryPipeline (decode transform chain) | ✅ done |
 | 5 (i) | Dialogs: About, ShareSize, Settings | ✅ done |
-| 5 (ii) | Dialogs: Startup, BackupPicker, PhotoDetail | ⬜ pending |
+| 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
+| 5 (iii) | Dialog: Startup (USB-entangled) | ⬜ pending |
+| 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
 | 6 | MainScreen split | ⬜ pending |
@@ -219,3 +221,25 @@ access to `GalleryState`/`UiStyle`/`MainScreen`).
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL; full APK installed on device.
 - On-device smoke test — ⬜ pending (verify: Settings toggles persist + RGB pickers
   show/hide + action rows; About links; share-size picker).
+
+### Part (ii) — BackupPicker, PhotoDetail
+- New `BackupPickerDialog(activity, screen, backups, previewExecutor, postToUi,
+  onSelected)` — owns `backupRow`/`backupMosaic`; thumbnails load off the preview
+  executor and post to the UI; selection calls back via `onSelected`.
+- New `PhotoDetailDialog(activity, screen, settings, pipeline, previewExecutor,
+  postToUi, currentPaletteColors, host)` — the big one: status/metadata chips,
+  swipe nav, order/algorithm dropdowns, the live `runPreviewMerge`, and the
+  title/subtitle/merge-label builders. `Host` keeps `applyOrSaveDetailChanges` and
+  `shareSinglePhoto` in `MainActivity` (controller-side per the plan). The merge
+  preview generation guard and bg/UI threading are preserved exactly.
+- `MainActivity`'s now-dead `rounded`/`indexOf` helpers and 7 orphaned imports removed.
+
+### Result
+- `MainActivity` 1705 → ~1064 lines. New: `BackupPickerDialog` 213,
+  `PhotoDetailDialog` 470.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL; APK installed on device.
+- On-device smoke test — ⬜ pending (verify: open photo, swipe between photos,
+  change merged order/algorithm → live preview + persists, share single photo,
+  backups thumbnails + restore).
