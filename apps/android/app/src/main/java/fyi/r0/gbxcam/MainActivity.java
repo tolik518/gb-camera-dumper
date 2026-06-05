@@ -65,7 +65,6 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
         paletteIndex = Math.max(0, Math.min(paletteIndex, palettes.labels.length - 1));
         screen = new MainScreen(
                 this,
-                null,
                 palettes.labels,
                 palettes.colors,
                 settings.paletteFavorites(palettes.labels),

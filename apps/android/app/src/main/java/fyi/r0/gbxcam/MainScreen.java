@@ -155,9 +155,8 @@ final class MainScreen {
         this.listener = listener;
     }
 
-    MainScreen(Context context, Listener listener, String[] paletteLabels, int[][] paletteColors, boolean[] paletteFavorites, int[] recentPalettes, int defaultPaletteIndex) {
+    MainScreen(Context context, String[] paletteLabels, int[][] paletteColors, boolean[] paletteFavorites, int[] recentPalettes, int defaultPaletteIndex) {
         this.context = context;
-        this.listener = listener;
         this.paletteLabels = paletteLabels.length == 0 ? new String[] { "Monochrome - Grayscale" } : paletteLabels;
         this.paletteColors = paletteColors.length == 0 ? new int[][] { fallbackPaletteColors() } : paletteColors;
         this.paletteFavorites = paletteFavorites.length == this.paletteLabels.length ? paletteFavorites : new boolean[this.paletteLabels.length];
