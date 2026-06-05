@@ -44,24 +44,25 @@ final class GalleryState {
         List<GalleryPhoto> photos = new ArrayList<>(items.length());
         for (int i = 0; i < items.length(); i++) {
             JSONObject item = items.getJSONObject(i);
-            photos.add(new GalleryPhoto(
-                    item.getString("name"),
-                    item.getString("path"),
-                    item.getInt("displayIndex"),
-                    item.getInt("physicalSlot"),
-                    item.getInt("width"),
-                    item.getInt("height"),
-                    decodeIndexedPixels(item.optString("indexedPixels", "")),
-                    item.optBoolean("deleted", false),
-                    item.optInt("border", 0),
-                    item.optBoolean("copy", false),
-                    item.optBoolean("metadataValid", false),
-                    item.optString("ownerUserId", ""),
-                    item.optBoolean("mergedRgb", false),
-                    item.optString("mergedKind", ""),
-                    item.optInt("mergedSourceCount", 0),
-                    item.optInt("mergedSourceStartDisplayIndex", -1),
-                    item.optString("mergedAlgorithm", "")));
+            photos.add(GalleryPhoto.builder(
+                            item.getString("name"),
+                            item.getString("path"),
+                            item.getInt("displayIndex"),
+                            item.getInt("physicalSlot"),
+                            item.getInt("width"),
+                            item.getInt("height"))
+                    .indexedPixels(decodeIndexedPixels(item.optString("indexedPixels", "")))
+                    .deleted(item.optBoolean("deleted", false))
+                    .border(item.optInt("border", 0))
+                    .copy(item.optBoolean("copy", false))
+                    .metadataValid(item.optBoolean("metadataValid", false))
+                    .ownerUserId(item.optString("ownerUserId", ""))
+                    .mergedRgb(item.optBoolean("mergedRgb", false))
+                    .mergedKind(item.optString("mergedKind", ""))
+                    .mergedSourceCount(item.optInt("mergedSourceCount", 0))
+                    .mergedSourceStartDisplayIndex(item.optInt("mergedSourceStartDisplayIndex", -1))
+                    .mergedAlgorithm(item.optString("mergedAlgorithm", ""))
+                    .build());
         }
         return new GalleryState(
                 root.getString("connected"),
@@ -75,6 +76,19 @@ final class GalleryState {
     }
 
     GalleryState withPalette(int paletteIndex, String paletteName) {
+        return new GalleryState(
+                connected,
+                savePath,
+                outputDir,
+                paletteIndex,
+                paletteName,
+                validationErrors,
+                validationWarnings,
+                photos);
+    }
+
+    /** A copy of this state with a different photos list; all other fields preserved. */
+    GalleryState withPhotos(List<GalleryPhoto> photos) {
         return new GalleryState(
                 connected,
                 savePath,

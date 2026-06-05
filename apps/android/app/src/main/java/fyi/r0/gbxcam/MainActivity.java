@@ -264,11 +264,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 }
                 photos.add(insertAt, merged);
                 addManualMergeVariant(merged);
-                screen.showGallery(new GalleryState(
-                        current.connected, current.savePath, current.outputDir,
-                        current.paletteIndex, current.paletteName,
-                        current.validationErrors, current.validationWarnings,
-                        photos));
+                screen.showGallery(current.withPhotos(photos));
                 onLog("Merged " + count + " photos → " + merged.name);
             });
         });
@@ -475,9 +471,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             changed = true;
         }
         if (changed) saveManualMerges();
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
+        return gallery.withPhotos(photos);
     }
 
     private GalleryState markSelectedCameraPhotosDeletedLocally(GalleryState gallery) {
@@ -493,9 +487,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         if (!changed) return gallery;
         settings.addLocallyDeletedSlots(newSlots);
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
+        return gallery.withPhotos(photos);
     }
 
     private GalleryState recoverSelectedCameraPhotosLocally(GalleryState gallery) {
@@ -514,9 +506,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         }
         if (!changed) return gallery;
         settings.removeLocallyDeletedSlots(toRestore);
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
+        return gallery.withPhotos(photos);
     }
 
     private GalleryState applyLocallyDeletedSlots(GalleryState gallery) {
@@ -532,9 +522,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             changed = true;
         }
         if (!changed) return gallery;
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
+        return gallery.withPhotos(photos);
     }
 
     @Override
@@ -1597,8 +1585,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         GalleryPhoto[] preview = new GalleryPhoto[4];
         for (int i = 0; i < Math.min(indices.length, preview.length); i++) {
             File f = found.get(indices[i]);
-            preview[i] = new GalleryPhoto(f.getName(), f.getAbsolutePath(),
-                    indices[i], indices[i], 128, 112, null, false, 0, false, true, "");
+            preview[i] = GalleryPhoto.builder(f.getName(), f.getAbsolutePath(),
+                    indices[i], indices[i], 128, 112)
+                    .metadataValid(true)
+                    .build();
         }
         return preview;
     }
@@ -2241,6 +2231,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex);
                 obj.put("mergedAlgorithm", m.mergedAlgorithm != null ? m.mergedAlgorithm : "");
                 obj.put("deleted", m.deleted);
+                obj.put("manualMerge", m.manualMerge);
                 arr.put(obj);
             }
             File dir = dumpsDir();
@@ -2270,19 +2261,22 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 JSONObject obj = arr.getJSONObject(i);
                 String path = obj.getString("path");
                 if (!new File(path).exists()) continue;
-                manualMerges.add(new GalleryPhoto(
-                        obj.getString("name"),
-                        path,
-                        obj.getInt("displayIndex"),
-                        -1,
-                        128, 112,
-                        null,
-                        obj.optBoolean("deleted", false), 0, false, true, "",
-                        true,
-                        obj.optString("mergedKind", ""),
-                        obj.optInt("mergedSourceCount", 0),
-                        obj.optInt("mergedSourceStartDisplayIndex", -1),
-                        obj.optString("mergedAlgorithm", "")));
+                manualMerges.add(GalleryPhoto.builder(
+                                obj.getString("name"),
+                                path,
+                                obj.getInt("displayIndex"),
+                                -1, 128, 112)
+                        .deleted(obj.optBoolean("deleted", false))
+                        .metadataValid(true)
+                        .mergedRgb(true)
+                        .mergedKind(obj.optString("mergedKind", ""))
+                        .mergedSourceCount(obj.optInt("mergedSourceCount", 0))
+                        .mergedSourceStartDisplayIndex(obj.optInt("mergedSourceStartDisplayIndex", -1))
+                        .mergedAlgorithm(obj.optString("mergedAlgorithm", ""))
+                        // Fall back to the old path heuristic for files written before
+                        // the explicit manualMerge field existed.
+                        .manualMerge(obj.optBoolean("manualMerge", path.contains("rgb-merged-manual")))
+                        .build());
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to load manual merges", e);
@@ -2312,9 +2306,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             photos.add(insertAt, m);
         }
         if (photos == null) return gallery;
-        return new GalleryState(gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings, photos);
+        return gallery.withPhotos(photos);
     }
 
     private int mergeInsertIndex(List<GalleryPhoto> photos, GalleryPhoto merge) {
@@ -2382,9 +2374,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 for (int i = 0; i < photos.size(); i++) {
                     if (photos.get(i).path.equals(photo.path)) { photos.set(i, updated); break; }
                 }
-                screen.showGallery(new GalleryState(current.connected, current.savePath,
-                        current.outputDir, current.paletteIndex, current.paletteName,
-                        current.validationErrors, current.validationWarnings, photos));
+                screen.showGallery(current.withPhotos(photos));
                 onLog("Merge updated: " + order + " / " + RgbMergeDetector.algorithmShortLabel(algorithm));
             });
         });
@@ -2418,11 +2408,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             }
         }
         if (filtered == null) return gallery;
-        return new GalleryState(
-                gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings,
-                filtered);
+        return gallery.withPhotos(filtered);
     }
 
     private boolean isEmptyImage(GalleryPhoto photo) {

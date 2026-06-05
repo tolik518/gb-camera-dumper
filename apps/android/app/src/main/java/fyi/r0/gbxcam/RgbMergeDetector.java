@@ -96,11 +96,7 @@ final class RgbMergeDetector {
             return gallery;
         }
 
-        return new GalleryState(
-                gallery.connected, gallery.savePath, gallery.outputDir,
-                gallery.paletteIndex, gallery.paletteName,
-                gallery.validationErrors, gallery.validationWarnings,
-                output);
+        return gallery.withPhotos(output);
     }
 
     static GalleryPhoto manualMerge(
@@ -122,13 +118,18 @@ final class RgbMergeDetector {
         String resolvedAlgorithm = resolveAlgorithm(defaultAlgorithm, layout.clearIndex >= 0);
         File out = uniqueManualMergeFile(mergeDir, sources, count, layout.label, resolvedAlgorithm);
         if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
-        return new GalleryPhoto(
-                out.getName(), out.getAbsolutePath(),
-                sources[0].displayIndex, -1,
-                IMAGE_WIDTH, IMAGE_HEIGHT,
-                null, false, 0, false, true, "",
-                true, layout.label, count, sources[0].displayIndex,
-                resolvedAlgorithm);
+        return GalleryPhoto.builder(
+                        out.getName(), out.getAbsolutePath(),
+                        sources[0].displayIndex, -1,
+                        IMAGE_WIDTH, IMAGE_HEIGHT)
+                .metadataValid(true)
+                .mergedRgb(true)
+                .mergedKind(layout.label)
+                .mergedSourceCount(count)
+                .mergedSourceStartDisplayIndex(sources[0].displayIndex)
+                .mergedAlgorithm(resolvedAlgorithm)
+                .manualMerge(true)
+                .build();
     }
 
     /** Returns the algorithm IDs valid for the given set size. */
@@ -300,14 +301,17 @@ final class RgbMergeDetector {
                 mergeNumber, source[0].displayIndex + 1, layout.label));
         if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
 
-        GalleryPhoto merged = new GalleryPhoto(
-                out.getName(), out.getAbsolutePath(),
-                source[0].displayIndex, -1,
-                IMAGE_WIDTH, IMAGE_HEIGHT,
-                null,
-                false, 0, false, true, "",
-                true, layout.label, count, source[0].displayIndex,
-                resolvedAlgorithm);
+        GalleryPhoto merged = GalleryPhoto.builder(
+                        out.getName(), out.getAbsolutePath(),
+                        source[0].displayIndex, -1,
+                        IMAGE_WIDTH, IMAGE_HEIGHT)
+                .metadataValid(true)
+                .mergedRgb(true)
+                .mergedKind(layout.label)
+                .mergedSourceCount(count)
+                .mergedSourceStartDisplayIndex(source[0].displayIndex)
+                .mergedAlgorithm(resolvedAlgorithm)
+                .build();
         return new MergeCandidate(count, merged);
     }
 
