@@ -255,7 +255,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
 
     @Override
     public void onAboutRequested() {
-        new AboutDialog(activity, this::onLog).show(screen.gallery(), usb.device() != null);
+        new AboutDialog(activity, screen, this::onLog).show(screen.gallery(), usb.device() != null);
     }
 
     @Override

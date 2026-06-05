@@ -17,9 +17,11 @@ import java.util.function.Consumer;
 final class AboutDialog {
     private final Activity activity;
     private final Consumer<String> logger;
+    private final MainScreen screen;
 
-    AboutDialog(Activity activity, Consumer<String> logger) {
+    AboutDialog(Activity activity, MainScreen screen, Consumer<String> logger) {
         this.activity = activity;
+        this.screen = screen;
         this.logger = logger;
     }
 
@@ -27,8 +29,9 @@ final class AboutDialog {
     void show(GalleryState connectedGallery, boolean deviceConnected) {
         Dialog dialog = UiStyle.baseDialog(activity);
         UiStyle.Palette colors = UiStyle.palette(activity);
+        int accent = screen.accentColor();
 
-        LinearLayout content = UiStyle.dialog(activity, dialog, "GBxCAM Viewer", "v" + packageVersionName());
+        LinearLayout content = UiStyle.dialog(activity, dialog, "GBxCAM Viewer", "v" + packageVersionName() + " · by tolik518");
 
         LinearLayout body = new LinearLayout(activity);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -45,27 +48,29 @@ final class AboutDialog {
         }
 
         body.addView(aboutSection("Feedback", colors));
-        body.addView(aboutRow("Report a bug", "518@returnnull.de",
-                "mailto:518@returnnull.de", colors));
 
-        body.addView(aboutSection("Author", colors));
-        body.addView(aboutRow("tolik518", null,
-                "https://github.com/tolik518", colors));
+        body.addView(aboutRow("Report a bug", "518@returnnull.de",
+                "mailto:518@returnnull.de", colors, accent));
+        body.addView(aboutRow("tolik518/GBxCAM-Viewer", 
+                "The app is fully open source! Contributions and feedback are welcome.",
+                "https://github.com/tolik518/GBxCAM-Viewer", colors, accent));
 
         body.addView(aboutSection("Acknowledgments", colors));
+
         body.addView(aboutRow("FlashGBX",
                 "USB protocol · lesserkuma · GPL-3.0",
-                "https://github.com/lesserkuma/FlashGBX", colors));
+                "https://github.com/lesserkuma/FlashGBX", colors, accent));
         body.addView(aboutRow("gbcam-rev-engineer",
                 "GB Camera docs · Antonio Niño Díaz · CC BY 4.0",
-                "https://github.com/AntonioND/gbcam-rev-engineer", colors));
+                "https://github.com/AntonioND/gbcam-rev-engineer", colors, accent));
         body.addView(aboutRow("Inject-pictures-in-your-Game-Boy-Camera-saves",
                 "Save file research · Raphaël Boichot",
-                "https://github.com/Raphael-Boichot/Inject-pictures-in-your-Game-Boy-Camera-saves", colors));
+                "https://github.com/Raphael-Boichot/Inject-pictures-in-your-Game-Boy-Camera-saves", colors, accent));
 
         body.addView(aboutSection("License", colors));
+
         body.addView(aboutRow("GPL-3.0-or-later", null,
-                "https://www.gnu.org/licenses/gpl-3.0.html", colors));
+                "https://www.gnu.org/licenses/gpl-3.0.html", colors, accent));
 
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(body);
@@ -101,7 +106,7 @@ final class AboutDialog {
         return row;
     }
 
-    private View aboutRow(String label, String description, String url, UiStyle.Palette colors) {
+    private View aboutRow(String label, String description, String url, UiStyle.Palette colors, int accent) {
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -112,7 +117,7 @@ final class AboutDialog {
         text.setOrientation(LinearLayout.VERTICAL);
         TextView labelView = new TextView(activity);
         labelView.setText(label);
-        labelView.setTextColor(colors.primary);
+        labelView.setTextColor(accent);
         labelView.setTextSize(13);
         text.addView(labelView);
         if (description != null && !description.isEmpty()) {
