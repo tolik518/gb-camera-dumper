@@ -15,7 +15,7 @@ run by the user before release.
 | 0 | Builders & data hygiene | ✅ done |
 | 1 | Leaf helpers (AppFiles, PaletteCatalog) + dead code | ✅ done |
 | 2 | UsbDeviceController | ✅ done |
-| 3 | ManualMergeStore + BackupRepository | ⬜ pending |
+| 3 | ManualMergeStore + BackupRepository | ✅ done |
 | 4 | GalleryPipeline + GalleryController | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
 | 6 | MainScreen split | ⬜ pending |
@@ -116,3 +116,44 @@ controller, leaving `MainActivity` as the host of the UI reactions.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
 - On-device smoke test — ⬜ pending (verify: plug/unplug detection, permission
   prompt on first load, auto-load on attach, startup popup step colors).
+
+---
+
+## Phase 3 — Extract the data stores
+
+**Goal:** move manual-merge persistence and backup-save handling out of
+`MainActivity` into dedicated stores. No behavior change.
+
+### Changes
+- New `ManualMergeStore(context)` owns the `manualMerges` list and
+  `manual-merges.json`: `load`, `save`, `addVariant`, `replaceVariant`,
+  `removeByPath`, `inject(gallery)`, and static `insertIndex(...)`. `MainActivity`
+  calls these instead of its old private methods; `deleteSelectedManualMerges`
+  now uses `removeByPath` + a single `save()`.
+- New `BackupRepository(context, settings, emptyImages)` owns the dumps-folder
+  backups: `listBackups`, `previewPhotos` (+ on-disk preview cache via
+  `loadCachedPreviews`/`previewIndices`), `paletteIndexFor`/`rememberPalette`, and
+  the `importSave`/`exportSave` file copies (the orchestration — `loadCachedGallery`,
+  logging — stays in `MainActivity`). The backup picker *dialog* still lives in
+  `MainActivity` for now (Phase 5) and calls `backups.previewPhotos(...)`.
+- New `EmptyImageCache` leaf (blank-PNG detection + cache), shared by
+  `BackupRepository.loadCachedPreviews` and the gallery pipeline's
+  `filterEmptyDeletedPhotos`. Extracted because both sides needed it.
+- Removed now-dead `compareLongsDescending` and 8 orphaned imports.
+
+### Result
+- `MainActivity` 2468 → 2183 lines. New: `ManualMergeStore` 180,
+  `BackupRepository` 171, `EmptyImageCache` 38.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
+- On-device smoke test — ⬜ pending (verify: manual merge add/edit/delete persists
+  across restart; backups picker thumbnails; import/export .sav).
+
+---
+
+## ⏸ Paused after Phase 3 for on-device testing
+
+Per the agreed plan, stopping here (low/medium-risk phases done) before the
+high-risk Phase 4 (controller + pipeline extraction). Please run
+`just android-apk-install` on a device and smoke-test the flows listed above.

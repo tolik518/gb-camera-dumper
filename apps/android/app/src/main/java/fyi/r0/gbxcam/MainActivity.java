@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -32,18 +31,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -52,7 +44,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -74,8 +65,9 @@ public class MainActivity extends Activity
     private final ExecutorService previewExecutor = Executors.newFixedThreadPool(3);
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger recolorGeneration = new AtomicInteger(0);
-    private final Map<String, Boolean> emptyImageCache = new ConcurrentHashMap<>();
-    private final List<GalleryPhoto> manualMerges = new ArrayList<>();
+    private final EmptyImageCache emptyImages = new EmptyImageCache();
+    private ManualMergeStore mergeStore;
+    private BackupRepository backups;
     private boolean destroyed;
 
     private TextView startupStep1Label;
@@ -141,6 +133,8 @@ public class MainActivity extends Activity
         usb = new UsbDeviceController(this, this);
         operationRunner = new GbcamOperationRunner();
         settings = new AppSettings(this);
+        mergeStore = new ManualMergeStore(this);
+        backups = new BackupRepository(this, settings, emptyImages);
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
         palettes = PaletteCatalog.load();
         paletteIndex = settings.paletteIndex(defaultPaletteIndex);
@@ -240,13 +234,13 @@ public class MainActivity extends Activity
                     return;
                 }
                 List<GalleryPhoto> photos = new ArrayList<>(current.photos);
-                int insertAt = mergeInsertIndex(photos, merged);
+                int insertAt = ManualMergeStore.insertIndex(photos, merged);
                 if (insertAt < 0) {
                     onLog("Manual merge aborted: source photos not found in gallery.");
                     return;
                 }
                 photos.add(insertAt, merged);
-                addManualMergeVariant(merged);
+                mergeStore.addVariant(merged);
                 screen.showGallery(current.withPhotos(photos));
                 onLog("Merged " + count + " photos → " + merged.name);
             });
@@ -351,12 +345,11 @@ public class MainActivity extends Activity
 
     @Override
     public void onBackupsRequested() {
-        File[] saves = dumpsDir().listFiles((dir, name) -> name.toLowerCase(Locale.ROOT).endsWith(".sav"));
-        if (saves == null || saves.length == 0) {
+        File[] saves = backups.listBackups();
+        if (saves.length == 0) {
             onLog("No save backups found.");
             return;
         }
-        Arrays.sort(saves, (left, right) -> compareLongsDescending(left.lastModified(), right.lastModified()));
         showBackupPicker(saves);
     }
 
@@ -448,12 +441,10 @@ public class MainActivity extends Activity
             if (!p.selected || !p.isManualMerge()) continue;
             photos.remove(i);
             new File(p.path).delete();
-            for (int j = 0; j < manualMerges.size(); j++) {
-                if (manualMerges.get(j).path.equals(p.path)) { manualMerges.remove(j); break; }
-            }
+            mergeStore.removeByPath(p.path);
             changed = true;
         }
-        if (changed) saveManualMerges();
+        if (changed) mergeStore.save();
         return gallery.withPhotos(photos);
     }
 
@@ -606,7 +597,7 @@ public class MainActivity extends Activity
         settings.savePaletteIndex(this.paletteIndex);
         GalleryState current = screen.gallery();
         if (current != null) {
-            settings.rememberBackupPalette(new File(current.savePath), this.paletteIndex);
+            backups.rememberPalette(new File(current.savePath), this.paletteIndex);
         }
         settings.rememberRecentPalette(palettes.labels, this.paletteIndex);
         screen.setRecentPalettes(settings.recentPalettes(palettes.labels));
@@ -654,9 +645,9 @@ public class MainActivity extends Activity
         if (destroyed) return;
         settings.clearLocallyDeletedSlots();
         gallery = applyAutoRgbMerge(gallery);
-        loadManualMerges();
-        gallery = injectManualMerges(gallery);
-        rememberBackupPalette(new File(gallery.savePath), gallery.paletteIndex);
+        mergeStore.load();
+        gallery = mergeStore.inject(gallery);
+        backups.rememberPalette(new File(gallery.savePath), gallery.paletteIndex);
         screen.showGallery(gallery);
         if (startupStep2Label != null) startupStep2Label.setTextColor(startupStepDoneColor);
         int loaded = gallery.photos.size();
@@ -1292,9 +1283,9 @@ public class MainActivity extends Activity
                     paletteIndex));
             gallery = applyLocallyDeletedSlots(gallery);
             gallery = applyAutoRgbMerge(gallery);
-            loadManualMerges();
-            gallery = injectManualMerges(gallery);
-            rememberBackupPalette(save, paletteIndex);
+            mergeStore.load();
+            gallery = mergeStore.inject(gallery);
+            backups.rememberPalette(save, paletteIndex);
             screen.showGallery(gallery);
             onLog("Loaded cached gallery from:\n" + save.getAbsolutePath());
         } catch (Exception e) {
@@ -1305,13 +1296,13 @@ public class MainActivity extends Activity
     private void loadBackupSave(File save) {
         try {
             File current = new File(dumpsDir(), "GAMEBOYCAMERA.sav");
-            int backupPalette = backupPaletteIndex(save);
+            int backupPalette = backups.paletteIndexFor(save);
             paletteIndex = backupPalette;
             settings.savePaletteIndex(paletteIndex);
             if (!save.getCanonicalPath().equals(current.getCanonicalPath())) {
                 PhotoExporter.copyFile(save, current);
             }
-            rememberBackupPalette(current, paletteIndex);
+            backups.rememberPalette(current, paletteIndex);
             loadCachedGallery();
             onLog("Loaded save backup:\n" + save.getAbsolutePath());
         } catch (Exception e) {
@@ -1382,7 +1373,7 @@ public class MainActivity extends Activity
         row.addView(backupMosaic(tiles, badge, current, border, accent, textSecondary, previewBackground),
                 new LinearLayout.LayoutParams(dp(58), dp(58)));
         previewExecutor.submit(() -> {
-            GalleryPhoto[] photos = backupPreviewPhotos(save);
+            GalleryPhoto[] photos = backups.previewPhotos(save);
             postToUi(() -> {
                 boolean anyPhoto = false;
                 for (int i = 0; i < tiles.length; i++) {
@@ -1475,91 +1466,6 @@ public class MainActivity extends Activity
         badgeOut[0] = badge;
 
         return frame;
-    }
-
-    private GalleryPhoto[] backupPreviewPhotos(File save) {
-        GalleryPhoto[] preview = new GalleryPhoto[4];
-        try {
-            int backupPalette = backupPaletteIndex(save);
-            File output = new File(
-                    appFilesDir(null),
-                    "backup-previews/" + AppFiles.safeFilePart(save.getName()) + "-" + save.lastModified() + "-p" + backupPalette);
-
-            // Fast path: if preview PNGs already exist on disk, use them without re-decoding.
-            if (output.isDirectory()) {
-                GalleryPhoto[] cached = loadCachedPreviews(output);
-                if (cached != null) return cached;
-            }
-
-            if (!output.mkdirs() && !output.isDirectory()) {
-                return preview;
-            }
-            GalleryState gallery = GalleryState.fromJson(NativeGbcam.loadGalleryFromSave(
-                    save.getAbsolutePath(),
-                    output.getAbsolutePath(),
-                    backupPalette));
-            List<GalleryPhoto> active = new ArrayList<>();
-            for (GalleryPhoto p : gallery.photos) {
-                if (!p.deleted) active.add(p);
-            }
-            if (active.isEmpty()) {
-                return preview;
-            }
-
-            int[] indices = backupPreviewIndices(active.size());
-            for (int i = 0; i < indices.length; i++) {
-                preview[i] = active.get(indices[i]);
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Backup preview failed for " + save.getName(), e);
-        }
-        return preview;
-    }
-
-    private GalleryPhoto[] loadCachedPreviews(File dir) {
-        List<File> found = new ArrayList<>();
-        for (int i = 1; i <= 30; i++) {
-            File f = new File(dir, String.format(Locale.US, "IMG_PC%02d.png", i));
-            if (f.exists() && !isEmptyImage(f.getAbsolutePath())) {
-                found.add(f);
-            }
-        }
-        if (found.isEmpty()) return null;
-
-        int[] indices = backupPreviewIndices(found.size());
-        GalleryPhoto[] preview = new GalleryPhoto[4];
-        for (int i = 0; i < Math.min(indices.length, preview.length); i++) {
-            File f = found.get(indices[i]);
-            preview[i] = GalleryPhoto.builder(f.getName(), f.getAbsolutePath(),
-                    indices[i], indices[i], 128, 112)
-                    .metadataValid(true)
-                    .build();
-        }
-        return preview;
-    }
-
-    private static int[] backupPreviewIndices(int count) {
-        if (count <= 4) {
-            int[] indices = new int[count];
-            for (int i = 0; i < count; i++) {
-                indices[i] = i;
-            }
-            return indices;
-        }
-        return new int[] {
-                0,
-                count / 3,
-                (count * 2) / 3,
-                count - 1
-        };
-    }
-
-    private int backupPaletteIndex(File save) {
-        return settings.backupPaletteIndex(save, NativeGbcam.defaultPaletteIndex());
-    }
-
-    private void rememberBackupPalette(File save, int paletteIndex) {
-        settings.rememberBackupPalette(save, paletteIndex);
     }
 
     private void showPhotoDetail(GalleryPhoto photo) {
@@ -2105,13 +2011,13 @@ public class MainActivity extends Activity
                 if (recolorGeneration.get() != generation) return;
                 gallery = applyLocallyDeletedSlots(gallery);
                 gallery = applyAutoRgbMerge(gallery);
-                // injectManualMerges and copySelectionFrom run on the UI thread so they
-                // always see the latest manualMerges state (e.g. a merge added while this
+                // mergeStore.inject and copySelectionFrom run on the UI thread so they
+                // always see the latest manual-merge state (e.g. a merge added while this
                 // background recolor was in flight).
                 GalleryState finalGallery = gallery;
                 postToUi(() -> {
                     if (recolorGeneration.get() != generation) return;
-                    GalleryState withMerges = injectManualMerges(finalGallery);
+                    GalleryState withMerges = mergeStore.inject(finalGallery);
                     withMerges.copySelectionFrom(previous);
                     screen.showGallery(withMerges);
                     if (logChange) onLog("Palette changed: " + withMerges.paletteName);
@@ -2125,143 +2031,8 @@ public class MainActivity extends Activity
         });
     }
 
-    private void addManualMergeVariant(GalleryPhoto m) {
-        for (int i = 0; i < manualMerges.size(); i++) {
-            GalleryPhoto e = manualMerges.get(i);
-            if (e.path.equals(m.path)) {
-                manualMerges.set(i, m);
-                saveManualMerges();
-                return;
-            }
-        }
-        manualMerges.add(m);
-        saveManualMerges();
-    }
-
-    private boolean replaceManualMergeVariant(String oldPath, GalleryPhoto updated) {
-        for (int i = 0; i < manualMerges.size(); i++) {
-            GalleryPhoto e = manualMerges.get(i);
-            if (!e.path.equals(oldPath)) continue;
-            if (!oldPath.equals(updated.path)) new File(oldPath).delete();
-            manualMerges.set(i, updated);
-            saveManualMerges();
-            return true;
-        }
-        return false;
-    }
-
-    private void saveManualMerges() {
-        try {
-            JSONArray arr = new JSONArray();
-            for (GalleryPhoto m : manualMerges) {
-                JSONObject obj = new JSONObject();
-                obj.put("name", m.name);
-                obj.put("path", m.path);
-                obj.put("displayIndex", m.displayIndex);
-                obj.put("mergedKind", m.mergedKind != null ? m.mergedKind : "");
-                obj.put("mergedSourceCount", m.mergedSourceCount);
-                obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex);
-                obj.put("mergedAlgorithm", m.mergedAlgorithm != null ? m.mergedAlgorithm : "");
-                obj.put("deleted", m.deleted);
-                obj.put("manualMerge", m.manualMerge);
-                arr.put(obj);
-            }
-            File dir = dumpsDir();
-            if (!dir.isDirectory() && !dir.mkdirs()) return;
-            try (FileOutputStream out = new FileOutputStream(new File(dir, "manual-merges.json"))) {
-                out.write(arr.toString().getBytes("UTF-8"));
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void loadManualMerges() {
-        manualMerges.clear();
-        File f = new File(dumpsDir(), "manual-merges.json");
-        if (!f.isFile()) return;
-        try {
-            String json;
-            try (FileInputStream in = new FileInputStream(f)) {
-                ByteArrayOutputStream buf = new ByteArrayOutputStream();
-                byte[] chunk = new byte[4096];
-                int n;
-                while ((n = in.read(chunk)) != -1) buf.write(chunk, 0, n);
-                json = buf.toString("UTF-8");
-            }
-            JSONArray arr = new JSONArray(json);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject obj = arr.getJSONObject(i);
-                String path = obj.getString("path");
-                if (!new File(path).exists()) continue;
-                manualMerges.add(GalleryPhoto.builder(
-                                obj.getString("name"),
-                                path,
-                                obj.getInt("displayIndex"),
-                                -1, 128, 112)
-                        .deleted(obj.optBoolean("deleted", false))
-                        .metadataValid(true)
-                        .mergedRgb(true)
-                        .mergedKind(obj.optString("mergedKind", ""))
-                        .mergedSourceCount(obj.optInt("mergedSourceCount", 0))
-                        .mergedSourceStartDisplayIndex(obj.optInt("mergedSourceStartDisplayIndex", -1))
-                        .mergedAlgorithm(obj.optString("mergedAlgorithm", ""))
-                        // Fall back to the old path heuristic for files written before
-                        // the explicit manualMerge field existed.
-                        .manualMerge(obj.optBoolean("manualMerge", path.contains("rgb-merged-manual")))
-                        .build());
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to load manual merges", e);
-        }
-    }
-
     private boolean isManualMerge(GalleryPhoto photo) {
         return photo.isManualMerge();
-    }
-
-    private GalleryState injectManualMerges(GalleryState gallery) {
-        List<GalleryPhoto> merges = new ArrayList<>(manualMerges);
-        if (merges.isEmpty()) return gallery;
-        List<GalleryPhoto> photos = null;
-        for (GalleryPhoto m : merges) {
-            if (!new File(m.path).exists()) continue;
-            boolean alreadyPresent = false;
-            List<GalleryPhoto> list = photos != null ? photos : gallery.photos;
-            for (int i = 0; i < list.size(); i++) {
-                GalleryPhoto p = list.get(i);
-                if (p.mergedRgb && p.path.equals(m.path)) { alreadyPresent = true; break; }
-            }
-            if (alreadyPresent) continue;
-            if (photos == null) photos = new ArrayList<>(gallery.photos);
-            int insertAt = mergeInsertIndex(photos, m);
-            if (insertAt < 0) continue;
-            photos.add(insertAt, m);
-        }
-        if (photos == null) return gallery;
-        return gallery.withPhotos(photos);
-    }
-
-    private int mergeInsertIndex(List<GalleryPhoto> photos, GalleryPhoto merge) {
-        int endIdx = merge.mergedSourceStartDisplayIndex + merge.mergedSourceCount - 1;
-        int insertAt = -1;
-        for (int i = 0; i < photos.size(); i++) {
-            GalleryPhoto p = photos.get(i);
-            if (!p.mergedRgb && !p.deleted && p.displayIndex == endIdx) {
-                insertAt = i + 1;
-                break;
-            }
-        }
-        if (insertAt < 0) return -1;
-        while (insertAt < photos.size()) {
-            GalleryPhoto p = photos.get(insertAt);
-            if (!p.mergedRgb
-                    || p.mergedSourceStartDisplayIndex != merge.mergedSourceStartDisplayIndex
-                    || p.mergedSourceCount != merge.mergedSourceCount) {
-                break;
-            }
-            insertAt++;
-        }
-        return insertAt;
     }
 
     private void applyManualMergeChanges(GalleryPhoto photo, String order, String algorithm) {
@@ -2296,7 +2067,7 @@ public class MainActivity extends Activity
                     return;
                 }
                 updated.selected = photo.selected;
-                if (!replaceManualMergeVariant(photo.path, updated)) {
+                if (!mergeStore.replaceVariant(photo.path, updated)) {
                     new File(updated.path).delete();
                     return;
                 }
@@ -2331,7 +2102,7 @@ public class MainActivity extends Activity
         List<GalleryPhoto> filtered = null;
         for (int i = 0; i < gallery.photos.size(); i++) {
             GalleryPhoto photo = gallery.photos.get(i);
-            if (photo.deleted && isEmptyImage(photo)) {
+            if (photo.deleted && emptyImages.isEmpty(photo.path)) {
                 if (filtered == null) {
                     filtered = new ArrayList<>(gallery.photos.subList(0, i));
                 }
@@ -2341,33 +2112,6 @@ public class MainActivity extends Activity
         }
         if (filtered == null) return gallery;
         return gallery.withPhotos(filtered);
-    }
-
-    private boolean isEmptyImage(GalleryPhoto photo) {
-        return isEmptyImage(photo.path);
-    }
-
-    private boolean isEmptyImage(String path) {
-        Boolean cached = emptyImageCache.get(path);
-        if (cached != null) return cached;
-        boolean empty = decodeAndCheckEmpty(path);
-        emptyImageCache.put(path, empty);
-        return empty;
-    }
-
-    private static boolean decodeAndCheckEmpty(String path) {
-        Bitmap bmp = BitmapFactory.decodeFile(path);
-        if (bmp == null) return true;
-        int w = bmp.getWidth(), h = bmp.getHeight();
-        int[] pixels = new int[w * h];
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h);
-        bmp.recycle();
-        if (pixels.length == 0) return true;
-        int first = pixels[0];
-        for (int p : pixels) {
-            if (p != first) return false;
-        }
-        return true;
     }
 
     private List<GalleryPhoto> monoSourcePhotos(GalleryState gallery) {
@@ -2401,35 +2145,11 @@ public class MainActivity extends Activity
         Uri uri = data.getData();
         try {
             if (requestCode == REQUEST_IMPORT_SAVE) {
-                File target = new File(dumpsDir(), "GAMEBOYCAMERA.sav");
-                File importCheck = new File(appFilesDir(null), "import-check.sav");
-                if (!dumpsDir().mkdirs() && !dumpsDir().isDirectory()) {
-                    throw new Exception("Could not create dumps directory.");
-                }
-                try (InputStream in = getContentResolver().openInputStream(uri);
-                     OutputStream out = new FileOutputStream(importCheck)) {
-                    if (in == null) {
-                        throw new Exception("Could not open imported save.");
-                    }
-                    PhotoExporter.copyStream(in, out);
-                }
-                NativeGbcam.loadGalleryFromSave(
-                        importCheck.getAbsolutePath(),
-                        dumpsDir().getAbsolutePath(),
-                        paletteIndex);
-                PhotoExporter.copyFile(importCheck, target);
-                if (!importCheck.delete()) {
-                    Log.w(TAG, "Could not delete import check file: " + importCheck);
-                }
+                File target = backups.importSave(uri, paletteIndex);
                 loadCachedGallery();
                 onLog("Imported save:\n" + target.getAbsolutePath());
             } else if (requestCode == REQUEST_EXPORT_SAVE && pendingSaveExport != null) {
-                try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                    if (out == null) {
-                        throw new Exception("Could not open export target.");
-                    }
-                    PhotoExporter.copyToStream(pendingSaveExport, out);
-                }
+                backups.exportSave(uri, pendingSaveExport);
                 onLog("Exported save file.");
             }
         } catch (Exception e) {
@@ -2456,12 +2176,6 @@ public class MainActivity extends Activity
     private static int compareInts(int left, int right) {
         if (left < right) return -1;
         if (left > right) return 1;
-        return 0;
-    }
-
-    private static int compareLongsDescending(long left, long right) {
-        if (left > right) return -1;
-        if (left < right) return 1;
         return 0;
     }
 
