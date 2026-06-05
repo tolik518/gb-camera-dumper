@@ -20,7 +20,7 @@ run by the user before release.
 | 5 (i) | Dialogs: About, ShareSize, Settings | ✅ done |
 | 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
 | 5 (iii) | Dialog: Startup (USB-entangled) | ⏸ deferred — see note |
-| 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
+| 4b | GalleryController (listener/callback orchestration) | ✅ done |
 | 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
 | 6 | MainScreen split | ⬜ pending |
@@ -277,3 +277,43 @@ APK installed on device:
 **Remaining:** Phase 4b (`GalleryController` — move the ~40
 `MainScreen.Listener` + operation-callback methods out; the largest single change
 in the plan), optional StartupDialog, and Phase 6 (split `MainScreen`).
+
+---
+
+## Phase 4b — Extract GalleryController
+
+**Goal (the plan's headline):** pull the gallery business logic out of
+`MainActivity` so it becomes a thin Activity shell.
+
+### Changes
+- New `GalleryController` implements `MainScreen.Listener`,
+  `GbcamOperationRunner.Callback`, `SettingsDialog.Host`, and
+  `PhotoDetailDialog.Host`. It owns the gallery flow: every listener/callback
+  method, load/delete/recover/reorder/merge orchestration, the selected
+  `paletteIndex`, the `recolorGeneration` guard, `runInBackground`/`postToUi`,
+  import/export coordination (`handleActivityResult`), and `autoLoadCamera`/
+  `loadCachedGallery`. Bodies moved verbatim; `this`(Context)→`activity`,
+  callback/`MainActivity.this`→`this`, Activity calls→`activity.*`.
+- `MainScreen.listener` is now settable (`setListener`) — read lazily by click
+  handlers, so the controller (which needs `screen`) can be created first and
+  wired after. Verified no `listener.*` call runs during construction.
+- `onGalleryLoaded`'s startup-label poke is delegated through an `onCameraLoaded`
+  `Runnable` hook supplied by `MainActivity`.
+- `MainActivity` now implements only `UsbDeviceController.Listener`. It keeps the
+  lifecycle, the USB-event reactions (delegating logging/auto-load to the
+  controller via a small `log(...)` forwarder), and the startup popup +
+  `doStartupCartridgeCheck`. The redundant `&& !autoLoadAttempted` precheck was
+  dropped at the USB call sites because `autoLoadCamera()` self-guards on it
+  (behavior identical).
+
+### Result
+- **`MainActivity` 1064 → 371 lines** (2642 → 371 overall, **−86%**); new
+  `GalleryController` 773 lines.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` + `:app:assembleDebug` — ✅ BUILD SUCCESSFUL;
+  APK installed on device.
+- On-device smoke test — ⬜ pending (this is the deepest change — exercise
+  everything: load camera, palette switch, select/save/share, delete/recover with
+  and without the cartridge connected, move-first/compact/clear, manual + auto
+  merges, photo detail edits, backups, import/export, startup popup auto-load).

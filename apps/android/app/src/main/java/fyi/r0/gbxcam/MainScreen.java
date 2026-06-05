@@ -72,7 +72,7 @@ final class MainScreen {
     }
 
     private final Context context;
-    private final Listener listener;
+    private Listener listener;
     private final String[] paletteLabels;
     private final int[][] paletteColors;
     private final boolean[] paletteFavorites;
@@ -147,6 +147,12 @@ final class MainScreen {
 
     void setBitmapExecutor(Executor executor) {
         this.bitmapExecutor = executor;
+    }
+
+    /** Sets the action listener. The listener is read lazily by click handlers, so it
+     * may be assigned after construction (e.g. once the controller exists). */
+    void setListener(Listener listener) {
+        this.listener = listener;
     }
 
     MainScreen(Context context, Listener listener, String[] paletteLabels, int[][] paletteColors, boolean[] paletteFavorites, int[] recentPalettes, int defaultPaletteIndex) {
