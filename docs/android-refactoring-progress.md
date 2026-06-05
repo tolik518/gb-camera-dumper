@@ -19,7 +19,7 @@ run by the user before release.
 | 4a | GalleryPipeline (decode transform chain) | ✅ done |
 | 5 (i) | Dialogs: About, ShareSize, Settings | ✅ done |
 | 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
-| 5 (iii) | Dialog: Startup (USB-entangled) | ⬜ pending |
+| 5 (iii) | Dialog: Startup (USB-entangled) | ⏸ deferred — see note |
 | 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
@@ -243,3 +243,37 @@ access to `GalleryState`/`UiStyle`/`MainScreen`).
 - On-device smoke test — ⬜ pending (verify: open photo, swipe between photos,
   change merged order/algorithm → live preview + persists, share single photo,
   backups thumbnails + restore).
+
+### StartupDialog — deferred (decision)
+The startup popup's two step labels are **live status**, updated from three
+lifecycle points — USB attach (step 1 green + kick the cartridge poll), USB detach
+(reset both), and `onGalleryLoaded` (step 2 green) — plus the async
+`doStartupCartridgeCheck` poll (background open of the USB device + native probe,
+re-armed every 12 s). Unlike every other dialog, it is a long-lived view bound to
+the activity's hardware lifecycle, so it stays in `MainActivity` for now (the plan
+flags it as the hardest). Revisit alongside Phase 4b if the controller ends up
+owning the USB-lifecycle reactions.
+
+---
+
+## Milestone after Phase 5
+
+`MainActivity`: **2642 → 1064 lines (−60%)**. Extracted, all compiling and the
+APK installed on device:
+
+| New class | Lines | Role |
+| --- | ---: | --- |
+| `PhotoDetailDialog` | 470 | detail view + swipe + merge preview |
+| `SettingsDialog` | 320 | settings + RGB pickers + action rows |
+| `BackupPickerDialog` | 213 | backup list + thumbnail mosaic |
+| `UsbDeviceController` | 164 | USB discovery + permission flow |
+| `AboutDialog` | 159 | about/links/license |
+| `ManualMergeStore` | 180 | manual-merges.json + inject |
+| `BackupRepository` | 171 | dumps backups + import/export |
+| `GalleryPipeline` | 108 | decode transform chain |
+| `PaletteCatalog` | 89 | native palette tables |
+| `AppFiles` / `EmptyImageCache` / `ShareSizeDialog` | 40 / 38 / 31 | leaf helpers |
+
+**Remaining:** Phase 4b (`GalleryController` — move the ~40
+`MainScreen.Listener` + operation-callback methods out; the largest single change
+in the plan), optional StartupDialog, and Phase 6 (split `MainScreen`).
