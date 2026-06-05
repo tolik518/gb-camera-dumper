@@ -1,13 +1,8 @@
 package fyi.r0.gbxcam;
 
-import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Dialog;
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -15,7 +10,6 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
-import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -63,16 +57,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class MainActivity extends Activity implements MainScreen.Listener, GbcamOperationRunner.Callback {
+public class MainActivity extends Activity
+        implements MainScreen.Listener, GbcamOperationRunner.Callback, UsbDeviceController.Listener {
     private static final String TAG = "GbcamApp";
-    private static final String ACTION_USB_PERMISSION = "fyi.r0.gbxcam.USB_PERMISSION";
     private static final int REQUEST_IMPORT_SAVE = 1;
     private static final int REQUEST_EXPORT_SAVE = 2;
 
-    private UsbManager usbManager;
-    private UsbDevice selectedDevice;
+    private UsbDeviceController usb;
     private AppSettings settings;
-    private Runnable pendingAction;
     private MainScreen screen;
     private GbcamOperationRunner operationRunner;
     private boolean autoLoadAttempted;
@@ -94,63 +86,59 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     private final Handler startupHandler = new Handler(Looper.getMainLooper());
     private final Runnable startupCartridgeCheckRunnable = this::doStartupCartridgeCheck;
 
-    private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction())) {
-                boolean found = refreshDevice();
-                screen.setDeviceConnected(found);
-                if (found && settings.autoLoad() && !autoLoadAttempted) {
-                    autoLoadCamera();
-                }
-                if (found && startupStep1Label != null) {
-                    startupStep1Label.setTextColor(startupStepDoneColor);
-                    startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
-                    startupStep2Checking = false;
-                    doStartupCartridgeCheck();
-                }
-                return;
-            }
+    // --- UsbDeviceController.Listener: host reactions to USB events ------------
 
-            if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
-                if (selectedDevice != null && GbxCartDevices.find(usbManager) == null) {
-                    selectedDevice = null;
-                    pendingAction = null;
-                    onLog("GBxCart RW disconnected.");
-                    screen.setDeviceConnected(false);
-                }
-                if (startupStep1Label != null) startupStep1Label.setTextColor(startupStepDefaultColor);
-                if (startupStep2Label != null) startupStep2Label.setTextColor(startupStepDefaultColor);
-                startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
-                startupStep2Checking = false;
-                return;
-            }
+    @Override
+    public void onUsbLog(String message) {
+        onLog(message);
+    }
 
-            if (!ACTION_USB_PERMISSION.equals(intent.getAction())) {
-                return;
-            }
+    @Override
+    public void onConnectionChanged(boolean connected) {
+        screen.setDeviceConnected(connected);
+    }
 
-            UsbDevice device = usbDeviceFrom(intent);
-            boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
-            if (!granted || device == null) {
-                Log.w(TAG, "USB permission denied");
-                onLog("USB permission denied.");
-                pendingAction = null;
-                return;
-            }
-
-            selectedDevice = device;
-            onLog("USB permission granted.");
-            Runnable action = pendingAction;
-            pendingAction = null;
-            if (action != null) action.run();
+    @Override
+    public void onDeviceAttached(boolean found) {
+        screen.setDeviceConnected(found);
+        if (found && settings.autoLoad() && !autoLoadAttempted) {
+            autoLoadCamera();
         }
-    };
+        if (found && startupStep1Label != null) {
+            startupStep1Label.setTextColor(startupStepDoneColor);
+            startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+            startupStep2Checking = false;
+            doStartupCartridgeCheck();
+        }
+    }
+
+    @Override
+    public void onDeviceDetached(boolean wasDisconnected) {
+        if (wasDisconnected) {
+            onLog("GBxCart RW disconnected.");
+            screen.setDeviceConnected(false);
+        }
+        if (startupStep1Label != null) startupStep1Label.setTextColor(startupStepDefaultColor);
+        if (startupStep2Label != null) startupStep2Label.setTextColor(startupStepDefaultColor);
+        startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
+        startupStep2Checking = false;
+    }
+
+    @Override
+    public void onPermissionGranted() {
+        onLog("USB permission granted.");
+    }
+
+    @Override
+    public void onPermissionDenied() {
+        Log.w(TAG, "USB permission denied");
+        onLog("USB permission denied.");
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        usb = new UsbDeviceController(this, this);
         operationRunner = new GbcamOperationRunner();
         settings = new AppSettings(this);
         int defaultPaletteIndex = NativeGbcam.defaultPaletteIndex();
@@ -172,9 +160,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         UiStyle.setLogger(this::onLog);
         setContentView(screen.view());
 
-        registerUsbReceiver();
+        usb.register();
         onLog("Rust core loaded: " + NativeGbcam.version());
-        boolean deviceFound = refreshDevice();
+        boolean deviceFound = usb.refresh();
         screen.setDeviceConnected(deviceFound);
         if (deviceFound && settings.autoLoad()) {
             autoLoadCamera();
@@ -199,10 +187,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     protected void onDestroy() {
         destroyed = true;
         startupHandler.removeCallbacks(startupCartridgeCheckRunnable);
-        try {
-            unregisterReceiver(usbReceiver);
-        } catch (IllegalArgumentException ignored) {
-        }
+        usb.unregister();
         UiStyle.setLogger(null);
         operationRunner.shutdown();
         backgroundExecutor.shutdownNow();
@@ -213,7 +198,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        boolean deviceFound = refreshDevice();
+        boolean deviceFound = usb.refresh();
         screen.setDeviceConnected(deviceFound);
         if (deviceFound && settings.autoLoad() && !autoLoadAttempted) {
             autoLoadCamera();
@@ -270,13 +255,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
     @Override
     public void onLoadRequested() {
-        if (GbxCartDevices.find(usbManager) == null) {
+        if (!usb.isConnected()) {
             Toast.makeText(this,
                     "No GBxCart RW connected. Plug in the cartridge reader and try again.",
                     Toast.LENGTH_LONG).show();
             return;
         }
-        runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
+        usb.withPermission(() -> operationRunner.loadGallery(usb.manager(), usb.device(), dumpsDir(), paletteIndex, this));
     }
 
     @Override
@@ -426,7 +411,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             detail = "Permanently delete " + manualCount + " " + plural(manualCount, "merged image") + "? This cannot be undone.";
         }
 
-        boolean cameraAvailable = GbxCartDevices.find(usbManager) != null;
+        boolean cameraAvailable = usb.isConnected();
 
         Runnable doDelete = () -> {
             GalleryState g = screen.gallery();
@@ -434,10 +419,10 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             GalleryState after = g.selectedManualMergeCount() > 0 ? deleteSelectedManualMerges(g) : g;
             if (after.selectedActiveCount() > 0) {
                 if (cameraAvailable) {
-                    runWithPermission(() -> {
+                    usb.withPermission(() -> {
                         GalleryState current = screen.gallery();
                         if (current != null)
-                            operationRunner.deletePhotos(usbManager, selectedDevice, current, dumpsDir(), paletteIndex, MainActivity.this);
+                            operationRunner.deletePhotos(usb.manager(), usb.device(), current, dumpsDir(), paletteIndex, MainActivity.this);
                     });
                 } else {
                     after = markSelectedCameraPhotosDeletedLocally(after);
@@ -533,16 +518,16 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         String detail = "Restore " + deletedCount + " deleted " + plural(deletedCount, "slot")
                 + " into the camera album. A save backup is kept in the app dumps folder.";
 
-        boolean cameraAvailable = GbxCartDevices.find(usbManager) != null;
+        boolean cameraAvailable = usb.isConnected();
 
         confirmOrRun("Recover deleted?", detail, "Recover", () -> {
             GalleryState g = screen.gallery();
             if (g == null) return;
             if (cameraAvailable) {
-                runWithPermission(() -> {
+                usb.withPermission(() -> {
                     GalleryState current = screen.gallery();
                     if (current != null)
-                        operationRunner.recoverPhotos(usbManager, selectedDevice, current, dumpsDir(), paletteIndex, MainActivity.this);
+                        operationRunner.recoverPhotos(usb.manager(), usb.device(), current, dumpsDir(), paletteIndex, MainActivity.this);
                 });
             } else {
                 GalleryState after = recoverSelectedCameraPhotosLocally(g);
@@ -563,9 +548,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 "Move selected photos first?",
                 "This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.",
                 "Move",
-                () -> runWithPermission(() -> {
+                () -> usb.withPermission(() -> {
                     GalleryState g = screen.gallery();
-                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Moving selected photos to front...", this);
+                    if (g != null) operationRunner.reorderPhotos(usb.manager(), usb.device(), g, dumpsDir(), paletteIndex, csv, "Moving selected photos to front...", this);
                 }));
     }
 
@@ -581,9 +566,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 "Compact album order?",
                 "This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.",
                 "Compact",
-                () -> runWithPermission(() -> {
+                () -> usb.withPermission(() -> {
                     GalleryState g = screen.gallery();
-                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Compacting album order...", this);
+                    if (g != null) operationRunner.reorderPhotos(usb.manager(), usb.device(), g, dumpsDir(), paletteIndex, csv, "Compacting album order...", this);
                 }));
     }
 
@@ -599,9 +584,9 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
                 "Clear camera album?",
                 "This hides every album slot by writing an empty state vector. Image data remains in SRAM for recovery/export until overwritten. A save backup is kept in the app dumps folder.",
                 "Clear",
-                () -> runWithPermission(() -> {
+                () -> usb.withPermission(() -> {
                     GalleryState g = screen.gallery();
-                    if (g != null) operationRunner.reorderPhotos(usbManager, selectedDevice, g, dumpsDir(), paletteIndex, csv, "Clearing album order...", this);
+                    if (g != null) operationRunner.reorderPhotos(usb.manager(), usb.device(), g, dumpsDir(), paletteIndex, csv, "Clearing album order...", this);
                 }));
     }
 
@@ -704,7 +689,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         steps.addView(connectionStep("2", boldSpan("Insert the Game Boy Camera cartridge into GBxCart RW.", "Game Boy Camera"), startupStep2Label, colors, accent));
         steps.addView(connectionStep("3", boldSpan("Tap \"Load Camera\".", "Load Camera"), step3Label, colors, accent));
 
-        if (selectedDevice != null) {
+        if (usb.device() != null) {
             startupStep1Label.setTextColor(startupStepDoneColor);
             if (screen.gallery() != null) {
                 startupStep2Label.setTextColor(startupStepDoneColor);
@@ -733,7 +718,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
 
         Button loadCamera = UiStyle.button(this, "Load Camera", accent, colors.surfaceRaised, accent);
         loadCamera.setOnClickListener(v -> {
-            if (GbxCartDevices.find(usbManager) == null) {
+            if (!usb.isConnected()) {
                 onLoadRequested(); // shows toast; popup stays open
                 return;
             }
@@ -764,18 +749,18 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
     }
 
     private void doStartupCartridgeCheck() {
-        if (startupStep2Label == null || selectedDevice == null || startupStep2Checking) return;
+        if (startupStep2Label == null || usb.device() == null || startupStep2Checking) return;
         if (screen != null && screen.isBusy()) {
             startupHandler.postDelayed(startupCartridgeCheckRunnable, 5_000);
             return;
         }
         startupStep2Checking = true;
-        UsbDevice device = selectedDevice;
+        UsbDevice device = usb.device();
         runInBackground(() -> {
             UsbDeviceConnection conn = null;
             boolean isCamera = false;
             try {
-                conn = usbManager.openDevice(device);
+                conn = usb.manager().openDevice(device);
                 if (conn != null) {
                     isCamera = NativeGbcam.isGameBoyCameraInserted(conn.getFileDescriptor());
                 }
@@ -789,7 +774,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
             boolean finalIsCamera = isCamera;
             postToUi(() -> {
                 startupStep2Checking = false;
-                if (startupStep2Label == null || selectedDevice != device) return;
+                if (startupStep2Label == null || usb.device() != device) return;
                 startupStep2Label.setTextColor(finalIsCamera ? startupStepDoneColor : startupStepDefaultColor);
                 if (startupStep2Label.isAttachedToWindow()) {
                     startupHandler.postDelayed(startupCartridgeCheckRunnable, 12_000);
@@ -1037,7 +1022,7 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         body.setPadding(0, dp(8), 0, 0);
 
         GalleryState connectedGallery = screen.gallery();
-        if (connectedGallery != null && selectedDevice != null) {
+        if (connectedGallery != null && usb.device() != null) {
             body.addView(aboutSection("Connected Device", colors));
             TextView deviceInfo = new TextView(this);
             deviceInfo.setText(connectedGallery.connected);
@@ -1277,44 +1262,13 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         });
     }
 
-    private boolean refreshDevice() {
-        selectedDevice = GbxCartDevices.find(usbManager);
-        if (selectedDevice == null) {
-            onLog("GBxCart RW not found. Connect it, then tap Load Camera.");
-            return false;
-        }
-
-        onLog(String.format(
-                "GBxCart RW found: VID 0x%04X, PID 0x%04X",
-                selectedDevice.getVendorId(),
-                selectedDevice.getProductId()));
-        return true;
-    }
-
     private void autoLoadCamera() {
         if (autoLoadAttempted || screen.gallery() != null) {
             return;
         }
         autoLoadAttempted = true;
         onLog("Loading camera automatically...");
-        runWithPermission(() -> operationRunner.loadGallery(usbManager, selectedDevice, dumpsDir(), paletteIndex, this));
-    }
-
-    private void runWithPermission(Runnable action) {
-        if (!refreshDevice()) {
-            screen.setDeviceConnected(false);
-            return;
-        }
-        screen.setDeviceConnected(true);
-
-        if (!usbManager.hasPermission(selectedDevice)) {
-            pendingAction = action;
-            onLog("Requesting USB permission...");
-            usbManager.requestPermission(selectedDevice, permissionIntent());
-            return;
-        }
-
-        action.run();
+        usb.withPermission(() -> operationRunner.loadGallery(usb.manager(), usb.device(), dumpsDir(), paletteIndex, this));
     }
 
     private File dumpsDir() {
@@ -2495,24 +2449,6 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         return UiStyle.dp(this, value);
     }
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
-    private void registerUsbReceiver() {
-        IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
-        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(usbReceiver, filter);
-        }
-    }
-
-    private PendingIntent permissionIntent() {
-        Intent intent = new Intent(ACTION_USB_PERMISSION).setPackage(getPackageName());
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE;
-        return PendingIntent.getBroadcast(this, 0, intent, flags);
-    }
-
     private static void sortByDisplayIndex(List<GalleryPhoto> photos) {
         Collections.sort(photos, (left, right) -> compareInts(left.displayIndex, right.displayIndex));
     }
@@ -2529,11 +2465,4 @@ public class MainActivity extends Activity implements MainScreen.Listener, Gbcam
         return 0;
     }
 
-    @SuppressWarnings("deprecation")
-    private static UsbDevice usbDeviceFrom(Intent intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class);
-        }
-        return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-    }
 }

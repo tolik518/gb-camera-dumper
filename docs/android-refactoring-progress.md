@@ -14,7 +14,7 @@ run by the user before release.
 | --- | --- | --- |
 | 0 | Builders & data hygiene | ✅ done |
 | 1 | Leaf helpers (AppFiles, PaletteCatalog) + dead code | ✅ done |
-| 2 | UsbDeviceController | ⬜ pending |
+| 2 | UsbDeviceController | ✅ done |
 | 3 | ManualMergeStore + BackupRepository | ⬜ pending |
 | 4 | GalleryPipeline + GalleryController | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
@@ -83,3 +83,36 @@ classes and remove confirmed-dead API. No logic change.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
 - On-device smoke test — ⬜ pending (verify export/share, palette switch, backup
   thumbnails still render).
+
+---
+
+## Phase 2 — Extract the USB layer
+
+**Goal:** move all USB plumbing (discovery, the attach/detach/permission receiver,
+and the permission-gated action flow) out of `MainActivity` into a focused
+controller, leaving `MainActivity` as the host of the UI reactions.
+
+### Changes
+- New `UsbDeviceController` owns `usbManager`, `selectedDevice`, `pendingAction`,
+  the `BroadcastReceiver`, `register()`/`unregister()`, `permissionIntent()`,
+  `usbDeviceFrom()`, `refresh()` (was `refreshDevice`) and `withPermission()`
+  (was `runWithPermission`). Exposes `manager()`, `device()`, `isConnected()`.
+- UI reactions are delegated through `UsbDeviceController.Listener`, which
+  `MainActivity` implements: `onUsbLog`, `onConnectionChanged`, `onDeviceAttached`,
+  `onDeviceDetached`, `onPermissionGranted`, `onPermissionDenied`. The exact
+  attach/detach/permission behavior (screen connection state, auto-load, startup
+  step colors, disconnect log) is preserved in those callbacks.
+- Call sites updated: `operationRunner.*(usb.manager(), usb.device(), ...)`,
+  `usb.withPermission(...)`, `usb.isConnected()`. The startup cartridge poll
+  (`doStartupCartridgeCheck`) stays in `MainActivity` for now — it is really
+  StartupDialog logic (Phase 5) that happens to read USB via `usb.manager()/device()`.
+- Removed now-unused imports (`BroadcastReceiver`, `IntentFilter`, `PendingIntent`,
+  `UsbManager`, `Context`, `SuppressLint`).
+
+### Result
+- `MainActivity` 2539 → 2468 lines; new `UsbDeviceController` 164 lines.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
+- On-device smoke test — ⬜ pending (verify: plug/unplug detection, permission
+  prompt on first load, auto-load on attach, startup popup step colors).
