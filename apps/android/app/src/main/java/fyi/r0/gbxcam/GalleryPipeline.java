@@ -18,12 +18,10 @@ import java.util.function.Consumer;
  */
 final class GalleryPipeline {
     private final AppSettings settings;
-    private final EmptyImageCache emptyImages;
     private final Consumer<String> logger;
 
-    GalleryPipeline(AppSettings settings, EmptyImageCache emptyImages, Consumer<String> logger) {
+    GalleryPipeline(AppSettings settings, Consumer<String> logger) {
         this.settings = settings;
-        this.emptyImages = emptyImages;
         this.logger = logger;
     }
 
@@ -75,7 +73,7 @@ final class GalleryPipeline {
         List<GalleryPhoto> filtered = null;
         for (int i = 0; i < gallery.photos.size(); i++) {
             GalleryPhoto photo = gallery.photos.get(i);
-            if (photo.deleted && emptyImages.isEmpty(photo.path)) {
+            if (photo.deleted && photo.blank) {
                 if (filtered == null) {
                     filtered = new ArrayList<>(gallery.photos.subList(0, i));
                 }

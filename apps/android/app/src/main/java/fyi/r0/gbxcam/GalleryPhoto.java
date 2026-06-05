@@ -8,6 +8,7 @@ final class GalleryPhoto {
     final int width;
     final int height;
     final byte[] indexedPixels;
+    final boolean blank;
     final boolean deleted;
     final int border;
     final boolean copy;
@@ -33,6 +34,7 @@ final class GalleryPhoto {
         this.width = b.width;
         this.height = b.height;
         this.indexedPixels = b.indexedPixels;
+        this.blank = b.blank;
         this.deleted = b.deleted;
         this.border = b.border;
         this.copy = b.copy;
@@ -55,6 +57,7 @@ final class GalleryPhoto {
     Builder toBuilder() {
         return new Builder(name, path, displayIndex, physicalSlot, width, height)
                 .indexedPixels(indexedPixels)
+                .blank(blank)
                 .deleted(deleted)
                 .border(border)
                 .copy(copy)
@@ -108,6 +111,7 @@ final class GalleryPhoto {
         private final int width;
         private final int height;
         private byte[] indexedPixels;
+        private boolean blank;
         private boolean deleted;
         private int border;
         private boolean copy;
@@ -131,6 +135,7 @@ final class GalleryPhoto {
         }
 
         Builder indexedPixels(byte[] v) { this.indexedPixels = v; return this; }
+        Builder blank(boolean v) { this.blank = v; return this; }
         Builder deleted(boolean v) { this.deleted = v; return this; }
         Builder border(int v) { this.border = v; return this; }
         Builder copy(boolean v) { this.copy = v; return this; }

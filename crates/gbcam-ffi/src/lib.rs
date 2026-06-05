@@ -1,7 +1,7 @@
 use gbxcam_core::{
     apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, palette_colors,
-    palette_labels, write_palette_png, write_photos_to_dir, GbcamSave, PaletteId, PhotoKind,
-    ValidationSeverity, DEFAULT_PALETTE_INDEX,
+    palette_labels, write_palette_png, GbcamSave, PaletteId, PhotoKind, ValidationSeverity,
+    DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
@@ -180,6 +180,43 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local
 }
 
 #[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromSave<'local>(
+    env: jni::EnvUnowned<'local>,
+    _class: JClass<'local>,
+    save_path: JString<'local>,
+    output_dir: JString<'local>,
+    physical_slots_csv: JString<'local>,
+    palette_index: jint,
+    progress: JObject<'local>,
+) -> jstring {
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_dir = match java_path(env, output_dir) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let physical_slots_csv = match java_string(env, physical_slots_csv) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let result = {
+            let mut progress = JniProgress::new(env, progress);
+            recover_photos_from_save(
+                save_path,
+                output_dir,
+                &physical_slots_csv,
+                palette_from_jint(palette_index),
+                &mut progress,
+            )
+        };
+        java_result(env, result, "Cached save recover failed")
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local>(
     env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
@@ -240,27 +277,6 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromSave<'local
             load_gallery_from_save(save_path, output_dir, palette_from_jint(palette_index)),
             "GB Camera cached gallery load failed",
         )
-    })
-}
-
-#[no_mangle]
-pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_dumpFromFd(
-    env: jni::EnvUnowned,
-    _class: JClass,
-    fd: jint,
-    output_dir: JString,
-    erase_after: jni::sys::jboolean,
-) -> jstring {
-    with_jni(&env, |env| {
-        let output_dir = match java_path(env, output_dir) {
-            Ok(path) => path,
-            Err(e) => return throw(env, e),
-        };
-        let result = {
-            let mut progress = NoJniProgress;
-            dump_from_fd(fd, output_dir, erase_after != jni::sys::JNI_FALSE, &mut progress)
-        };
-        java_result(env, result, "GB Camera dump failed")
     })
 }
 
@@ -428,6 +444,40 @@ fn recover_photos_from_fd(
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
+fn recover_photos_from_save(
+    save_path: PathBuf,
+    output_dir: PathBuf,
+    physical_slots_csv: &str,
+    palette: PaletteId,
+    progress: &mut impl Progress,
+) -> AppResult<String> {
+    let slots = parse_physical_slots(physical_slots_csv)?;
+    if slots.is_empty() {
+        return Err("No deleted photos selected.".into());
+    }
+
+    let save = std::fs::read(&save_path)?;
+    let backup_path = timestamped_backup_path(&output_dir, "GAMEBOYCAMERA-before-recover")?;
+    std::fs::create_dir_all(&output_dir)?;
+    std::fs::write(&backup_path, &save)?;
+    progress.message(&format!(
+        "Pre-recover backup saved: {}",
+        backup_path.display()
+    ));
+
+    let updated = apply_album_recover(&save, &slots)?;
+    std::fs::write(&save_path, &updated)?;
+    progress.message("Cached gallery updated after recover.");
+
+    let info = GbxCartInfo {
+        pcb_ver: 0,
+        ofw_ver: 0,
+        cfw_ver: 0,
+        name: Some("Cached save".to_string()),
+    };
+    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+}
+
 fn reorder_photos_from_fd(
     fd: jint,
     save_path: PathBuf,
@@ -471,46 +521,6 @@ fn load_gallery_from_save(
         name: Some("Cached save".to_string()),
     };
     gallery_json(&save, &output_dir, &save_path, &info, palette)
-}
-
-fn dump_from_fd(
-    fd: jint,
-    output_dir: PathBuf,
-    erase_after: bool,
-    progress: &mut impl Progress,
-) -> AppResult<String> {
-    std::fs::create_dir_all(&output_dir)?;
-
-    let (info, save) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
-        let save = dev.dump_save(progress)?;
-        if erase_after {
-            dev.erase_save(&save, progress)?;
-        }
-        Ok(save)
-    })?;
-
-    let save_path = output_dir.join("GAMEBOYCAMERA.sav");
-    std::fs::write(&save_path, &save)?;
-    let photo_names = write_photos_to_dir(&save, &output_dir)?;
-
-    let image_list = photo_names
-        .iter()
-        .map(|name| format!("  {name}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(format!(
-        "Connected: {}\nSaved: {}\nExtracted {} image(s)\n{}{}",
-        connected_label(&info),
-        save_path.display(),
-        photo_names.len(),
-        image_list,
-        if erase_after {
-            "\nErased camera memory."
-        } else {
-            ""
-        }
-    ))
 }
 
 fn with_gbxcart_session<T, P, F>(
@@ -563,6 +573,7 @@ fn gallery_json(
             "width": photo.width,
             "height": photo.height,
             "indexedPixels": base64_encode(&photo.pixels_indexed),
+            "blank": indexed_pixels_blank(&photo.pixels_indexed),
             "deleted": photo.deleted,
         });
 
@@ -597,6 +608,13 @@ fn hex_bytes(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn indexed_pixels_blank(pixels: &[u8]) -> bool {
+    match pixels.split_first() {
+        None => true,
+        Some((first, rest)) => rest.iter().all(|pixel| pixel == first),
+    }
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -726,5 +744,12 @@ mod tests {
         assert_eq!(base64_encode(b"fo"), "Zm8=");
         assert_eq!(base64_encode(b"foo"), "Zm9v");
         assert_eq!(base64_encode(&[0, 1, 2, 3]), "AAECAw==");
+    }
+
+    #[test]
+    fn indexed_pixels_blank_requires_one_flat_value() {
+        assert!(indexed_pixels_blank(&[]));
+        assert!(indexed_pixels_blank(&[2, 2, 2]));
+        assert!(!indexed_pixels_blank(&[2, 2, 1]));
     }
 }

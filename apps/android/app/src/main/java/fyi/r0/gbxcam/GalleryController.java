@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * worker threading, and import/export coordination — delegating bytes/pixels to the
  * domain/data collaborators and view work to {@link MainScreen}.
  *
- * {@code MainActivity} keeps only lifecycle, the USB receiver, and the startup popup.
+ * {@code MainActivity} keeps only lifecycle and USB receiver reactions.
  */
 final class GalleryController implements MainScreen.Listener, GbcamOperationRunner.Callback,
         SettingsDialog.Host, PhotoDetailDialog.Host {
@@ -378,10 +378,54 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                         operationRunner.recoverPhotos(usb.manager(), usb.device(), current, dumpsDir(), paletteIndex, this);
                 });
             } else {
-                GalleryState after = recoverSelectedCameraPhotosLocally(g);
-                screen.showGallery(after);
+                recoverSelectedFromCachedSave(g);
             }
         });
+    }
+
+    private void recoverSelectedFromCachedSave(GalleryState gallery) {
+        String slots = gallery.selectedPhysicalSlotsCsv(true);
+        if (slots.isEmpty()) return;
+        Set<String> restoredSlots = selectedDeletedSlotKeys(gallery);
+        screen.setBusy(true, "Recovering selected deleted photos...");
+        runInBackground(() -> {
+            try {
+                String json = NativeGbcam.recoverPhotosFromSave(
+                        gallery.savePath,
+                        dumpsDir().getAbsolutePath(),
+                        slots,
+                        paletteIndex,
+                        message -> postToUi(() -> {
+                            onLog(message);
+                            screen.updateBusyProgress(message);
+                        }));
+                GalleryState recovered = GalleryState.fromJson(json);
+                postToUi(() -> {
+                    settings.removeLocallyDeletedSlots(restoredSlots);
+                    GalleryState shown = pipeline.process(recovered, true);
+                    mergeStore.load();
+                    shown = mergeStore.inject(shown);
+                    screen.showGallery(shown);
+                    screen.setBusy(false, null);
+                    onLog("Recovered selected deleted photos from cached save.");
+                });
+            } catch (Exception e) {
+                postToUi(() -> {
+                    onError("Error: " + e.toString());
+                    screen.setBusy(false, null);
+                });
+            }
+        });
+    }
+
+    private static Set<String> selectedDeletedSlotKeys(GalleryState gallery) {
+        Set<String> slots = new HashSet<>();
+        for (GalleryPhoto photo : gallery.photos) {
+            if (photo.selected && photo.isDeletedAlbumPhoto() && !photo.mergedRgb) {
+                slots.add(String.valueOf(photo.physicalSlot));
+            }
+        }
+        return slots;
     }
 
     @Override

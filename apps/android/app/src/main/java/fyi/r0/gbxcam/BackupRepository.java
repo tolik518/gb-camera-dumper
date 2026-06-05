@@ -4,8 +4,12 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -21,15 +25,14 @@ import java.util.Locale;
 final class BackupRepository {
     private static final String TAG = "GbcamApp";
     private static final String WORKING_SAVE_NAME = "GAMEBOYCAMERA.sav";
+    private static final String PREVIEW_MANIFEST = "preview-photos.txt";
 
     private final Context context;
     private final AppSettings settings;
-    private final EmptyImageCache emptyImages;
 
-    BackupRepository(Context context, AppSettings settings, EmptyImageCache emptyImages) {
+    BackupRepository(Context context, AppSettings settings) {
         this.context = context;
         this.settings = settings;
-        this.emptyImages = emptyImages;
     }
 
     /** All backup saves in the dumps folder, newest first. Empty array when none. */
@@ -75,8 +78,9 @@ final class BackupRepository {
                     backupPalette));
             List<GalleryPhoto> active = new ArrayList<>();
             for (GalleryPhoto p : gallery.photos) {
-                if (!p.deleted) active.add(p);
+                if (!p.deleted && !p.blank) active.add(p);
             }
+            writePreviewManifest(output, active);
             if (active.isEmpty()) {
                 return preview;
             }
@@ -92,12 +96,20 @@ final class BackupRepository {
     }
 
     private GalleryPhoto[] loadCachedPreviews(File dir) {
+        File manifest = new File(dir, PREVIEW_MANIFEST);
+        if (!manifest.isFile()) return null;
+
         List<File> found = new ArrayList<>();
-        for (int i = 1; i <= 30; i++) {
-            File f = new File(dir, String.format(Locale.US, "IMG_PC%02d.png", i));
-            if (f.exists() && !emptyImages.isEmpty(f.getAbsolutePath())) {
-                found.add(f);
+        try (BufferedReader reader = new BufferedReader(new FileReader(manifest))) {
+            String name;
+            while ((name = reader.readLine()) != null) {
+                File f = new File(dir, name);
+                if (f.isFile()) {
+                    found.add(f);
+                }
             }
+        } catch (Exception e) {
+            return null;
         }
         if (found.isEmpty()) return null;
 
@@ -111,6 +123,18 @@ final class BackupRepository {
                     .build();
         }
         return preview;
+    }
+
+    private static void writePreviewManifest(File dir, List<GalleryPhoto> active) {
+        File manifest = new File(dir, PREVIEW_MANIFEST);
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(manifest))) {
+            for (GalleryPhoto photo : active) {
+                writer.write(photo.name);
+                writer.newLine();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not write backup preview manifest: " + manifest, e);
+        }
     }
 
     private static int[] previewIndices(int count) {

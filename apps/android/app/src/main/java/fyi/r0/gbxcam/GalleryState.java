@@ -52,6 +52,7 @@ final class GalleryState {
                             item.getInt("width"),
                             item.getInt("height"))
                     .indexedPixels(decodeIndexedPixels(item.optString("indexedPixels", "")))
+                    .blank(item.optBoolean("blank", false))
                     .deleted(item.optBoolean("deleted", false))
                     .border(item.optInt("border", 0))
                     .copy(item.optBoolean("copy", false))

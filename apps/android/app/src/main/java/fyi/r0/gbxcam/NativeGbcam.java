@@ -38,6 +38,13 @@ final class NativeGbcam {
             int paletteIndex,
             Progress progress);
 
+    static native String recoverPhotosFromSave(
+            String savePath,
+            String outputDir,
+            String physicalSlotsCsv,
+            int paletteIndex,
+            Progress progress);
+
     static native String reorderPhotosFromFd(
             int fd,
             String savePath,
@@ -47,8 +54,6 @@ final class NativeGbcam {
             Progress progress);
 
     static native String loadGalleryFromSave(String savePath, String outputDir, int paletteIndex);
-
-    static native String dumpFromFd(int fd, String outputDir, boolean eraseAfter);
 
     static native boolean isGameBoyCameraInserted(int fd);
 }
