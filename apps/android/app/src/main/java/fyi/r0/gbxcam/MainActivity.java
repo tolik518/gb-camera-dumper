@@ -49,7 +49,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends Activity
-        implements MainScreen.Listener, GbcamOperationRunner.Callback, UsbDeviceController.Listener {
+        implements MainScreen.Listener, GbcamOperationRunner.Callback, UsbDeviceController.Listener,
+        SettingsDialog.Host {
     private static final String TAG = "GbcamApp";
     private static final int REQUEST_IMPORT_SAVE = 1;
     private static final int REQUEST_EXPORT_SAVE = 2;
@@ -289,26 +290,7 @@ public class MainActivity extends Activity
     public void onShareSelectedRequested() {
         GalleryState gallery = screen.gallery();
         if (gallery == null || gallery.selectedCount() == 0) return;
-        showShareSizeDialog(scale -> doShareSelected(gallery, scale));
-    }
-
-    private void showShareSizeDialog(UiStyle.ChoiceListener onPicked) {
-        final int[] scales = { 1, 2, 4, 8 };
-        int lastScale = settings.shareMultiplier();
-        int selectedIdx = 0;
-        for (int i = 0; i < scales.length; i++) {
-            if (scales[i] == lastScale) { selectedIdx = i; break; }
-        }
-        String[] labels = {
-            "1×  ·  128 × 112  (native pixel size)",
-            "2×  ·  256 × 224",
-            "4×  ·  512 × 448",
-            "8×  ·  1024 × 896"
-        };
-        UiStyle.singleChoiceDialog(this, "Share size", labels, selectedIdx, which -> {
-            settings.saveShareMultiplier(scales[which]);
-            onPicked.onChoice(scales[which]);
-        });
+        ShareSizeDialog.show(this, settings, scale -> doShareSelected(gallery, scale));
     }
 
     private void doShareSelected(GalleryState gallery, int scale) {
@@ -379,12 +361,27 @@ public class MainActivity extends Activity
 
     @Override
     public void onSettingsRequested() {
-        showSettingsDialog();
+        new SettingsDialog(this, settings, screen, this).show();
+    }
+
+    @Override
+    public void shareLogs() {
+        shareCurrentLogs();
+    }
+
+    @Override
+    public void applyPaletteIcon() {
+        runInBackground(() -> PaletteIcons.applyIfChanged(MainActivity.this, paletteIndex));
+    }
+
+    @Override
+    public void recolorGallery() {
+        recolorCachedGallery(paletteIndex, false);
     }
 
     @Override
     public void onAboutRequested() {
-        showAboutDialog();
+        new AboutDialog(this, this::onLog).show(screen.gallery(), usb.device() != null);
     }
 
     @Override
@@ -800,409 +797,6 @@ public class MainActivity extends Activity
         return row;
     }
 
-    private void showSettingsDialog() {
-        Dialog dialog = UiStyle.baseDialog(this);
-        UiStyle.Palette colors = UiStyle.palette(this);
-        int accent = screen.accentColor();
-
-        LinearLayout content = UiStyle.dialog(this, dialog, "Settings", null);
-        // Insert About button before Close in the dialog header
-        LinearLayout header = (LinearLayout) content.getChildAt(0);
-        Button headerAbout = UiStyle.button(this, "About", colors.textSecondary, colors.surfaceRaised, colors.border);
-        headerAbout.setTextSize(13);
-        headerAbout.setOnClickListener(v -> { dialog.dismiss(); showAboutDialog(); });
-        LinearLayout.LayoutParams headerAboutParams = new LinearLayout.LayoutParams(dp(72), dp(44));
-        headerAboutParams.setMargins(0, 0, dp(6), 0);
-        header.addView(headerAbout, header.getChildCount() - 1, headerAboutParams);
-
-        LinearLayout options = new LinearLayout(this);
-        options.setOrientation(LinearLayout.VERTICAL);
-        options.setPadding(0, dp(12), 0, 0);
-
-        CheckBox autoLoad = UiStyle.settingsCheckBox(
-                this,
-                "Auto-load camera on launch",
-                "Starts reading the camera automatically when a GBxCart RW is connected.",
-                settings.autoLoad(),
-                accent);
-        CheckBox loadCache = UiStyle.settingsCheckBox(
-                this,
-                "Load last gallery when offline",
-                "Shows the most recent save backup when no camera is connected or auto-load is off.",
-                settings.loadCache(),
-                accent);
-        CheckBox showLogs = UiStyle.settingsCheckBox(
-                this,
-                "Show logs by default",
-                "Keeps the operation log panel open after app startup.",
-                settings.showLogs(),
-                accent);
-        CheckBox showPhotoMetaCb = UiStyle.settingsCheckBox(
-                this,
-                "Show photo metadata",
-                "Shows slot number and merge info below each photo in the gallery.",
-                settings.showPhotoMeta(),
-                accent);
-        CheckBox showStartupPopupCb = UiStyle.settingsCheckBox(
-                this,
-                "Show popup on startup",
-                "Displays connection instructions when the app launches.",
-                settings.showStartupPopup(),
-                accent);
-        CheckBox confirmWrites = UiStyle.settingsCheckBox(
-                this,
-                "Confirm album writes",
-                "Asks before delete, recover, reorder, compact, or clear operations.",
-                settings.confirmAlbumWrites(),
-                accent);
-        CheckBox exportDeleted = UiStyle.settingsCheckBox(
-                this,
-                "Export deleted photos",
-                "Includes selected recoverable deleted slots when saving or sharing images.",
-                settings.exportDeleted(),
-                accent);
-        CheckBox autoRgbMerge = UiStyle.settingsCheckBox(
-                this,
-                "Auto-detect RGB sets",
-                "Merges consecutive 3-shot RGB and 4-shot CRGB captures.",
-                settings.autoRgbMerge(),
-                accent);
-
-        final String[] rgb4Value = { settings.rgb4Order() };
-        final String[] rgb3Value = { settings.rgb3Order() };
-        final String[] defaultAlgoValue = { settings.mergeAlgorithm() };
-
-        Runnable saveAll = () -> {
-            boolean rgbChanged = autoRgbMerge.isChecked() != settings.autoRgbMerge()
-                    || !rgb4Value[0].equals(settings.rgb4Order())
-                    || !rgb3Value[0].equals(settings.rgb3Order())
-                    || !defaultAlgoValue[0].equals(settings.mergeAlgorithm());
-            settings.saveSettings(
-                    autoLoad.isChecked(), loadCache.isChecked(), showLogs.isChecked(),
-                    confirmWrites.isChecked(), exportDeleted.isChecked(), autoRgbMerge.isChecked(),
-                    rgb4Value[0], rgb3Value[0], defaultAlgoValue[0]);
-            settings.saveShowStartupPopup(showStartupPopupCb.isChecked());
-            screen.setLogsVisibleFromSettings(showLogs.isChecked());
-            if (rgbChanged && screen.gallery() != null) {
-                recolorCachedGallery(paletteIndex, false);
-            }
-        };
-
-        View rgb4Row = settingsPickerRow(
-                "4-shot order",
-                "Position of C (clear), R, G, B in consecutive shots.",
-                AppSettings.RGB4_ORDERS, rgb4Value, saveAll);
-        View rgb3Row = settingsPickerRow(
-                "3-shot order",
-                "Position of R, G, B in consecutive shots.",
-                AppSettings.RGB3_ORDERS, rgb3Value, saveAll);
-        View algoRow = settingsIdPickerRow(
-                "Default merge algorithm",
-                "Algorithm used when auto-detecting RGB sets.",
-                RgbMergeDetector.ALGORITHM_IDS,
-                RgbMergeDetector.ALGORITHM_LABELS,
-                new String[]{ "Basic", "Clear Lum", "Norm RGB", "Norm+Clear", "Sat Boost", "Adaptive ★" },
-                defaultAlgoValue, saveAll);
-
-        boolean rgbMergeOn = autoRgbMerge.isChecked();
-        rgb4Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
-        rgb3Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
-        algoRow.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
-
-        autoLoad.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        loadCache.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        showLogs.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        showPhotoMetaCb.setOnCheckedChangeListener((btn, checked) -> {
-            settings.saveShowPhotoMeta(checked);
-            screen.setShowMeta(checked);
-        });
-        showStartupPopupCb.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        confirmWrites.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        exportDeleted.setOnCheckedChangeListener((btn, checked) -> saveAll.run());
-        autoRgbMerge.setOnCheckedChangeListener((btn, checked) -> {
-            rgb4Row.setVisibility(checked ? View.VISIBLE : View.GONE);
-            rgb3Row.setVisibility(checked ? View.VISIBLE : View.GONE);
-            algoRow.setVisibility(checked ? View.VISIBLE : View.GONE);
-            saveAll.run();
-        });
-
-        options.addView(UiStyle.settingsRow(this, autoLoad));
-        options.addView(UiStyle.settingsRow(this, loadCache));
-        options.addView(UiStyle.settingsRow(this, showLogs));
-        options.addView(UiStyle.settingsRow(this, showPhotoMetaCb));
-        options.addView(UiStyle.settingsRow(this, showStartupPopupCb));
-        options.addView(UiStyle.settingsRow(this, confirmWrites));
-        options.addView(UiStyle.settingsRow(this, exportDeleted));
-        options.addView(UiStyle.settingsRow(this, autoRgbMerge));
-        options.addView(rgb4Row);
-        options.addView(rgb3Row);
-        options.addView(algoRow);
-        options.addView(settingsActionRow(
-                "Backups",
-                "Browse and restore save file backups.",
-                accent,
-                () -> {
-                    dialog.dismiss();
-                    onBackupsRequested();
-                }));
-        options.addView(settingsActionRow(
-                "Import save",
-                "Load a .sav file from your device.",
-                accent,
-                () -> {
-                    dialog.dismiss();
-                    onImportSaveRequested();
-                }));
-        options.addView(settingsActionRow(
-                "Export save",
-                "Save the current camera backup to your device.",
-                accent,
-                () -> {
-                    dialog.dismiss();
-                    onExportSaveRequested();
-                }));
-        options.addView(settingsActionRow(
-                "Apply current palette as app icon",
-                "Updates the launcher icon to match the selected palette. The app will briefly restart.",
-                accent,
-                () -> {
-                    dialog.dismiss();
-                    runInBackground(() -> PaletteIcons.applyIfChanged(MainActivity.this, paletteIndex));
-                }));
-        options.addView(settingsActionRow(
-                "Share logs",
-                "Share the current session log text.",
-                accent,
-                () -> {
-                    dialog.dismiss();
-                    shareCurrentLogs();
-                }));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(options);
-        content.addView(scroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                Math.min(dp(360), dp(72) * 11 + dp(12))));
-
-        dialog.setContentView(content);
-        UiStyle.sizeDialog(dialog, this, 32, 560);
-        dialog.show();
-    }
-
-    private void showAboutDialog() {
-        Dialog dialog = UiStyle.baseDialog(this);
-        UiStyle.Palette colors = UiStyle.palette(this);
-
-        LinearLayout content = UiStyle.dialog(this, dialog, "GBxCAM Viewer", "v" + packageVersionName());
-
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(8), 0, 0);
-
-        GalleryState connectedGallery = screen.gallery();
-        if (connectedGallery != null && usb.device() != null) {
-            body.addView(aboutSection("Connected Device", colors));
-            TextView deviceInfo = new TextView(this);
-            deviceInfo.setText(connectedGallery.connected);
-            deviceInfo.setTextColor(colors.textPrimary);
-            deviceInfo.setTextSize(13);
-            deviceInfo.setPadding(0, dp(6), 0, dp(6));
-            body.addView(deviceInfo);
-        }
-
-        body.addView(aboutSection("Feedback", colors));
-        body.addView(aboutRow("Report a bug", "518@returnnull.de",
-                "mailto:518@returnnull.de", colors));
-
-        body.addView(aboutSection("Author", colors));
-        body.addView(aboutRow("tolik518", null,
-                "https://github.com/tolik518", colors));
-
-        body.addView(aboutSection("Acknowledgments", colors));
-        body.addView(aboutRow("FlashGBX",
-                "USB protocol · lesserkuma · GPL-3.0",
-                "https://github.com/lesserkuma/FlashGBX", colors));
-        body.addView(aboutRow("gbcam-rev-engineer",
-                "GB Camera docs · Antonio Niño Díaz · CC BY 4.0",
-                "https://github.com/AntonioND/gbcam-rev-engineer", colors));
-        body.addView(aboutRow("Inject-pictures-in-your-Game-Boy-Camera-saves",
-                "Save file research · Raphaël Boichot",
-                "https://github.com/Raphael-Boichot/Inject-pictures-in-your-Game-Boy-Camera-saves", colors));
-
-        body.addView(aboutSection("License", colors));
-        body.addView(aboutRow("GPL-3.0-or-later", null,
-                "https://www.gnu.org/licenses/gpl-3.0.html", colors));
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(body);
-        content.addView(scroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        dialog.setContentView(content);
-        UiStyle.sizeDialog(dialog, this, 32, 560);
-        dialog.show();
-    }
-
-    private View aboutSection(String label, UiStyle.Palette colors) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, dp(10), 0, dp(2));
-        row.setLayoutParams(params);
-        TextView title = new TextView(this);
-        title.setText(label);
-        title.setTextColor(colors.textSecondary);
-        title.setTextSize(11);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setIncludeFontPadding(false);
-        row.addView(title);
-        View rule = new View(this);
-        rule.setBackgroundColor(colors.border);
-        LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(0, dp(1), 1);
-        ruleParams.setMargins(dp(8), 0, 0, 0);
-        row.addView(rule, ruleParams);
-        return row;
-    }
-
-    private View aboutRow(String label, String description, String url, UiStyle.Palette colors) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setClickable(true);
-        row.setOnClickListener(v -> openUrl(url));
-        row.setPadding(0, dp(6), 0, dp(6));
-        LinearLayout text = new LinearLayout(this);
-        text.setOrientation(LinearLayout.VERTICAL);
-        TextView labelView = new TextView(this);
-        labelView.setText(label);
-        labelView.setTextColor(colors.primary);
-        labelView.setTextSize(13);
-        text.addView(labelView);
-        if (description != null && !description.isEmpty()) {
-            TextView descView = new TextView(this);
-            descView.setText(description);
-            descView.setTextColor(colors.textSecondary);
-            descView.setTextSize(11);
-            descView.setIncludeFontPadding(false);
-            text.addView(descView);
-        }
-        row.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        TextView arrow = new TextView(this);
-        arrow.setText("↗");
-        arrow.setTextColor(colors.textMuted);
-        arrow.setTextSize(14);
-        arrow.setGravity(Gravity.CENTER);
-        row.addView(arrow, new LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.MATCH_PARENT));
-        return row;
-    }
-
-    private void openUrl(String url) {
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-        } catch (Exception ignored) {
-            onLog("Could not open link.");
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    private String packageVersionName() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Exception ignored) {
-            return "?";
-        }
-    }
-
-    private View settingsActionRow(String title, String description, int accentColor, Runnable action) {
-        UiStyle.Palette colors = UiStyle.palette(this);
-        android.widget.FrameLayout row = new android.widget.FrameLayout(this);
-        row.setBackground(UiStyle.rounded(this, colors.surfaceRaised, colors.border, 10, 1));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(v -> action.run());
-
-        LinearLayout inner = new LinearLayout(this);
-        inner.setOrientation(LinearLayout.HORIZONTAL);
-        inner.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        inner.setPadding(dp(14), dp(10), dp(10), dp(10));
-
-        android.widget.TextView text = new android.widget.TextView(this);
-        text.setText(UiStyle.twoLineText(title, description, colors.textPrimary, colors.textSecondary));
-        text.setTextSize(12);
-        inner.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        android.widget.TextView arrow = new android.widget.TextView(this);
-        arrow.setText("›");
-        arrow.setTextColor(accentColor);
-        arrow.setTextSize(22);
-        arrow.setGravity(android.view.Gravity.CENTER);
-        arrow.setPadding(dp(8), 0, dp(4), 0);
-        inner.addView(arrow);
-
-        row.addView(inner, new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
-
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(66));
-        params.setMargins(0, 0, 0, dp(6));
-        row.setLayoutParams(params);
-        return row;
-    }
-
-    private View settingsPickerRow(
-            String title,
-            String description,
-            String[] options,
-            String[] valueHolder,
-            Runnable onChange) {
-        return UiStyle.settingsChoiceRow(
-                this,
-                title,
-                description,
-                options,
-                indexOf(options, valueHolder[0]),
-                valueHolder[0],
-                64,
-                13,
-                true,
-                screen.accentColor(),
-                which -> {
-                    valueHolder[0] = options[which];
-                    if (onChange != null) onChange.run();
-                    return options[which];
-                });
-    }
-
-    private View settingsIdPickerRow(
-            String title,
-            String description,
-            String[] ids,
-            String[] labels,
-            String[] shortLabels,
-            String[] valueHolder,
-            Runnable onChange) {
-        return UiStyle.settingsChoiceRow(
-                this,
-                title,
-                description,
-                labels,
-                indexOf(ids, valueHolder[0]),
-                shortLabelForId(ids, shortLabels, valueHolder[0]),
-                80,
-                11,
-                false,
-                screen.accentColor(),
-                which -> {
-                    valueHolder[0] = ids[which];
-                    if (onChange != null) onChange.run();
-                    return shortLabelForId(ids, shortLabels, ids[which]);
-                });
-    }
-
     private static int indexOf(String[] values, String value) {
         for (int i = 0; i < values.length; i++) {
             if (values[i].equals(value)) {
@@ -1210,13 +804,6 @@ public class MainActivity extends Activity
             }
         }
         return 0;
-    }
-
-    private static String shortLabelForId(String[] ids, String[] shortLabels, String id) {
-        for (int i = 0; i < ids.length; i++) {
-            if (ids[i].equals(id)) return shortLabels[i];
-        }
-        return id;
     }
 
     private void confirmOrRun(String title, String message, String action, Runnable runnable) {
@@ -1849,7 +1436,7 @@ public class MainActivity extends Activity
     private void shareSinglePhoto(GalleryPhoto photo) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
-        showShareSizeDialog(scale -> {
+        ShareSizeDialog.show(this, settings, scale -> {
             // Save and temporarily replace selection so exportSelectedScaled picks up just this photo.
             boolean[] prev = new boolean[gallery.photos.size()];
             for (int i = 0; i < gallery.photos.size(); i++) {

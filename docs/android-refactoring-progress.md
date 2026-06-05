@@ -17,6 +17,8 @@ run by the user before release.
 | 2 | UsbDeviceController | ✅ done |
 | 3 | ManualMergeStore + BackupRepository | ✅ done |
 | 4a | GalleryPipeline (decode transform chain) | ✅ done |
+| 5 (i) | Dialogs: About, ShareSize, Settings | ✅ done |
+| 5 (ii) | Dialogs: Startup, BackupPicker, PhotoDetail | ⬜ pending |
 | 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
 | 5 | Dialog classes | ⬜ pending |
 | 6 | MainScreen split | ⬜ pending |
@@ -186,3 +188,34 @@ load paths (`onGalleryLoaded`, `loadCachedGallery`, `recolorCachedGallery`).
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
 - On-device smoke test — ⬜ pending (verify: camera load, cache load on restart,
   backup load, palette recolor, auto-RGB-merge appears, manual merges still inject).
+
+---
+
+## Phase 5 — Extract dialogs (reordered before Phase 4b)
+
+Phase 5 is done before the controller (4b): the controller is the
+`MainScreen.Listener`, and many listener methods open dialogs — pulling the
+dialogs out first turns a circular dependency into plain calls. All dialog
+classes stay in the flat `fyi.r0.gbxcam` package (they rely on package-private
+access to `GalleryState`/`UiStyle`/`MainScreen`).
+
+### Part (i) — About, ShareSize, Settings
+- New `AboutDialog(activity, logger)` — `show(connectedGallery, deviceConnected)`;
+  owns `aboutSection`/`aboutRow`/`openUrl`/`packageVersionName`.
+- New `ShareSizeDialog` — static `show(activity, settings, onPicked)`.
+- New `SettingsDialog(activity, settings, screen, host)` with a `Host` callback
+  interface (`onAbout/onBackups/onImport/onExport/shareLogs/applyPaletteIcon/
+  recolorGallery`). `MainActivity` implements `Host` (4 methods already existed as
+  `MainScreen.Listener` methods; added `shareLogs`/`applyPaletteIcon`/`recolorGallery`).
+  Owns `settingsActionRow`/`settingsPickerRow`/`settingsIdPickerRow` + its own
+  `indexOf`/`shortLabelForId` (`indexOf` kept in `MainActivity` too, used by the
+  photo-detail dialog extracted in part ii).
+
+### Result so far
+- `MainActivity` 2118 → 1705 lines. New: `AboutDialog` 159, `SettingsDialog` 320,
+  `ShareSizeDialog` 31.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL; full APK installed on device.
+- On-device smoke test — ⬜ pending (verify: Settings toggles persist + RGB pickers
+  show/hide + action rows; About links; share-size picker).
