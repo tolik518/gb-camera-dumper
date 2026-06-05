@@ -1,7 +1,6 @@
 package fyi.r0.gbxcam;
 
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -11,7 +10,6 @@ import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -107,15 +105,7 @@ final class MainScreen implements PaletteMenu.Host {
     private boolean busy;
     private boolean logsVisible;
     private boolean selectMode;
-    private Dialog busyDialog;
-    private LinearLayout busyContent;
-    private GifView busyGif;
-    private TextView busyProgressText;
-    private TextView busyStatusText;
-    private TextView busySlowText;
-    private Runnable busySlowReveal;
-    private boolean busyHasError = false;
-    private int lastBusyPercent = -1;
+    private final BusyDialog busyOverlay;
     private int paletteIndex;
     private int accent;
     private int accentPressed;
@@ -167,6 +157,7 @@ final class MainScreen implements PaletteMenu.Host {
         root.setPadding(dp(24), dp(24), dp(24), 0);
         root.setBackgroundColor(colors.background);
         setAccentForPalette(defaultPaletteIndex);
+        busyOverlay = new BusyDialog(context, root);
 
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -401,191 +392,19 @@ final class MainScreen implements PaletteMenu.Host {
     void setBusy(boolean busy, String message) {
         this.busy = busy;
         if (busy) {
-            showBusyDialog(message);
-        } else if (!busyHasError) {
-            dismissBusyDialog();
+            busyOverlay.show(message, accent);
+        } else if (!busyOverlay.hasError()) {
+            busyOverlay.dismiss();
         }
         updateActions();
     }
 
-    private void showBusyDialog(String message) {
-        dismissBusyDialog();
-        UiStyle.Palette colors = UiStyle.palette(context);
-        Dialog dialog = UiStyle.baseDialog(context);
-        dialog.setCancelable(false);
-
-        LinearLayout content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER_HORIZONTAL);
-        content.setPadding(dp(32), dp(28), dp(32), dp(28));
-        content.setBackground(UiStyle.rounded(context, colors.surface, colors.borderStrong, 14, 1));
-
-        GifView gif = new GifView(context, R.raw.gbcam_logo);
-        content.addView(gif, new LinearLayout.LayoutParams(dp(128), dp(64)));
-        busyGif = gif;
-
-        if (message != null && !message.isEmpty()) {
-            TextView text = new TextView(context);
-            text.setText(message);
-            text.setTextColor(colors.textSecondary);
-            text.setTextSize(13);
-            text.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            textParams.setMargins(0, dp(12), 0, 0);
-            content.addView(text, textParams);
-        }
-
-        TextView warnText = new TextView(context);
-        warnText.setText("⚠ DO NOT DISCONNECT");
-        warnText.setTextColor(colors.danger);
-        warnText.setTypeface(Typeface.DEFAULT_BOLD);
-        warnText.setTextSize(11);
-        warnText.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams warnParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        warnParams.setMargins(0, dp(10), 0, 0);
-        content.addView(warnText, warnParams);
-
-        busyProgressText = new TextView(context);
-        busyProgressText.setTextSize(32);
-        busyProgressText.setTypeface(Typeface.DEFAULT_BOLD);
-        busyProgressText.setTextColor(accent);
-        busyProgressText.setGravity(Gravity.CENTER);
-        busyProgressText.setText("0%");
-        busyProgressText.setVisibility(View.VISIBLE);
-        lastBusyPercent = 0;
-        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        progressParams.setMargins(0, dp(8), 0, 0);
-        content.addView(busyProgressText, progressParams);
-
-        busyStatusText = new TextView(context);
-        busyStatusText.setTextSize(11);
-        busyStatusText.setTextColor(colors.textMuted);
-        busyStatusText.setGravity(Gravity.CENTER);
-        busyStatusText.setSingleLine(true);
-        busyStatusText.setEllipsize(TextUtils.TruncateAt.END);
-        busyStatusText.setVisibility(View.INVISIBLE);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        statusParams.setMargins(0, dp(6), 0, 0);
-        content.addView(busyStatusText, statusParams);
-
-        busySlowText = new TextView(context);
-        busySlowText.setText("Please stand by... Game Boy Camera cartridges run on battery-backed SRAM from the '90s — they write one byte at a time. Vintage hardware, vintage speed. 🎮");
-        busySlowText.setTextColor(colors.textMuted);
-        busySlowText.setTextSize(11);
-        busySlowText.setGravity(Gravity.CENTER);
-        busySlowText.setVisibility(View.INVISIBLE);
-        LinearLayout.LayoutParams slowParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        slowParams.setMargins(0, dp(10), 0, 0);
-        content.addView(busySlowText, slowParams);
-
-        busySlowReveal = () -> {
-            if (busySlowText != null) {
-                busySlowText.setVisibility(View.VISIBLE);
-            }
-        };
-        root.postDelayed(busySlowReveal, 20_000);
-
-        busyContent = content;
-        dialog.setContentView(content);
-        UiStyle.sizeDialog(dialog, context, 48, 340);
-        dialog.show();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
-        busyDialog = dialog;
-    }
-
-    private void dismissBusyDialog() {
-        if (busySlowReveal != null) {
-            root.removeCallbacks(busySlowReveal);
-        }
-        if (busyDialog != null) {
-            busyDialog.dismiss();
-            busyDialog = null;
-        }
-        busyContent = null;
-        busyGif = null;
-        busyProgressText = null;
-        busyStatusText = null;
-        busySlowText = null;
-        busySlowReveal = null;
-        busyHasError = false;
-        lastBusyPercent = -1;
-    }
-
     void showBusyError(String errorMessage) {
-        if (busyContent == null || busyHasError) return;
-        busyHasError = true;
-        if (busyGif != null) {
-            busyGif.setVisibility(View.GONE);
-        }
-        if (busyProgressText != null) {
-            busyProgressText.setVisibility(View.GONE);
-        }
-
-        UiStyle.Palette colors = UiStyle.palette(context);
-
-        TextView errorText = new TextView(context);
-        errorText.setText(errorMessage);
-        errorText.setTextColor(colors.danger);
-        errorText.setTextSize(13);
-        errorText.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams errorParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        errorParams.setMargins(0, dp(12), 0, 0);
-        busyContent.addView(errorText, errorParams);
-
-        Button dismissButton = UiStyle.button(context, "Dismiss", Color.WHITE, colors.danger, colors.danger);
-        dismissButton.setBackground(UiStyle.dangerButtonBackground(context));
-        LinearLayout.LayoutParams dismissParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
-        dismissParams.setMargins(0, dp(16), 0, 0);
-        dismissButton.setOnClickListener(v -> {
-            dismissBusyDialog();
-            updateActions();
-        });
-        busyContent.addView(dismissButton, dismissParams);
-        if (busyDialog != null) {
-            UiStyle.sizeDialog(busyDialog, context, 48, 340);
-        }
+        busyOverlay.showError(errorMessage, this::updateActions);
     }
 
     void updateBusyProgress(String message) {
-        if (busyProgressText == null || busyHasError) return;
-        int percent = parsePercent(message);
-        if (percent > lastBusyPercent) {
-            lastBusyPercent = percent;
-            busyProgressText.setText(percent + "%");
-            busyProgressText.setVisibility(View.VISIBLE);
-        }
-        if (busyStatusText != null && !message.startsWith("[debug]")) {
-            busyStatusText.setText(message);
-            busyStatusText.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private static final java.util.regex.Pattern PERCENT_PATTERN =
-            java.util.regex.Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
-
-    private static int parsePercent(String message) {
-        if (message == null) return -1;
-        java.util.regex.Matcher m = PERCENT_PATTERN.matcher(message);
-        if (m.find()) {
-            try {
-                int current = Integer.parseInt(m.group(1));
-                int total   = Integer.parseInt(m.group(2));
-                // Require denominator >= 5 to exclude small step-count patterns like "1/3"
-                if (total >= 5 && current <= total) {
-                    return Math.min(100, (int) (100.0 * current / total));
-                }
-            } catch (NumberFormatException ignored) {}
-        }
-        return -1;
+        busyOverlay.updateProgress(message);
     }
 
     void appendLog(String message) {
