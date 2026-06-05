@@ -21,10 +21,27 @@ run by the user before release.
 | 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
 | 5 (iii) | Dialog: Startup (USB-entangled) | ⏸ deferred — see note |
 | 4b | GalleryController (listener/callback orchestration) | ✅ done |
-| 6 | MainScreen split (GalleryActions, PaletteMenu, BusyDialog) | 🛠 in progress |
+| 6 | MainScreen split (GalleryActions, PaletteMenu, BusyDialog) | ✅ done |
 
+All planned phases complete (StartupDialog intentionally left in `MainActivity`).
 Two follow-up fixes landed from on-device testing: the `MainScreen` listener NPE
 (`bcde6be`) and the photo-detail share committing pending merge changes (`746cbfd`).
+
+### Final result
+- `MainActivity` **2642 → 371 lines (−86%)**; `MainScreen` **1318 → 999 lines (−24%)**.
+- 18 focused classes extracted across the layers (ui/dialogs, control, domain,
+  data, usb, io), each compiling and exercised on device where possible.
+
+### Phase 6 — MainScreen split
+- `GalleryActions` — the toolbar button enable/visible/availability state machine
+  (`update(gallery, busy, selectMode, deviceConnected)`); buttons stay created/wired
+  in `MainScreen`. Verified: select 3 mergeable → Save/Share/Delete/Merge appear.
+- `PaletteMenu` — the palette popup, reading live palette state and reporting
+  selection/favorite toggles via a `PaletteMenu.Host` on `MainScreen`. Verified:
+  favorite star toggle + palette switch on device.
+- `BusyDialog` — the busy overlay (gif, warning, percent, slow hint, error state);
+  `MainScreen` keeps the `busy` flag and delegates show/dismiss/error/progress.
+  Verified: manual merge drives show/dismiss without crash.
 
 ---
 
