@@ -102,6 +102,7 @@ final class MainScreen {
     private final Button compactButton;
     private final Button clearAlbumButton;
     private final Button mergeButton;
+    private final GalleryActions galleryActions;
 
     private GalleryState gallery;
     private boolean deviceConnected;
@@ -289,6 +290,12 @@ final class MainScreen {
         addActionButton(albumActions, clearAlbumButton);
         albumActionsWrapper = wrapHorizontal(albumActions);
         root.addView(albumActionsWrapper, matchWidthWrapContent());
+
+        galleryActions = new GalleryActions(colors,
+                loadButton, selectAllButton, selectModeButton, deselectAllButton,
+                saveButton, shareButton, settingsButton, deleteButton,
+                recoverButton, moveFirstButton, compactButton, clearAlbumButton,
+                mergeButton, paletteField, albumActionsWrapper);
 
         LinearLayout libraryHeader = row();
         libraryHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -686,61 +693,7 @@ final class MainScreen {
     }
 
     void updateActions() {
-        int selected = gallery == null ? 0 : gallery.selectedCount();
-        int selectedActive = gallery == null ? 0 : gallery.selectedActiveCount();
-        int selectedDeleted = gallery == null ? 0 : gallery.selectedDeletedCount();
-        int selectedManualMerges = gallery == null ? 0 : gallery.selectedManualMergeCount();
-        boolean showDelete = selectedActive > 0 || selectedManualMerges > 0;
-        boolean showRecover = selectedDeleted > 0;
-        int total = gallery == null ? 0 : gallery.photos.size();
-
-        loadButton.setEnabled(!busy);
-        selectAllButton.setEnabled(!busy && total > 0 && selected < total);
-        selectAllButton.setVisibility(total > 0 && selected < total ? View.VISIBLE : View.GONE);
-        selectModeButton.setEnabled(!busy && total > 0);
-        selectModeButton.setVisibility(!selectMode && total > 0 ? View.VISIBLE : View.GONE);
-        deselectAllButton.setEnabled(!busy && selected > 0);
-        deselectAllButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
-        saveButton.setEnabled(!busy && selected > 0);
-        saveButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
-        shareButton.setEnabled(!busy && selected > 0);
-        shareButton.setVisibility(selected > 0 ? View.VISIBLE : View.GONE);
-        settingsButton.setEnabled(!busy);
-        deleteButton.setEnabled(!busy && showDelete);
-        deleteButton.setVisibility(showDelete ? View.VISIBLE : View.GONE);
-        recoverButton.setEnabled(!busy && showRecover);
-        recoverButton.setVisibility(showRecover ? View.VISIBLE : View.GONE);
-        moveFirstButton.setEnabled(!busy && deviceConnected && selectedActive > 0);
-        moveFirstButton.setVisibility(deviceConnected && selectedActive > 0 ? View.VISIBLE : View.GONE);
-        compactButton.setEnabled(false);
-        compactButton.setVisibility(View.GONE);
-        clearAlbumButton.setEnabled(!busy && deviceConnected && total > 0);
-        clearAlbumButton.setVisibility(deviceConnected && total > 0 ? View.VISIBLE : View.GONE);
-        int selectedMergeable = gallery == null ? 0 : gallery.selectedMergeableCount();
-        boolean canMerge = !busy && (selectedMergeable == 3 || selectedMergeable == 4);
-        mergeButton.setEnabled(canMerge);
-        mergeButton.setVisibility(canMerge ? View.VISIBLE : View.GONE);
-        mergeButton.setText(selectedMergeable == 4 ? "Merge to CRGB" : "Merge to RGB");
-        paletteField.setEnabled(!busy);
-        paletteField.setAlpha(busy ? 0.42f : 1.0f);
-        setButtonAvailability(loadButton, !busy);
-        setButtonAvailability(selectAllButton, !busy && total > 0 && selected < total);
-        setButtonAvailability(selectModeButton, !busy && total > 0);
-        setButtonAvailability(deselectAllButton, !busy && selected > 0);
-        setButtonAvailability(saveButton, !busy && selected > 0);
-        setButtonAvailability(shareButton, !busy && selected > 0);
-        setButtonAvailability(settingsButton, !busy);
-        setButtonAvailability(recoverButton, !busy && showRecover);
-        setButtonAvailability(moveFirstButton, !busy && deviceConnected && selectedActive > 0);
-        setButtonAvailability(compactButton, false);
-        setButtonAvailability(clearAlbumButton, !busy && deviceConnected && total > 0);
-        setButtonAvailability(mergeButton, canMerge);
-        deleteButton.setTextColor(!busy && showDelete ? Color.WHITE : colors.disabledText);
-        boolean anyAlbumAction = moveFirstButton.getVisibility() == View.VISIBLE
-                || recoverButton.getVisibility() == View.VISIBLE
-                || mergeButton.getVisibility() == View.VISIBLE
-                || clearAlbumButton.getVisibility() == View.VISIBLE;
-        if (albumActionsWrapper != null) albumActionsWrapper.setVisibility(anyAlbumAction ? View.VISIBLE : View.GONE);
+        galleryActions.update(gallery, busy, selectMode, deviceConnected);
     }
 
     private TileHolder photoTile(GalleryPhoto photo, int gen) {
@@ -1246,10 +1199,6 @@ final class MainScreen {
         scroll.setFillViewport(true);
         scroll.addView(row, matchWidthWrapContent());
         return scroll;
-    }
-
-    private void setButtonAvailability(Button button, boolean enabled) {
-        button.setAlpha(enabled ? 1.0f : 0.42f);
     }
 
     private StateListDrawable buttonBackground(int normal, int pressed, int disabled) {
