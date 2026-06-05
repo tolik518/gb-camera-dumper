@@ -1,5 +1,0 @@
--> add overwrites, similarly like merge algo, for merge order, so the user can choose on manually merged and auto merged order between CRGB, RGBC, etc. the order should be the same as in the settings. the overwrites should only apply to the current image and should not change if it was changed in the settings. setting should be on "default" so it changes with the global settings. if the setting is changed locally (on an individual image) also apply change to the naming. this setting is especially important for the manually merged images
-
--> "don't show on startup" checkbox doesnt work when I close the popup
-
--> overhaul the delete feature again. if the user clicks delete, the images should be getting the "delete" status. I like you know, the images are stored multiple times in the sram, so delete it from the gallery. the images that were deleted should behave the same as images that we don't have access to on the cartridge and are marked as deleted
