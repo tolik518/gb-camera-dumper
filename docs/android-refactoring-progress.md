@@ -13,7 +13,7 @@ run by the user before release.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 0 | Builders & data hygiene | ✅ done |
-| 1 | Leaf helpers (AppFiles, PaletteCatalog) + dead code | ⬜ pending |
+| 1 | Leaf helpers (AppFiles, PaletteCatalog) + dead code | ✅ done |
 | 2 | UsbDeviceController | ⬜ pending |
 | 3 | ManualMergeStore + BackupRepository | ⬜ pending |
 | 4 | GalleryPipeline + GalleryController | ⬜ pending |
@@ -52,3 +52,34 @@ explicit field. Pure mechanical, no behavior change.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
 - On-device smoke test — ⬜ pending (no device attached; user to verify load /
   palette switch / select-merge-delete-recover / manual merge persistence)
+
+---
+
+## Phase 1 — Extract leaf helpers + delete dead code
+
+**Goal:** pull stateless helpers out of `MainActivity`/`PhotoExporter` into focused
+classes and remove confirmed-dead API. No logic change.
+
+### Changes
+- New `AppFiles` — `dumpsDir(ctx)`, `appFilesDir(ctx, type)`, `safeFilePart`,
+  `safeFolderName`. Dedupes the `appFilesDir`/safe-name logic that was copied in
+  both `MainActivity` and `PhotoExporter`. `MainActivity.dumpsDir()`/
+  `appFilesDir()` are now thin one-line delegates (kept to avoid churning ~15 call
+  sites that Phase 4 will move to the controller anyway).
+- New `PaletteCatalog` — owns native `paletteLabels`/`paletteColors` loading,
+  `parseRow`, fallbacks, and the `labelFor(i)`/`colorsFor(i)` lookups. `MainActivity`
+  now holds a single `PaletteCatalog palettes` field instead of the two raw arrays.
+- Deleted dead code:
+  - `PhotoExporter`: 5 unused overloads (`exportSelected(ctx,gallery)`,
+    `exportSelected(ctx,gallery,boolean)`, `exportAll`, two `exportPhotos(...)`).
+    The reachable `exportSelected(ctx,gallery,int[],boolean)` stays; the
+    `exportPhotos(...,int[],...)` impl is now `private`.
+  - `MainActivity`: unused `previewButton(...)` and no-arg `recolorCachedGallery()`.
+
+### Result
+- `MainActivity` 2642 → 2539 lines; `PhotoExporter` 356 → 320 lines.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL
+- On-device smoke test — ⬜ pending (verify export/share, palette switch, backup
+  thumbnails still render).

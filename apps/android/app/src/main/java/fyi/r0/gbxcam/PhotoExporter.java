@@ -47,31 +47,11 @@ final class PhotoExporter {
         }
     }
 
-    static ExportResult exportSelected(Context context, GalleryState gallery) throws IOException {
-        return exportSelected(context, gallery, null, true);
-    }
-
-    static ExportResult exportSelected(Context context, GalleryState gallery, boolean includeDeleted) throws IOException {
-        return exportSelected(context, gallery, null, includeDeleted);
-    }
-
     static ExportResult exportSelected(Context context, GalleryState gallery, int[] palette, boolean includeDeleted) throws IOException {
         return exportPhotos(context, gallery, palette, true, includeDeleted);
     }
 
-    static ExportResult exportAll(Context context, GalleryState gallery) throws IOException {
-        return exportPhotos(context, gallery, null, false, true);
-    }
-
-    static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly) throws IOException {
-        return exportPhotos(context, gallery, null, selectedOnly, true);
-    }
-
-    static ExportResult exportPhotos(Context context, GalleryState gallery, boolean selectedOnly, boolean includeDeleted) throws IOException {
-        return exportPhotos(context, gallery, null, selectedOnly, includeDeleted);
-    }
-
-    static ExportResult exportPhotos(Context context, GalleryState gallery, int[] palette, boolean selectedOnly, boolean includeDeleted) throws IOException {
+    private static ExportResult exportPhotos(Context context, GalleryState gallery, int[] palette, boolean selectedOnly, boolean includeDeleted) throws IOException {
         int count = eligiblePhotoCount(gallery, selectedOnly, includeDeleted);
         if (count == 0) {
             throw new IOException(selectedOnly ? "No exportable photos selected." : "No exportable photos.");
@@ -165,7 +145,7 @@ final class PhotoExporter {
     private static File exportScaledToAppFolder(
             Context context, GalleryState gallery, int[] palette,
             String album, boolean includeDeleted, int scale) throws IOException {
-        File out = ensureDir(new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
+        File out = ensureDir(new File(AppFiles.appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
                 "Cannot create dir");
         for (GalleryPhoto photo : gallery.photos) {
             if (!isExportable(photo, true, includeDeleted)) continue;
@@ -276,7 +256,7 @@ final class PhotoExporter {
             String album,
             boolean selectedOnly,
             boolean includeDeleted) throws IOException {
-        File out = ensureDir(new File(appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
+        File out = ensureDir(new File(AppFiles.appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
                 "Could not create export directory");
         for (GalleryPhoto photo : gallery.photos) {
             if (isExportable(photo, selectedOnly, includeDeleted)) {
@@ -306,19 +286,8 @@ final class PhotoExporter {
     }
 
     private static File appExportDir(Context context, String stamp) throws IOException {
-        File root = new File(appFilesDir(context, null), "exports");
+        File root = new File(AppFiles.appFilesDir(context, null), "exports");
         return ensureDir(new File(root, "gbxcam-" + stamp), "Could not create backup directory");
-    }
-
-    private static File appFilesDir(Context context, String type) {
-        File dir = context.getExternalFilesDir(type);
-        if (dir != null) {
-            return dir;
-        }
-        if (type == null) {
-            return context.getFilesDir();
-        }
-        return new File(context.getFilesDir(), type);
     }
 
     private static void writePhoto(GalleryPhoto photo, int[] palette, OutputStream out) throws IOException {
@@ -328,17 +297,12 @@ final class PhotoExporter {
         copyToStream(new File(photo.path), out);
     }
 
-    private static String safeFolderName(String label) {
-        String safe = label == null ? "" : label.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
-        return safe.isEmpty() ? "Palette" : safe;
-    }
-
     private static String timestamp() {
         return new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
     }
 
     private static String albumPath(GalleryState gallery, String stamp) {
-        return "GBxCAM Viewer/" + safeFolderName(gallery.paletteName) + "/" + stamp;
+        return "GBxCAM Viewer/" + AppFiles.safeFolderName(gallery.paletteName) + "/" + stamp;
     }
 
     private static File ensureDir(File dir, String errorPrefix) throws IOException {
