@@ -21,9 +21,10 @@ run by the user before release.
 | 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
 | 5 (iii) | Dialog: Startup (USB-entangled) | ⏸ deferred — see note |
 | 4b | GalleryController (listener/callback orchestration) | ✅ done |
-| 4b | GalleryController (listener/callback orchestration) | ⬜ pending |
-| 5 | Dialog classes | ⬜ pending |
-| 6 | MainScreen split | ⬜ pending |
+| 6 | MainScreen split (GalleryActions, PaletteMenu, BusyDialog) | 🛠 in progress |
+
+Two follow-up fixes landed from on-device testing: the `MainScreen` listener NPE
+(`bcde6be`) and the photo-detail share committing pending merge changes (`746cbfd`).
 
 ---
 
