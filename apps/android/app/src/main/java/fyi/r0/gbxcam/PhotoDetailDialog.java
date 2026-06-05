@@ -40,6 +40,8 @@ final class PhotoDetailDialog {
     interface Host {
         void applyOrSaveDetailChanges(GalleryPhoto photo, String order, String algorithm);
         void shareSinglePhoto(GalleryPhoto photo);
+        /** Commit a pending order/algorithm change, then share the re-merged result. */
+        void applyDetailChangesThenShare(GalleryPhoto photo, String order, String algorithm);
     }
 
     private final Activity activity;
@@ -110,7 +112,17 @@ final class PhotoDetailDialog {
                     titleViewRef, subtitleViewRef));
             photoScroll.scrollTo(0, 0);
 
-            shareBtn.setOnClickListener(v -> host.shareSinglePhoto(p));
+            shareBtn.setOnClickListener(v -> {
+                // Share what's displayed: if order/algorithm changed but isn't committed yet
+                // (the file is only written on dismiss), commit it first, then share the result.
+                if ((algoChangedRef[0] || orderChangedRef[0]) && p.mergedRgb) {
+                    algoChangedRef[0] = false;   // committed now — don't re-apply on dismiss
+                    orderChangedRef[0] = false;
+                    host.applyDetailChangesThenShare(p, orderRef[0], algoRef[0]);
+                } else {
+                    host.shareSinglePhoto(p);
+                }
+            });
         };
 
         // Swipe left/right anywhere in the photo area to navigate.

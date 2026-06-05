@@ -597,12 +597,43 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     @Override
     public void applyOrSaveDetailChanges(GalleryPhoto photo, String order, String algorithm) {
         if (photo.isManualMerge()) {
-            applyManualMergeChanges(photo, order, algorithm);
+            applyManualMergeChanges(photo, order, algorithm, null);
         } else {
             // Auto-merged: order is fixed by detection; only algorithm can change.
             settings.saveMergeAlgorithmOverride(photo, algorithm);
             recolorCachedGallery(paletteIndex, false);
         }
+    }
+
+    @Override
+    public void applyDetailChangesThenShare(GalleryPhoto photo, String order, String algorithm) {
+        if (photo.isManualMerge()) {
+            // The committed manual merge is a brand-new photo object; share it directly.
+            applyManualMergeChanges(photo, order, algorithm, this::shareSinglePhoto);
+        } else {
+            int start = photo.mergedSourceStartDisplayIndex;
+            int count = photo.mergedSourceCount;
+            settings.saveMergeAlgorithmOverride(photo, algorithm);
+            // Recolor regenerates the auto-merge in place; share whatever auto-merge now
+            // covers this source range (there is exactly one auto-merge per range).
+            recolorCachedGallery(paletteIndex, false, () -> {
+                GalleryPhoto updated = findAutoMerge(start, count);
+                if (updated != null) shareSinglePhoto(updated);
+            });
+        }
+    }
+
+    private GalleryPhoto findAutoMerge(int sourceStart, int sourceCount) {
+        GalleryState g = screen.gallery();
+        if (g == null) return null;
+        for (GalleryPhoto p : g.photos) {
+            if (p.mergedRgb && !p.isManualMerge()
+                    && p.mergedSourceStartDisplayIndex == sourceStart
+                    && p.mergedSourceCount == sourceCount) {
+                return p;
+            }
+        }
+        return null;
     }
 
     private void shareCurrentLogs() {
@@ -647,6 +678,10 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private void recolorCachedGallery(int paletteIndex, boolean logChange) {
+        recolorCachedGallery(paletteIndex, logChange, null);
+    }
+
+    private void recolorCachedGallery(int paletteIndex, boolean logChange, Runnable onApplied) {
         GalleryState previous = screen.gallery();
         if (previous == null) {
             return;
@@ -671,6 +706,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     withMerges.copySelectionFrom(previous);
                     screen.showGallery(withMerges);
                     if (logChange) onLog("Palette changed: " + withMerges.paletteName);
+                    if (onApplied != null) onApplied.run();
                 });
             } catch (Exception e) {
                 postToUi(() -> {
@@ -681,7 +717,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         });
     }
 
-    private void applyManualMergeChanges(GalleryPhoto photo, String order, String algorithm) {
+    private void applyManualMergeChanges(GalleryPhoto photo, String order, String algorithm,
+            java.util.function.Consumer<GalleryPhoto> onApplied) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
         int start = photo.mergedSourceStartDisplayIndex;
@@ -725,6 +762,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 }
                 screen.showGallery(current.withPhotos(photos));
                 onLog("Merge updated: " + order + " / " + RgbMergeDetector.algorithmShortLabel(algorithm));
+                if (onApplied != null) onApplied.accept(updated);
             });
         });
     }
