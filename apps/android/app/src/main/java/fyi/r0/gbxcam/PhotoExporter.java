@@ -302,7 +302,7 @@ final class PhotoExporter {
     }
 
     private static String albumPath(GalleryState gallery, String stamp) {
-        return "GBxCAM Viewer/" + AppFiles.safeFolderName(gallery.paletteName) + "/" + stamp;
+        return "GBxCAM Viewer/" + AppFiles.safeFolderName(gallery.palette.name) + "/" + stamp;
     }
 
     private static File ensureDir(File dir, String errorPrefix) throws IOException {

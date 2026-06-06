@@ -13,8 +13,7 @@ final class GalleryState {
     final String connected;
     final String savePath;
     final String outputDir;
-    final int paletteIndex;
-    final String paletteName;
+    final Palette palette;
     final int validationErrors;
     final int validationWarnings;
     final List<GalleryPhoto> photos;
@@ -23,16 +22,14 @@ final class GalleryState {
             String connected,
             String savePath,
             String outputDir,
-            int paletteIndex,
-            String paletteName,
+            Palette palette,
             int validationErrors,
             int validationWarnings,
             List<GalleryPhoto> photos) {
         this.connected = connected;
         this.savePath = savePath;
         this.outputDir = outputDir;
-        this.paletteIndex = paletteIndex;
-        this.paletteName = paletteName;
+        this.palette = palette;
         this.validationErrors = validationErrors;
         this.validationWarnings = validationWarnings;
         this.photos = photos;
@@ -69,20 +66,19 @@ final class GalleryState {
                 root.getString("connected"),
                 root.getString("savePath"),
                 root.getString("outputDir"),
-                root.optInt("paletteIndex", 0),
-                root.optString("paletteName", "Monochrome - Grayscale"),
+                new Palette(root.optInt("paletteIndex", 0),
+                        root.optString("paletteName", "Monochrome - Grayscale")),
                 root.optInt("validationErrors", 0),
                 root.optInt("validationWarnings", 0),
                 photos);
     }
 
-    GalleryState withPalette(int paletteIndex, String paletteName) {
+    GalleryState withPalette(Palette palette) {
         return new GalleryState(
                 connected,
                 savePath,
                 outputDir,
-                paletteIndex,
-                paletteName,
+                palette,
                 validationErrors,
                 validationWarnings,
                 photos);
@@ -94,8 +90,7 @@ final class GalleryState {
                 connected,
                 savePath,
                 outputDir,
-                paletteIndex,
-                paletteName,
+                palette,
                 validationErrors,
                 validationWarnings,
                 photos);

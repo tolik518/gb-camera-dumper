@@ -152,7 +152,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         }
         try {
             PhotoExporter.ExportResult result = PhotoExporter.exportSelected(
-                    activity, gallery, palettes.colorsFor(gallery.paletteIndex), settings.exportDeleted());
+                    activity, gallery, palettes.colorsFor(gallery.palette.index), settings.exportDeleted());
             onLog("Saved " + result.imageCount + " " + plural(result.imageCount, "photo") + ":\n" + result.summary());
         } catch (Exception e) {
             onLog("Save failed: " + e.toString());
@@ -171,7 +171,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (selected == 0) return;
         try {
             PhotoExporter.ExportResult result = PhotoExporter.exportSelectedScaled(
-                    activity, gallery, palettes.colorsFor(gallery.paletteIndex),
+                    activity, gallery, palettes.colorsFor(gallery.palette.index),
                     settings.exportDeleted(), scale);
             if (result.imageUris.isEmpty()) {
                 onLog("Share unavailable for this Android version. Saved:\n" + result.summary());
@@ -550,7 +550,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         gallery = pipeline.process(gallery, false);
         mergeStore.load();
         gallery = mergeStore.inject(gallery);
-        backups.rememberPalette(new File(gallery.savePath), gallery.paletteIndex);
+        backups.rememberPalette(new File(gallery.savePath), gallery.palette.index);
         screen.showGallery(gallery);
         onCameraLoaded.run();
         int loaded = gallery.photos.size();
@@ -783,7 +783,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     GalleryState withMerges = mergeStore.inject(finalGallery);
                     withMerges.copySelectionFrom(previous);
                     screen.showGallery(withMerges);
-                    if (logChange) onLog("Palette changed: " + withMerges.paletteName);
+                    if (logChange) onLog("Palette changed: " + withMerges.palette.name);
                     if (onApplied != null) onApplied.run();
                 });
             } catch (Exception e) {

@@ -87,7 +87,7 @@ final class GalleryPipeline {
     /** The mono (grayscale) source photos used to compute RGB merges. */
     List<GalleryPhoto> monoSourcePhotos(GalleryState gallery) {
         int monoPaletteIndex = NativeGbcam.defaultPaletteIndex();
-        if (gallery.paletteIndex == monoPaletteIndex) {
+        if (gallery.palette.index == monoPaletteIndex) {
             return gallery.photos;
         }
         try {

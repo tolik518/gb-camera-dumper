@@ -363,7 +363,7 @@ final class MainScreen implements PaletteMenu.Host {
         if (selectMode && gallery.selectedCount() == 0) selectMode = false;
         tileHolders = null;
         int gen = displayGeneration.incrementAndGet();
-        setPaletteIndexOnly(gallery.paletteIndex);
+        setPaletteIndexOnly(gallery.palette.index);
         grid.removeAllViews();
         reserveCaptionSpace = hasAnyPhotoMeta(gallery);
         tileHolders = new TileHolder[gallery.photos.size()];
@@ -420,7 +420,7 @@ final class MainScreen implements PaletteMenu.Host {
         this.paletteIndex = safePaletteIndex(paletteIndex);
         applyPaletteIndex(this.paletteIndex);
         if (gallery != null) {
-            gallery = gallery.withPalette(this.paletteIndex, paletteLabels[this.paletteIndex]);
+            gallery = gallery.withPalette(new Palette(this.paletteIndex, paletteLabels[this.paletteIndex]));
             refreshGalleryPalette(this.paletteIndex);
         }
     }
