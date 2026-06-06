@@ -4,11 +4,9 @@ Tracks execution of the plan in [android-refactoring.md](android-refactoring.md)
 Each phase is a separate commit; every phase must compile
 (`:app:compileDebugJavaWithJavac`) and ideally smoke-test on device.
 
-**Verification loop used:** a device is not currently attached, so each phase is
-verified with a Java compile (`gradle :app:compileDebugJavaWithJavac`) rather than
-`just android-apk-install`. The Rust `.so` is prebuilt and unchanged, so this
-exercises the full Java compilation. Manual on-device smoke tests still need to be
-run by the user before release.
+**Verification loop used:** early phases were verified with a Java compile
+(`:app:compileDebugJavaWithJavac`); later phases and fixes were verified with
+`just android-apk` or `just android-apk-install` when a device was attached.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
@@ -19,18 +17,49 @@ run by the user before release.
 | 4a | GalleryPipeline (decode transform chain) | ✅ done |
 | 5 (i) | Dialogs: About, ShareSize, Settings | ✅ done |
 | 5 (ii) | Dialogs: BackupPicker, PhotoDetail | ✅ done |
-| 5 (iii) | Dialog: Startup (USB-entangled) | ⏸ deferred — see note |
+| 5 (iii) | Dialog: Startup (USB-entangled) | ✅ done |
 | 4b | GalleryController (listener/callback orchestration) | ✅ done |
 | 6 | MainScreen split (GalleryActions, PaletteMenu, BusyDialog) | ✅ done |
+| 7.3 | Boundary cleanup: blank flag + dead dump binding | ✅ done |
 
-All planned phases complete (StartupDialog intentionally left in `MainActivity`).
-Two follow-up fixes landed from on-device testing: the `MainScreen` listener NPE
-(`bcde6be`) and the photo-detail share committing pending merge changes (`746cbfd`).
+All planned Java-side phases are complete. Two follow-up fixes landed from
+on-device testing: the `MainScreen` listener NPE (`bcde6be`) and the photo-detail
+share committing pending merge changes (`746cbfd`).
 
 ### Final result
-- `MainActivity` **2642 → 371 lines (−86%)**; `MainScreen` **1318 → 999 lines (−24%)**.
-- 18 focused classes extracted across the layers (ui/dialogs, control, domain,
+- `MainActivity` **2642 → 160 lines (−94%)**; `MainScreen` **1318 → 997 lines (−24%)**.
+- 19 focused classes extracted across the layers (ui/dialogs, control, domain,
   data, usb, io), each compiling and exercised on device where possible.
+
+### Phase 5 (iii) — StartupDialog
+- New `StartupDialog` owns the startup connection guide UI, step label state,
+  the USB cartridge polling handler, `connectionStep`, and `boldSpan`.
+- `MainActivity` forwards USB attach/detach and successful gallery-load events
+  into the dialog (`markDeviceAttached`, `markDeviceDetached`, `markCameraLoaded`)
+  and keeps only lifecycle/wiring.
+- The existing load button behavior is preserved: if no GBxCart is connected, it
+  delegates to the controller so the existing toast/log behavior runs and the
+  popup stays open.
+
+### Verification
+- `just android-apk-install` — ✅ BUILD SUCCESSFUL and APK installed on attached phone.
+
+### §7.3 — Rust/Java Boundary Cleanup
+- Rust gallery JSON now includes `blank` for each album photo, computed directly
+  from `pixels_indexed`.
+- Java parses `GalleryPhoto.blank` and `GalleryPipeline` uses it to filter blank
+  deleted photos, removing the PNG re-decode path.
+- `EmptyImageCache` was deleted. Backup preview caching now writes/reads a small
+  `preview-photos.txt` manifest listing non-deleted, nonblank preview files
+  instead of decoding PNGs to test flat images.
+- Removed the unused `NativeGbcam.dumpFromFd` Java declaration and the matching
+  unused JNI export/private helper in `gbcam-ffi`.
+
+### Verification
+- `cargo test -p gbxcam-ffi` — ✅ 3 passed
+- `just android-apk-install` — ✅ BUILD SUCCESSFUL and APK installed on attached phone
+- On-device smoke — ✅ startup dialog renders; cached gallery loads; auto-merged
+  tiles are visible; no app fatal exception in logcat.
 
 ### Phase 6 — MainScreen split
 - `GalleryActions` — the toolbar button enable/visible/availability state machine
@@ -126,9 +155,9 @@ controller, leaving `MainActivity` as the host of the UI reactions.
   attach/detach/permission behavior (screen connection state, auto-load, startup
   step colors, disconnect log) is preserved in those callbacks.
 - Call sites updated: `operationRunner.*(usb.manager(), usb.device(), ...)`,
-  `usb.withPermission(...)`, `usb.isConnected()`. The startup cartridge poll
-  (`doStartupCartridgeCheck`) stays in `MainActivity` for now — it is really
-  StartupDialog logic (Phase 5) that happens to read USB via `usb.manager()/device()`.
+  `usb.withPermission(...)`, `usb.isConnected()`. At this phase, the startup
+  cartridge poll stayed in `MainActivity`; Phase 5 (iii) later moved it into
+  `StartupDialog`.
 - Removed now-unused imports (`BroadcastReceiver`, `IntentFilter`, `PendingIntent`,
   `UsbManager`, `Context`, `SuppressLint`).
 
@@ -262,18 +291,6 @@ access to `GalleryState`/`UiStyle`/`MainScreen`).
   change merged order/algorithm → live preview + persists, share single photo,
   backups thumbnails + restore).
 
-### StartupDialog — deferred (decision)
-The startup popup's two step labels are **live status**, updated from three
-lifecycle points — USB attach (step 1 green + kick the cartridge poll), USB detach
-(reset both), and `onGalleryLoaded` (step 2 green) — plus the async
-`doStartupCartridgeCheck` poll (background open of the USB device + native probe,
-re-armed every 12 s). Unlike every other dialog, it is a long-lived view bound to
-the activity's hardware lifecycle, so it stays in `MainActivity` for now (the plan
-flags it as the hardest). Revisit alongside Phase 4b if the controller ends up
-owning the USB-lifecycle reactions.
-
----
-
 ## Milestone after Phase 5
 
 `MainActivity`: **2642 → 1064 lines (−60%)**. Extracted, all compiling and the
@@ -290,7 +307,7 @@ APK installed on device:
 | `BackupRepository` | 171 | dumps backups + import/export |
 | `GalleryPipeline` | 108 | decode transform chain |
 | `PaletteCatalog` | 89 | native palette tables |
-| `AppFiles` / `EmptyImageCache` / `ShareSizeDialog` | 40 / 38 / 31 | leaf helpers |
+| `AppFiles` / `ShareSizeDialog` | 40 / 31 | leaf helpers |
 
 **Remaining:** Phase 4b (`GalleryController` — move the ~40
 `MainScreen.Listener` + operation-callback methods out; the largest single change
@@ -318,11 +335,9 @@ in the plan), optional StartupDialog, and Phase 6 (split `MainScreen`).
 - `onGalleryLoaded`'s startup-label poke is delegated through an `onCameraLoaded`
   `Runnable` hook supplied by `MainActivity`.
 - `MainActivity` now implements only `UsbDeviceController.Listener`. It keeps the
-  lifecycle, the USB-event reactions (delegating logging/auto-load to the
-  controller via a small `log(...)` forwarder), and the startup popup +
-  `doStartupCartridgeCheck`. The redundant `&& !autoLoadAttempted` precheck was
-  dropped at the USB call sites because `autoLoadCamera()` self-guards on it
-  (behavior identical).
+  lifecycle and USB-event reactions, delegating logging/auto-load to the
+  controller via a small `log(...)` forwarder. After Phase 5 (iii),
+  `StartupDialog` owns the startup popup and cartridge polling.
 
 ### Result
 - **`MainActivity` 1064 → 371 lines** (2642 → 371 overall, **−86%**); new
