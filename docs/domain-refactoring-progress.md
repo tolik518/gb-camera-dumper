@@ -1,0 +1,123 @@
+# Domain refactoring — progress log
+
+Tracks execution of the plan in [domain-refactoring.md](domain-refactoring.md).
+Each phase is its own commit; every phase must compile
+(`:app:compileDebugJavaWithJavac`) and is smoke-tested on device.
+
+**Branch:** `refactor/domain-value-objects` (off `main`).
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| A1 | `MergeAlgorithm` enum (algorithm value object) | ✅ done |
+| A2 | `MergeOrder` value object | ✅ done |
+| A3 | `MergeIdentity` | ↪ folded into Phase D (see plan) |
+| B | `Palette` value object | ⬜ not started (paused) |
+| C | `Slot` + `SlotSet` | ⬜ not started |
+| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`) | ⬜ not started |
+| E | extract `Selection` (optional) | ⬜ not started |
+| F | FFI as a context boundary (merge → core) | ⬜ not started |
+
+Work paused after Phase A at the user's request (document, don't continue).
+
+### Result so far
+- Two value objects introduced as the single source of truth for the RGB-merge
+  parameters; **no behavior change**, all persisted strings byte-identical.
+- `MainActivity`/`MainScreen` untouched in size; the win is *de-duplication and
+  type-safety*, not line count — four scattered copies of algorithm labels and the
+  order tables collapsed to one definition each.
+
+---
+
+## Phase A1 — `MergeAlgorithm` enum
+
+**Commit:** `49f6229`
+
+**Goal:** replace the parallel `ALGORITHM_IDS` / `ALGORITHM_LABELS` /
+`ALGORITHM_SHORT_LABELS` arrays and the scattered algorithm-string handling with a
+single enum.
+
+### Changes
+- New `MergeAlgorithm` enum — the single source of truth for the persisted ids
+  (`basic`…`adaptive`), the full / short / compact labels, clear-channel
+  compatibility (`compatible`/`compatibleIds`/`compatibleLabels`), and the
+  no-clear resolve fallback (`resolve`). Default = `NORM_CLEAR_LUM`.
+- `RgbMergeDetector` — keeps its public helper *names* (`algorithmLabel`,
+  `algorithmShortLabel`, `compatibleAlgorithm*`, `ALGORITHM_IDS/_LABELS`) as thin
+  delegators; the pixel dispatch (`mergePixels`/`writeMergedPng`) now switches on
+  the enum; `resolveAlgorithm`/`isAlgorithmId`/`ALGO_*` constants removed.
+- `AppSettings` — validates/defaults the merge algorithm via `MergeAlgorithm`
+  (`validAlgorithm` helper) instead of `validChoice` against the arrays.
+- `MainScreen.compactAlgorithmLabel` — via `MergeAlgorithm.compactLabel()`
+  (removed its hand-written `if/else` ladder, the 3rd label copy).
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ✅ (see combined Phase A verification below).
+
+---
+
+## Phase A2 — `MergeOrder` value object
+
+**Commit:** `4ad723e`
+
+**Goal:** centralize the channel-order permutation tables, per-size defaults, and
+validation.
+
+### Changes
+- New `MergeOrder` — owns `ORDERS_3` (6) / `ORDERS_4` (24), `DEFAULT_3`/`DEFAULT_4`,
+  and `optionsFor(count)` / `defaultFor(count)` / `valid(order, count)`. (Static
+  order authority for now; gains an instance/value form in Phase D when
+  `MergeInfo` holds a `MergeOrder`.)
+- `AppSettings` — `rgb3Order`/`rgb4Order`/`saveSettings` validate via `MergeOrder`;
+  dropped the order tables, `DEFAULT_*` constants, and the now-unused `validChoice`.
+- `SettingsDialog` / `PhotoDetailDialog` — use `MergeOrder.optionsFor/defaultFor`,
+  removing the repeated `count == 4 ? *4 : *3` selection.
+- Also finished the algorithm short-label dedup: `SettingsDialog`'s hand-written
+  short-label array (the 4th copy) now derives from
+  `MergeAlgorithm.allShortLabels()`.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ✅ (see combined Phase A verification below).
+
+---
+
+## Phase A — on-device verification
+
+Built and installed with `just android-apk-install` on a Huawei P30 (`ELE-L29`,
+1080×2340). Verified the installed APK's dex actually contains `MergeAlgorithm`
+and `MergeOrder` and that the removed `ALGORITHM_SHORT_LABELS` is gone (guards
+against a stale APK, since the changes are behavior-preserving and look identical
+at runtime).
+
+Driven via `adb` (screenshots + `uiautomator`), **no cartridge attached** — same
+constraint as the prior refactor's on-device tests:
+
+- **Launch** — ✅ no `FATAL`/app crash in logcat; cached gallery (32 photos) loads.
+- **Gallery captions** — ✅ "Manual Adapt 01-04" and "Manual Basic 08-10" render
+  the compact algorithm label via `MergeAlgorithm.compactLabel()`; accessibility
+  labels read "Merged CRGB, Manual Adapt 01-04" and "Merged BGR, Manual Basic
+  08-10" (`mergedKind` order string + compact algo label).
+- **Settings dialog** — ✅ 4-shot order = "CRGB", 3-shot order = "RGB" (from
+  `MergeOrder`), default algorithm = "Norm+Clear" (`MergeAlgorithm.shortLabel` via
+  the deduped `allShortLabels()`); the 4-shot dropdown lists the CRGB permutations
+  from `MergeOrder.ORDERS_4`.
+- **Photo detail (manual CRGB merge)** — ✅ title "Merged CRGB", subtitle "Manual
+  merge · 01-04 · Adaptive ★", chips "Merged CRGB / Manually merged / Adaptive ★ /
+  Sources 01-04", "Order: CRGB" dropdown, and the algorithm dropdown
+  "Experimental Adaptive ★" (`MergeAlgorithm.label()`).
+
+### Not exercised
+- **Mutating** a merge variant (changing order/algorithm in the detail dropdown →
+  live re-merge + persist) — dropdowns were opened but values left unchanged to
+  avoid altering saved state. Worth a manual pass.
+- **Camera-dependent ops** (load/delete/recover/reorder, fresh auto-merge) — no
+  GBxCart cartridge attached; those code paths are unchanged by Phase A but should
+  be confirmed when hardware is available.
+
+---
+
+## Next (when resumed)
+Phase B — `Palette` value object (`int paletteIndex` + `String paletteName` →
+`Palette`, 107 refs / 9 files). Independent of A; touches the instant-recolor path,
+so re-verify palette switching has zero latency on device.
