@@ -74,7 +74,7 @@ final class PhotoDetailDialog {
         String[]       algoRef        = { photo.mergedRgb && photo.mergedAlgorithm != null ? photo.mergedAlgorithm : "" };
         boolean[]      algoChangedRef  = { false };
         String[]       orderRef       = { photo.mergedKind != null && !photo.mergedKind.isEmpty() ? photo.mergedKind
-                                          : photo.mergedSourceCount == 4 ? AppSettings.DEFAULT_RGB4_ORDER : AppSettings.DEFAULT_RGB3_ORDER };
+                                          : MergeOrder.defaultFor(photo.mergedSourceCount) };
         boolean[]      orderChangedRef = { false };
         int[]          genRef         = { 0 };
 
@@ -97,7 +97,7 @@ final class PhotoDetailDialog {
             algoRef[0]         = p.mergedRgb && p.mergedAlgorithm != null ? p.mergedAlgorithm : "";
             algoChangedRef[0]  = false;
             orderRef[0]        = p.mergedKind != null && !p.mergedKind.isEmpty() ? p.mergedKind
-                                 : p.mergedSourceCount == 4 ? AppSettings.DEFAULT_RGB4_ORDER : AppSettings.DEFAULT_RGB3_ORDER;
+                                 : MergeOrder.defaultFor(p.mergedSourceCount);
             orderChangedRef[0] = false;
             genRef[0]++;
 
@@ -339,7 +339,7 @@ final class PhotoDetailDialog {
 
             // Channel-order dropdown — only for manual merges (auto-merged order is fixed by detection)
             if (isManual) {
-                String[] orders = photo.mergedSourceCount == 4 ? AppSettings.RGB4_ORDERS : AppSettings.RGB3_ORDERS;
+                String[] orders = MergeOrder.optionsFor(photo.mergedSourceCount);
                 FrameLayout orderField = new FrameLayout(activity);
                 orderField.setBackground(UiStyle.rounded(activity, panelRaised, borderSoft, 8, 1));
                 orderField.setClickable(true);
@@ -501,7 +501,7 @@ final class PhotoDetailDialog {
         if (photo.mergedRgb) {
             return mergedVariantSubtitle(photo,
                     photo.mergedKind != null && !photo.mergedKind.isEmpty() ? photo.mergedKind
-                            : photo.mergedSourceCount == 4 ? AppSettings.DEFAULT_RGB4_ORDER : AppSettings.DEFAULT_RGB3_ORDER,
+                            : MergeOrder.defaultFor(photo.mergedSourceCount),
                     photo.mergedAlgorithm);
         }
         String label = photo.deleted ? "Recoverable" : "Album";

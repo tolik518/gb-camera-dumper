@@ -133,17 +133,17 @@ final class SettingsDialog {
         View rgb4Row = settingsPickerRow(
                 "4-shot order",
                 "Position of C (clear), R, G, B in consecutive shots.",
-                AppSettings.RGB4_ORDERS, rgb4Value, saveAll);
+                MergeOrder.ORDERS_4, rgb4Value, saveAll);
         View rgb3Row = settingsPickerRow(
                 "3-shot order",
                 "Position of R, G, B in consecutive shots.",
-                AppSettings.RGB3_ORDERS, rgb3Value, saveAll);
+                MergeOrder.ORDERS_3, rgb3Value, saveAll);
         View algoRow = settingsIdPickerRow(
                 "Default merge algorithm",
                 "Algorithm used when auto-detecting RGB sets.",
                 RgbMergeDetector.ALGORITHM_IDS,
                 RgbMergeDetector.ALGORITHM_LABELS,
-                new String[]{ "Basic", "Clear Lum", "Norm RGB", "Norm+Clear", "Sat Boost", "Adaptive ★" },
+                MergeAlgorithm.allShortLabels(),
                 defaultAlgoValue, saveAll);
 
         boolean rgbMergeOn = autoRgbMerge.isChecked();

@@ -97,6 +97,10 @@ enum MergeAlgorithm {
         return labelsOf(values());
     }
 
+    static String[] allShortLabels() {
+        return shortLabelsOf(values());
+    }
+
     private static String[] idsOf(MergeAlgorithm[] algos) {
         String[] ids = new String[algos.length];
         for (int i = 0; i < algos.length; i++) ids[i] = algos[i].id;
@@ -106,6 +110,12 @@ enum MergeAlgorithm {
     private static String[] labelsOf(MergeAlgorithm[] algos) {
         String[] labels = new String[algos.length];
         for (int i = 0; i < algos.length; i++) labels[i] = algos[i].label;
+        return labels;
+    }
+
+    private static String[] shortLabelsOf(MergeAlgorithm[] algos) {
+        String[] labels = new String[algos.length];
+        for (int i = 0; i < algos.length; i++) labels[i] = algos[i].shortLabel;
         return labels;
     }
 }
