@@ -12,12 +12,12 @@ Each phase is its own commit; every phase must compile
 | A2 | `MergeOrder` value object | ✅ done |
 | A3 | `MergeIdentity` | ↪ folded into Phase D (see plan) |
 | B | `Palette` value object | ✅ done |
-| C | `Slot` + `SlotSet` | ⬜ not started |
-| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`) | ⬜ not started |
+| C | `SlotSet` (`Slot` deferred to D) | ✅ done |
+| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`, `Slot`) | ⬜ not started |
 | E | extract `Selection` (optional) | ⬜ not started |
 | F | FFI as a context boundary (merge → core) | ⬜ not started |
 
-Phases A and B landed; C–F not started.
+Phases A–C landed; D–F not started.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -142,6 +142,34 @@ constraint as the prior refactor's on-device tests:
 
 ---
 
+## Phase C — `SlotSet`
+
+**Commit:** `e1b5f0f`
+
+**Goal:** move the slot-CSV builders off `GalleryState` (the read model) — they
+encode operation parameters, not gallery state.
+
+### Changes
+- New `SlotSet` value object: `selected(gallery, deleted)` / `active(gallery)` /
+  `selectedActiveFirst(gallery)` factories + `toCsv()`, producing the same
+  comma-separated wire form the FFI's `parse_physical_slots` expects.
+- `GalleryState`: dropped `selectedPhysicalSlotsCsv`, `activePhysicalSlotsCsv`,
+  `selectedActiveFirstPhysicalSlotsCsv`, and `appendActiveSlots`.
+- Callers updated: `GbcamOperationRunner` (delete/recover), `GalleryController`
+  (recover-from-cache / move-first / compact); the "clear" op still passes `""`.
+
+**Deferred:** the standalone `Slot` value object (`int physicalSlot` + `-1`
+sentinel) — wide, and already abstracted by `isAlbumBacked()` /
+`isActiveAlbumPhoto()`; folded into the Phase D `GalleryPhoto` slimming.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ⬜ pending: delete / recover / move-first / compact / clear still
+  target the right slots.
+
+---
+
 ## Next (when resumed)
-Phase C — `Slot` + `SlotSet`: a `Slot` (0–29, explicit absence) and a `SlotSet`
-with `toCsv()`, moving the three CSV builders off `GalleryState`.
+Phase D — `MergeInfo` + slim `GalleryPhoto`: fold the 6 merge fields into a
+`MergeInfo` value object (null = ordinary photo), and introduce `MergeIdentity`
+and the deferred `Slot` here. Keep the `manual-merges.json` keys identical.
