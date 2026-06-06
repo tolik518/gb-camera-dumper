@@ -11,13 +11,13 @@ Each phase is its own commit; every phase must compile
 | A1 | `MergeAlgorithm` enum (algorithm value object) | ✅ done |
 | A2 | `MergeOrder` value object | ✅ done |
 | A3 | `MergeIdentity` | ↪ folded into Phase D (see plan) |
-| B | `Palette` value object | ⬜ not started (paused) |
+| B | `Palette` value object | ✅ done |
 | C | `Slot` + `SlotSet` | ⬜ not started |
 | D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`) | ⬜ not started |
 | E | extract `Selection` (optional) | ⬜ not started |
 | F | FFI as a context boundary (merge → core) | ⬜ not started |
 
-Work paused after Phase A at the user's request (document, don't continue).
+Phases A and B landed; C–F not started.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -117,7 +117,31 @@ constraint as the prior refactor's on-device tests:
 
 ---
 
+## Phase B — `Palette` value object
+
+**Commit:** `59e1fe9`
+
+**Goal:** collapse the `(paletteIndex, paletteName)` pair into a value object.
+
+### Changes
+- New `Palette { index, name }` (colours stay a `PaletteCatalog` lookup, mirroring
+  the core `PaletteId` thin-id design).
+- `GalleryState` now carries a single `palette` field instead of the two; the
+  constructor, `fromJson`, `withPalette(Palette)`, and `withPhotos` use it.
+- Readers updated to `gallery.palette.index` / `gallery.palette.name`:
+  `GalleryController`, `MainScreen`, `GalleryPipeline`, `PhotoExporter`.
+- Left as `int` (legitimately): the FFI (`NativeGbcam`/`GbcamOperationRunner`),
+  prefs (`AppSettings`/`BackupRepository`), and `MainScreen`'s array-indexing
+  internals; `GalleryController` keeps its selected-index `int` field.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ⬜ pending: re-confirm instant palette switching has zero latency
+  (the §7.2 hard constraint) and that backup/export folder names still use the
+  palette name.
+
+---
+
 ## Next (when resumed)
-Phase B — `Palette` value object (`int paletteIndex` + `String paletteName` →
-`Palette`, 107 refs / 9 files). Independent of A; touches the instant-recolor path,
-so re-verify palette switching has zero latency on device.
+Phase C — `Slot` + `SlotSet`: a `Slot` (0–29, explicit absence) and a `SlotSet`
+with `toCsv()`, moving the three CSV builders off `GalleryState`.
