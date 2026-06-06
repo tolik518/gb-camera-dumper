@@ -146,53 +146,6 @@ final class GalleryState {
         return count;
     }
 
-    String selectedPhysicalSlotsCsv(boolean deleted) {
-        StringBuilder csv = new StringBuilder();
-        for (GalleryPhoto photo : photos) {
-            if (!photo.selected || photo.deleted != deleted || !photo.isAlbumBacked()) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-        return csv.toString();
-    }
-
-    String activePhysicalSlotsCsv() {
-        StringBuilder csv = new StringBuilder();
-        for (GalleryPhoto photo : photos) {
-            if (!photo.isActiveAlbumPhoto()) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-        return csv.toString();
-    }
-
-    String selectedActiveFirstPhysicalSlotsCsv() {
-        StringBuilder csv = new StringBuilder();
-        appendActiveSlots(csv, true);
-        appendActiveSlots(csv, false);
-        return csv.toString();
-    }
-
-    private void appendActiveSlots(StringBuilder csv, boolean selected) {
-        for (GalleryPhoto photo : photos) {
-            if (!photo.isActiveAlbumPhoto() || photo.selected != selected) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-    }
-
     void copySelectionFrom(GalleryState previous) {
         for (GalleryPhoto photo : photos) {
             for (GalleryPhoto old : previous.photos) {

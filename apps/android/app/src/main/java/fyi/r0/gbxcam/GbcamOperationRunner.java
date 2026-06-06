@@ -52,7 +52,7 @@ final class GbcamOperationRunner {
             File outputDir,
             int paletteIndex,
             Callback callback) {
-        String slots = gallery.selectedPhysicalSlotsCsv(false);
+        String slots = SlotSet.selected(gallery, false).toCsv();
         runUsbOperation(usbManager, device, "Deleting selected photos...", callback, connection -> {
             String json = NativeGbcam.deletePhotosFromFd(
                     connection.getFileDescriptor(),
@@ -72,7 +72,7 @@ final class GbcamOperationRunner {
             File outputDir,
             int paletteIndex,
             Callback callback) {
-        String slots = gallery.selectedPhysicalSlotsCsv(true);
+        String slots = SlotSet.selected(gallery, true).toCsv();
         runUsbOperation(usbManager, device, "Recovering selected deleted photos...", callback, connection -> {
             String json = NativeGbcam.recoverPhotosFromFd(
                     connection.getFileDescriptor(),

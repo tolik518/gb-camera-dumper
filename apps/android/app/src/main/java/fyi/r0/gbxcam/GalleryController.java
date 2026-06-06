@@ -384,7 +384,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private void recoverSelectedFromCachedSave(GalleryState gallery) {
-        String slots = gallery.selectedPhysicalSlotsCsv(true);
+        String slots = SlotSet.selected(gallery, true).toCsv();
         if (slots.isEmpty()) return;
         Set<String> restoredSlots = selectedDeletedSlotKeys(gallery);
         screen.setBusy(true, "Recovering selected deleted photos...");
@@ -435,7 +435,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             return;
         }
 
-        String csv = gallery.selectedActiveFirstPhysicalSlotsCsv();
+        String csv = SlotSet.selectedActiveFirst(gallery).toCsv();
         confirmOrRun(
                 "Move selected photos first?",
                 "This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.",
@@ -453,7 +453,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             return;
         }
 
-        String csv = gallery.activePhysicalSlotsCsv();
+        String csv = SlotSet.active(gallery).toCsv();
         confirmOrRun(
                 "Compact album order?",
                 "This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.",
