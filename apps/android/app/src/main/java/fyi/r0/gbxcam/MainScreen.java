@@ -539,7 +539,7 @@ final class MainScreen implements PaletteMenu.Host {
         FrameLayout imageFrame = new CameraImageFrame(context);
         imageFrame.setOnClickListener(tileClick);
         imageFrame.setOnLongClickListener(tileLongPress);
-        ImageView image = new ImageView(context);
+        ImageView image = new PixelImageView(context);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
         image.setAlpha(photo.deleted ? 0.72f : 1.0f);

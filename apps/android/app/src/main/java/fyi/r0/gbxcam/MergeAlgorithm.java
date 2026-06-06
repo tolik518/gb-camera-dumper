@@ -17,6 +17,10 @@ enum MergeAlgorithm {
     NORM           ("norm",           "Normalized RGB",                   "Norm RGB",   "Norm",  false),
     NORM_CLEAR_LUM ("norm_clear_lum", "Normalized RGB + Clear Luminance", "Norm+Clear", "N+Clr", true),
     SAT_BOOST      ("sat_boost",      "Saturation Boosted",               "Sat Boost",  "Sat",   false),
+    GRAY_WORLD     ("gray_world",     "Gray-World Balanced",              "Gray World", "Gray",  false),
+    BROVEY_CLEAR   ("brovey_clear",   "Brovey Clear Fusion",              "Brovey",     "Brov",  true),
+    IHS_CLEAR      ("ihs_clear",      "IHS Clear Luminance",              "IHS Clear",  "IHS",   true),
+    DETAIL_CLEAR   ("detail_clear",   "Clear Detail Injection",           "Detail",     "Det",   true),
     ADAPTIVE       ("adaptive",       "Experimental Adaptive ★",          "Adaptive ★", "Adapt", false);
 
     /** Used when none/invalid is requested for a set that has a clear channel. */
@@ -67,6 +71,9 @@ enum MergeAlgorithm {
         switch (this) {
             case CLEAR_LUM:      return BASIC;
             case NORM_CLEAR_LUM: return NORM;
+            case BROVEY_CLEAR:   return GRAY_WORLD;
+            case IHS_CLEAR:      return GRAY_WORLD;
+            case DETAIL_CLEAR:   return GRAY_WORLD;
             default:             return this;
         }
     }

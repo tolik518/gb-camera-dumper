@@ -796,7 +796,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private void applyManualMergeChanges(GalleryPhoto photo, String order, String algorithm,
-            java.util.function.Consumer<GalleryPhoto> onApplied) {
+            AppCallback<GalleryPhoto> onApplied) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
         int start = photo.mergedSourceStartDisplayIndex;

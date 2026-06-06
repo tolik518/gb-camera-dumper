@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executor;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * The full-screen photo detail dialog: status/metadata chips, the rendered image,
@@ -49,13 +47,13 @@ final class PhotoDetailDialog {
     private final AppSettings settings;
     private final GalleryPipeline pipeline;
     private final Executor previewExecutor;
-    private final Consumer<Runnable> postToUi;
-    private final Supplier<int[]> currentPaletteColors;
+    private final AppCallback<Runnable> postToUi;
+    private final AppSupplier<int[]> currentPaletteColors;
     private final Host host;
 
     PhotoDetailDialog(Activity activity, MainScreen screen, AppSettings settings, GalleryPipeline pipeline,
-            Executor previewExecutor, Consumer<Runnable> postToUi,
-            Supplier<int[]> currentPaletteColors, Host host) {
+            Executor previewExecutor, AppCallback<Runnable> postToUi,
+            AppSupplier<int[]> currentPaletteColors, Host host) {
         this.activity = activity;
         this.screen = screen;
         this.settings = settings;
@@ -311,7 +309,7 @@ final class PhotoDetailDialog {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         matParams.setMargins(0, dp(12), 0, dp(12));
 
-        ImageView image = new ImageView(activity);
+        ImageView image = new PixelImageView(activity);
         Bitmap bmp = PhotoRenderer.renderBitmap(photo, currentPaletteColors.get());
         if (bmp != null) image.setImageBitmap(bmp);
         else             image.setImageURI(Uri.fromFile(new File(photo.path)));
@@ -478,8 +476,12 @@ final class PhotoDetailDialog {
                 if (result != null) {
                     int w = imageView.getWidth();
                     int h = imageView.getHeight();
-                    Bitmap display = (w > 0 && h > 0)
-                            ? Bitmap.createScaledBitmap(result, w, h, true)
+                    Bitmap display = (w > 0 && h > 0 && (w != result.getWidth() || h != result.getHeight()))
+                            ? Bitmap.createScaledBitmap(
+                                    result,
+                                    w,
+                                    h,
+                                    shouldFilterScale(result.getWidth(), result.getHeight(), w, h))
                             : result;
                     if (display != result) result.recycle();
                     imageView.setAdjustViewBounds(false);
@@ -545,6 +547,10 @@ final class PhotoDetailDialog {
 
     private int dp(int value) {
         return UiStyle.dp(activity, value);
+    }
+
+    private static boolean shouldFilterScale(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {
+        return targetWidth < sourceWidth || targetHeight < sourceHeight;
     }
 
     private static int indexOf(String[] values, String value) {

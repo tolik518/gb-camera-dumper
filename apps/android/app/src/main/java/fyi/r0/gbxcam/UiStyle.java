@@ -167,7 +167,8 @@ final class UiStyle {
             int badgeTextSize,
             boolean monospaceBadge,
             int accent,
-            ChoiceCommitListener listener) {
+            ChoiceCommitListener listener
+    ) {
         Palette colors = palette(context);
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);

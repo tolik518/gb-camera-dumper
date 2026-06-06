@@ -133,18 +133,29 @@ final class SettingsDialog {
         View rgb4Row = settingsPickerRow(
                 "4-shot order",
                 "Position of C (clear), R, G, B in consecutive shots.",
-                MergeOrder.ORDERS_4, rgb4Value, saveAll);
+                accent,
+                MergeOrder.ORDERS_4, 
+                rgb4Value, 
+                saveAll
+            );
         View rgb3Row = settingsPickerRow(
                 "3-shot order",
                 "Position of R, G, B in consecutive shots.",
-                MergeOrder.ORDERS_3, rgb3Value, saveAll);
+                accent,
+                MergeOrder.ORDERS_3, 
+                rgb3Value, 
+                saveAll
+            );
         View algoRow = settingsIdPickerRow(
                 "Default merge algorithm",
                 "Algorithm used when auto-detecting RGB sets.",
+                accent,
                 RgbMergeDetector.ALGORITHM_IDS,
                 RgbMergeDetector.ALGORITHM_LABELS,
                 MergeAlgorithm.allShortLabels(),
-                defaultAlgoValue, saveAll);
+                defaultAlgoValue, 
+                saveAll
+            );
 
         boolean rgbMergeOn = autoRgbMerge.isChecked();
         rgb4Row.setVisibility(rgbMergeOn ? View.VISIBLE : View.GONE);
@@ -271,9 +282,11 @@ final class SettingsDialog {
     private View settingsPickerRow(
             String title,
             String description,
+            int accent,
             String[] options,
             String[] valueHolder,
-            Runnable onChange) {
+            Runnable onChange
+        ) {
         return UiStyle.settingsChoiceRow(
                 activity,
                 title,
@@ -284,7 +297,7 @@ final class SettingsDialog {
                 64,
                 13,
                 true,
-                screen.accentColor(),
+                accent,
                 which -> {
                     valueHolder[0] = options[which];
                     if (onChange != null) onChange.run();
@@ -295,6 +308,7 @@ final class SettingsDialog {
     private View settingsIdPickerRow(
             String title,
             String description,
+            int accent,
             String[] ids,
             String[] labels,
             String[] shortLabels,
@@ -310,7 +324,7 @@ final class SettingsDialog {
                 80,
                 11,
                 false,
-                screen.accentColor(),
+                accent,
                 which -> {
                     valueHolder[0] = ids[which];
                     if (onChange != null) onChange.run();

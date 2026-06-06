@@ -4,7 +4,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Consumer;
 
 /**
  * The decode-side gallery transform chain shared by every load path (camera read,
@@ -18,9 +17,9 @@ import java.util.function.Consumer;
  */
 final class GalleryPipeline {
     private final AppSettings settings;
-    private final Consumer<String> logger;
+    private final AppCallback<String> logger;
 
-    GalleryPipeline(AppSettings settings, Consumer<String> logger) {
+    GalleryPipeline(AppSettings settings, AppCallback<String> logger) {
         this.settings = settings;
         this.logger = logger;
     }

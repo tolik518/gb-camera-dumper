@@ -22,7 +22,7 @@ final class RgbMergeDetector {
     // --- Detection thresholds --------------------------------------------------
 
     private static final int RGB_PHASH_MAX_DISTANCE  = 14;
-    private static final int CRGB_PHASH_MAX_DISTANCE = 16;
+    private static final int CRGB_PHASH_MAX_DISTANCE = 22;
     private static final int DHASH_MAX_DISTANCE      = 24;
     private static final int SHIFT_RANGE             = 8;
     private static final double NCC_MIN              = 0.65;
@@ -370,6 +370,29 @@ final class RgbMergeDetector {
                 return boostSaturation(base, 1.25f);
             }
 
+            case GRAY_WORLD: {
+                int[][] rgb = normalizedBalancedChannels(red, green, blue);
+                return composeRgb(rgb[0], rgb[1], rgb[2], null, 0f);
+            }
+
+            case BROVEY_CLEAR: {
+                int[][] rgb = normalizedBalancedChannels(red, green, blue);
+                int[] nc = clear != null ? normalize2(clear) : null;
+                return nc != null ? broveyFusion(rgb[0], rgb[1], rgb[2], nc) : composeRgb(rgb[0], rgb[1], rgb[2], null, 0f);
+            }
+
+            case IHS_CLEAR: {
+                int[][] rgb = normalizedBalancedChannels(red, green, blue);
+                int[] nc = clear != null ? normalize2(clear) : null;
+                return nc != null ? replaceLuma(rgb[0], rgb[1], rgb[2], nc) : composeRgb(rgb[0], rgb[1], rgb[2], null, 0f);
+            }
+
+            case DETAIL_CLEAR: {
+                int[][] rgb = normalizedBalancedChannels(red, green, blue);
+                int[] nc = clear != null ? normalize2(clear) : null;
+                return nc != null ? injectClearDetail(rgb[0], rgb[1], rgb[2], nc) : composeRgb(rgb[0], rgb[1], rgb[2], null, 0f);
+            }
+
             case ADAPTIVE: {
                 int[] nr = normalize2(red);
                 int[] ng = normalize2(green);
@@ -387,6 +410,14 @@ final class RgbMergeDetector {
 
     // --- Algorithm primitives -------------------------------------------------
 
+    private static int[][] normalizedBalancedChannels(int[] red, int[] green, int[] blue) {
+        int[] nr = normalize2(red);
+        int[] ng = normalize2(green);
+        int[] nb = normalize2(blue);
+        balanceChannels(nr, ng, nb);
+        return new int[][] { nr, ng, nb };
+    }
+
     /**
      * Composes an RGB pixel array.
      * clearStrength=0 ignores the clear channel entirely.
@@ -403,6 +434,55 @@ final class RgbMergeDetector {
             int rv = clamp(Math.round(r[i] * cf));
             int gv = clamp(Math.round(g[i] * cf));
             int bv = clamp(Math.round(b[i] * cf));
+            pixels[i] = 0xFF000000 | (rv << 16) | (gv << 8) | bv;
+        }
+        return pixels;
+    }
+
+    private static int[] broveyFusion(int[] r, int[] g, int[] b, int[] pan) {
+        int n = r.length;
+        int[] pixels = new int[n];
+        for (int i = 0; i < n; i++) {
+            float sum = r[i] + g[i] + b[i];
+            if (sum <= 1f) {
+                pixels[i] = 0xFF000000 | (pan[i] << 16) | (pan[i] << 8) | pan[i];
+                continue;
+            }
+            float scale = (3f * pan[i]) / sum;
+            int rv = clamp(Math.round(r[i] * scale));
+            int gv = clamp(Math.round(g[i] * scale));
+            int bv = clamp(Math.round(b[i] * scale));
+            pixels[i] = 0xFF000000 | (rv << 16) | (gv << 8) | bv;
+        }
+        return pixels;
+    }
+
+    private static int[] replaceLuma(int[] r, int[] g, int[] b, int[] luma) {
+        int n = r.length;
+        int[] pixels = new int[n];
+        for (int i = 0; i < n; i++) {
+            float y = 0.299f * r[i] + 0.587f * g[i] + 0.114f * b[i];
+            float cr = r[i] - y;
+            float cb = b[i] - y;
+            float target = luma[i];
+            int rv = clamp(Math.round(target + cr));
+            int bv = clamp(Math.round(target + cb));
+            int gv = clamp(Math.round((target - 0.299f * rv - 0.114f * bv) / 0.587f));
+            pixels[i] = 0xFF000000 | (rv << 16) | (gv << 8) | bv;
+        }
+        return pixels;
+    }
+
+    private static int[] injectClearDetail(int[] r, int[] g, int[] b, int[] clear) {
+        int[] smooth = blur(clear);
+        int n = r.length;
+        int[] pixels = new int[n];
+        for (int i = 0; i < n; i++) {
+            float ratio = (clear[i] + 16f) / (smooth[i] + 16f);
+            float factor = 1f + 0.75f * (ratio - 1f);
+            int rv = clamp(Math.round(r[i] * factor));
+            int gv = clamp(Math.round(g[i] * factor));
+            int bv = clamp(Math.round(b[i] * factor));
             pixels[i] = 0xFF000000 | (rv << 16) | (gv << 8) | bv;
         }
         return pixels;
@@ -567,7 +647,11 @@ final class RgbMergeDetector {
             Bitmap scaled = bitmap;
             try {
                 if (bitmap.getWidth() != IMAGE_WIDTH || bitmap.getHeight() != IMAGE_HEIGHT) {
-                    scaled = Bitmap.createScaledBitmap(bitmap, IMAGE_WIDTH, IMAGE_HEIGHT, true);
+                    scaled = Bitmap.createScaledBitmap(
+                            bitmap,
+                            IMAGE_WIDTH,
+                            IMAGE_HEIGHT,
+                            shouldFilterScale(bitmap.getWidth(), bitmap.getHeight(), IMAGE_WIDTH, IMAGE_HEIGHT));
                 }
                 int[] pixels = new int[IMAGE_WIDTH * IMAGE_HEIGHT];
                 scaled.getPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
@@ -584,6 +668,10 @@ final class RgbMergeDetector {
                 bitmap.recycle();
             }
         }
+    }
+
+    private static boolean shouldFilterScale(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {
+        return targetWidth < sourceWidth || targetHeight < sourceHeight;
     }
 
     private static int[] blur(int[] gray) {
