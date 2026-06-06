@@ -119,8 +119,7 @@ final class AppSettings {
     }
 
     String mergeAlgorithm() {
-        return validChoice(prefs.getString(KEY_DEFAULT_MERGE_ALGO, RgbMergeDetector.ALGO_NORM_CLEAR_LUM),
-                RgbMergeDetector.ALGORITHM_IDS, RgbMergeDetector.ALGO_NORM_CLEAR_LUM);
+        return validAlgorithm(prefs.getString(KEY_DEFAULT_MERGE_ALGO, null), MergeAlgorithm.DEFAULT.id());
     }
 
     void saveSettings(boolean autoLoad, boolean loadCache, boolean showLogs,
@@ -135,10 +134,7 @@ final class AppSettings {
                 .putBoolean(KEY_AUTO_RGB_MERGE, autoRgbMerge)
                 .putString(KEY_RGB4_ORDER, validChoice(rgb4Order, RGB4_ORDERS, DEFAULT_RGB4_ORDER))
                 .putString(KEY_RGB3_ORDER, validChoice(rgb3Order, RGB3_ORDERS, DEFAULT_RGB3_ORDER))
-                .putString(KEY_DEFAULT_MERGE_ALGO, validChoice(
-                        mergeAlgorithm,
-                        RgbMergeDetector.ALGORITHM_IDS,
-                        RgbMergeDetector.ALGO_NORM_CLEAR_LUM))
+                .putString(KEY_DEFAULT_MERGE_ALGO, validAlgorithm(mergeAlgorithm, MergeAlgorithm.DEFAULT.id()))
                 .apply();
     }
 
@@ -175,7 +171,7 @@ final class AppSettings {
 
     void saveMergeAlgorithmOverride(GalleryPhoto photo, String algorithm) {
         prefs.edit().putString(KEY_MERGE_ALGO_OVERRIDE_PREFIX + photo.mergeIdentity(),
-                validChoice(algorithm, RgbMergeDetector.ALGORITHM_IDS, mergeAlgorithm())).apply();
+                validAlgorithm(algorithm, mergeAlgorithm())).apply();
     }
 
     boolean[] paletteFavorites(String[] labels) {
@@ -280,5 +276,11 @@ final class AppSettings {
             }
         }
         return fallback;
+    }
+
+    /** The id of the known algorithm matching {@code id}, else {@code fallback}. */
+    private static String validAlgorithm(String id, String fallback) {
+        MergeAlgorithm a = MergeAlgorithm.fromId(id);
+        return a != null ? a.id() : fallback;
     }
 }

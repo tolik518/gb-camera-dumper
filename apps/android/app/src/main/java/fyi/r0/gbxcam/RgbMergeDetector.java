@@ -14,30 +14,10 @@ import java.util.Map;
 
 final class RgbMergeDetector {
 
-    // --- Algorithm IDs ---------------------------------------------------------
+    // --- Algorithm tables (single source: MergeAlgorithm) ----------------------
 
-    static final String ALGO_BASIC           = "basic";
-    static final String ALGO_CLEAR_LUM       = "clear_lum";
-    static final String ALGO_NORM            = "norm";
-    static final String ALGO_NORM_CLEAR_LUM  = "norm_clear_lum";
-    static final String ALGO_SAT_BOOST       = "sat_boost";
-    static final String ALGO_ADAPTIVE        = "adaptive";
-
-    static final String[] ALGORITHM_IDS = {
-            ALGO_BASIC, ALGO_CLEAR_LUM, ALGO_NORM, ALGO_NORM_CLEAR_LUM,
-            ALGO_SAT_BOOST, ALGO_ADAPTIVE
-    };
-    static final String[] ALGORITHM_LABELS = {
-            "Basic RGB",
-            "RGB + Clear Luminance",
-            "Normalized RGB",
-            "Normalized RGB + Clear Luminance",
-            "Saturation Boosted",
-            "Experimental Adaptive ★"
-    };
-    private static final String[] ALGORITHM_SHORT_LABELS = {
-            "Basic", "Clear Lum", "Norm RGB", "Norm+Clear", "Sat Boost", "Adaptive ★"
-    };
+    static final String[] ALGORITHM_IDS = MergeAlgorithm.allIds();
+    static final String[] ALGORITHM_LABELS = MergeAlgorithm.allLabels();
 
     // --- Detection thresholds --------------------------------------------------
 
@@ -115,9 +95,9 @@ final class RgbMergeDetector {
         }
         File mergeDir = new File(outputRoot, "rgb-merged-manual");
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
-        String resolvedAlgorithm = resolveAlgorithm(defaultAlgorithm, layout.clearIndex >= 0);
-        File out = uniqueManualMergeFile(mergeDir, sources, count, layout.label, resolvedAlgorithm);
-        if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
+        MergeAlgorithm resolved = MergeAlgorithm.resolve(defaultAlgorithm, layout.clearIndex >= 0);
+        File out = uniqueManualMergeFile(mergeDir, sources, count, layout.label, resolved.id());
+        if (!writeMergedPng(images, layout, out, resolved)) return null;
         return GalleryPhoto.builder(
                         out.getName(), out.getAbsolutePath(),
                         sources[0].displayIndex, -1,
@@ -127,37 +107,31 @@ final class RgbMergeDetector {
                 .mergedKind(layout.label)
                 .mergedSourceCount(count)
                 .mergedSourceStartDisplayIndex(sources[0].displayIndex)
-                .mergedAlgorithm(resolvedAlgorithm)
+                .mergedAlgorithm(resolved.id())
                 .manualMerge(true)
                 .build();
     }
 
     /** Returns the algorithm IDs valid for the given set size. */
     static String[] compatibleAlgorithmIds(boolean hasClear) {
-        if (hasClear) return ALGORITHM_IDS;
-        return new String[]{ ALGO_BASIC, ALGO_NORM, ALGO_SAT_BOOST, ALGO_ADAPTIVE };
+        return MergeAlgorithm.compatibleIds(hasClear);
     }
 
     /** Returns the display labels for algorithm IDs valid for the given set size. */
     static String[] compatibleAlgorithmLabels(boolean hasClear) {
-        if (hasClear) return ALGORITHM_LABELS;
-        return new String[]{ "Basic RGB", "Normalized RGB", "Saturation Boosted", "Experimental Adaptive ★" };
+        return MergeAlgorithm.compatibleLabels(hasClear);
     }
 
     /** Short label shown in chips/badges. */
     static String algorithmShortLabel(String id) {
-        for (int i = 0; i < ALGORITHM_IDS.length; i++) {
-            if (ALGORITHM_IDS[i].equals(id)) return ALGORITHM_SHORT_LABELS[i];
-        }
-        return id;
+        MergeAlgorithm a = MergeAlgorithm.fromId(id);
+        return a != null ? a.shortLabel() : id;
     }
 
     /** Full label shown in pickers. */
     static String algorithmLabel(String id) {
-        for (int i = 0; i < ALGORITHM_IDS.length; i++) {
-            if (ALGORITHM_IDS[i].equals(id)) return ALGORITHM_LABELS[i];
-        }
-        return id;
+        MergeAlgorithm a = MergeAlgorithm.fromId(id);
+        return a != null ? a.label() : id;
     }
 
     /**
@@ -174,29 +148,11 @@ final class RgbMergeDetector {
             images[i] = ImageData.from(sourcePhotos[i]);
             if (images[i] == null) return null;
         }
-        String resolved = resolveAlgorithm(algorithm, layout.clearIndex >= 0);
+        MergeAlgorithm resolved = MergeAlgorithm.resolve(algorithm, layout.clearIndex >= 0);
         int[] pixels = mergePixels(images, layout, resolved);
         Bitmap bmp = Bitmap.createBitmap(IMAGE_WIDTH, IMAGE_HEIGHT, Bitmap.Config.ARGB_8888);
         bmp.setPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
         return bmp;
-    }
-
-    /**
-     * Resolves the requested algorithm for this set, applying a fallback when the
-     * requested algorithm requires a clear channel but none is available.
-     */
-    static String resolveAlgorithm(String requested, boolean hasClear) {
-        if (requested == null || requested.isEmpty()) {
-            return hasClear ? ALGO_NORM_CLEAR_LUM : ALGO_NORM;
-        }
-        if (!isAlgorithmId(requested)) {
-            return hasClear ? ALGO_NORM_CLEAR_LUM : ALGO_NORM;
-        }
-        if (!hasClear) {
-            if (ALGO_CLEAR_LUM.equals(requested))      return ALGO_BASIC;
-            if (ALGO_NORM_CLEAR_LUM.equals(requested)) return ALGO_NORM;
-        }
-        return requested;
     }
 
     // --- Detection internals ---------------------------------------------------
@@ -238,13 +194,6 @@ final class RgbMergeDetector {
             if (sources[i] == null) return false;
         }
         return true;
-    }
-
-    private static boolean isAlgorithmId(String requested) {
-        for (String id : ALGORITHM_IDS) {
-            if (id.equals(requested)) return true;
-        }
-        return false;
     }
 
     private static void deleteOldMergedFiles(File mergeDir) {
@@ -295,11 +244,11 @@ final class RgbMergeDetector {
         String requested = (algorithmOverrides != null && algorithmOverrides.containsKey(identity))
                 ? algorithmOverrides.get(identity)
                 : defaultAlgorithm;
-        String resolvedAlgorithm = resolveAlgorithm(requested, layout.clearIndex >= 0);
+        MergeAlgorithm resolved = MergeAlgorithm.resolve(requested, layout.clearIndex >= 0);
 
         File out = new File(mergeDir, String.format(Locale.US, "RGB_%02d_from_%02d_%s.png",
                 mergeNumber, source[0].displayIndex + 1, layout.label));
-        if (!writeMergedPng(images, layout, out, resolvedAlgorithm)) return null;
+        if (!writeMergedPng(images, layout, out, resolved)) return null;
 
         GalleryPhoto merged = GalleryPhoto.builder(
                         out.getName(), out.getAbsolutePath(),
@@ -310,7 +259,7 @@ final class RgbMergeDetector {
                 .mergedKind(layout.label)
                 .mergedSourceCount(count)
                 .mergedSourceStartDisplayIndex(source[0].displayIndex)
-                .mergedAlgorithm(resolvedAlgorithm)
+                .mergedAlgorithm(resolved.id())
                 .build();
         return new MergeCandidate(count, merged);
     }
@@ -381,7 +330,7 @@ final class RgbMergeDetector {
 
     // --- PNG writing & algorithm dispatch -------------------------------------
 
-    private static boolean writeMergedPng(ImageData[] images, MergeLayout layout, File out, String algorithm) {
+    private static boolean writeMergedPng(ImageData[] images, MergeLayout layout, File out, MergeAlgorithm algorithm) {
         int[] pixels = mergePixels(images, layout, algorithm);
         Bitmap merged = Bitmap.createBitmap(IMAGE_WIDTH, IMAGE_HEIGHT, Bitmap.Config.ARGB_8888);
         merged.setPixels(pixels, 0, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
@@ -394,34 +343,34 @@ final class RgbMergeDetector {
         }
     }
 
-    private static int[] mergePixels(ImageData[] images, MergeLayout layout, String algorithm) {
+    private static int[] mergePixels(ImageData[] images, MergeLayout layout, MergeAlgorithm algorithm) {
         int[] red   = images[layout.redIndex].gray;
         int[] green = images[layout.greenIndex].gray;
         int[] blue  = images[layout.blueIndex].gray;
         int[] clear = layout.clearIndex >= 0 ? images[layout.clearIndex].gray : null;
 
         switch (algorithm) {
-            case ALGO_BASIC:
+            case BASIC:
                 return composeRgb(red, green, blue, null, 0f);
 
-            case ALGO_CLEAR_LUM:
+            case CLEAR_LUM:
                 return composeRgb(red, green, blue, clear, 1.0f);
 
-            case ALGO_NORM: {
+            case NORM: {
                 return composeRgb(normalize(red), normalize(green), normalize(blue), null, 0f);
             }
 
-            case ALGO_NORM_CLEAR_LUM: {
+            case NORM_CLEAR_LUM: {
                 int[] nc = clear != null ? normalize(clear) : null;
                 return composeRgb(normalize(red), normalize(green), normalize(blue), nc, 0.65f);
             }
 
-            case ALGO_SAT_BOOST: {
+            case SAT_BOOST: {
                 int[] base = composeRgb(normalize(red), normalize(green), normalize(blue), null, 0f);
                 return boostSaturation(base, 1.25f);
             }
 
-            case ALGO_ADAPTIVE: {
+            case ADAPTIVE: {
                 int[] nr = normalize2(red);
                 int[] ng = normalize2(green);
                 int[] nb = normalize2(blue);

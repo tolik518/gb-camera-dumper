@@ -681,13 +681,8 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private String compactAlgorithmLabel(String id) {
-        if (RgbMergeDetector.ALGO_BASIC.equals(id)) return "Basic";
-        if (RgbMergeDetector.ALGO_CLEAR_LUM.equals(id)) return "Clear";
-        if (RgbMergeDetector.ALGO_NORM.equals(id)) return "Norm";
-        if (RgbMergeDetector.ALGO_NORM_CLEAR_LUM.equals(id)) return "N+Clr";
-        if (RgbMergeDetector.ALGO_SAT_BOOST.equals(id)) return "Sat";
-        if (RgbMergeDetector.ALGO_ADAPTIVE.equals(id)) return "Adapt";
-        return id;
+        MergeAlgorithm a = MergeAlgorithm.fromId(id);
+        return a != null ? a.compactLabel() : id;
     }
 
     private void togglePhotoSelection(GalleryPhoto photo) {
