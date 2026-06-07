@@ -89,7 +89,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (count != 3 && count != 4) return;
         sortByDisplayIndex(sources);
         String order = count == 3 ? settings.rgb3Order() : settings.rgb4Order();
-        screen.setBusy(true, "Merging " + count + " photos...");
+        screen.setBusy(true, "Merging " + count + " photos...", BusyDialog.Direction.TO_GBCAM);
         runInBackground(() -> {
             GalleryPhoto merged = RgbMergeDetector.manualMerge(
                     sources.toArray(new GalleryPhoto[0]),
@@ -98,7 +98,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     settings.mergeAlgorithm(),
                     gallery.savePath);
             postToUi(() -> {
-                screen.setBusy(false, null);
+                screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                 if (merged == null) {
                     onLog("Manual merge failed.");
                     return;
@@ -388,7 +388,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         String slots = SlotSet.selected(gallery, true).toCsv();
         if (slots.isEmpty()) return;
         Set<String> restoredSlots = selectedDeletedSlotKeys(gallery);
-        screen.setBusy(true, "Recovering selected deleted photos...");
+        screen.setBusy(true, "Recovering selected deleted photos...", BusyDialog.Direction.TO_GBCAM);
         runInBackground(() -> {
             try {
                 String json = NativeGbcam.recoverPhotosFromSave(
@@ -407,13 +407,13 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     mergeStore.load();
                     shown = mergeStore.inject(shown);
                     screen.showGallery(shown);
-                    screen.setBusy(false, null);
+                    screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                     onLog("Recovered selected deleted photos from cached save.");
                 });
             } catch (Exception e) {
                 postToUi(() -> {
                     onError("Error: " + e.toString());
-                    screen.setBusy(false, null);
+                    screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                 });
             }
         });
@@ -533,7 +533,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     @Override
     public void onBusyChanged(boolean busy, String message) {
         if (destroyed) return;
-        screen.setBusy(busy, message);
+        screen.setBusy(busy, message, BusyDialog.Direction.TO_GBCAM);
     }
 
     @Override

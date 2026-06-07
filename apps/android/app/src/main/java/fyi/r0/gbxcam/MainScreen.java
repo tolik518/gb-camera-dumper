@@ -350,7 +350,7 @@ final class MainScreen implements PaletteMenu.Host {
                 dp(120)));
         setLogsVisible(false);
 
-        setBusy(false, null);
+        setBusy(false, null, BusyDialog.Direction.TO_ANDROID);
         updateActions();
     }
 
@@ -389,10 +389,10 @@ final class MainScreen implements PaletteMenu.Host {
         updateActions();
     }
 
-    void setBusy(boolean busy, String message) {
+    void setBusy(boolean busy, String message, BusyDialog.Direction direction) {
         this.busy = busy;
         if (busy) {
-            busyOverlay.show(message, accent);
+            busyOverlay.show(message, accent, direction);
         } else if (!busyOverlay.hasError()) {
             busyOverlay.dismiss();
         }
