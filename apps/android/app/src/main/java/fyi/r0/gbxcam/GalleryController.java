@@ -95,7 +95,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     sources.toArray(new GalleryPhoto[0]),
                     count, order,
                     new File(gallery.outputDir),
-                    settings.mergeAlgorithm());
+                    settings.mergeAlgorithm(),
+                    gallery.savePath);
             postToUi(() -> {
                 screen.setBusy(false, null);
                 if (merged == null) {
@@ -800,7 +801,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         runInBackground(() -> {
             GalleryPhoto updated = RgbMergeDetector.manualMerge(
                     sources.toArray(new GalleryPhoto[0]),
-                    count, order, new File(gallery.outputDir), algorithm);
+                    count, order, new File(gallery.outputDir), algorithm, gallery.savePath);
             postToUi(() -> {
                 if (updated == null) { onLog("Merge update failed."); return; }
                 // If the old file was written after this task started, a concurrent

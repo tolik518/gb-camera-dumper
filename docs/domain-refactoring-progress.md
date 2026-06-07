@@ -311,3 +311,29 @@ changing runtime behavior yet.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
 - On-device/parity — ⬜ pending: compare Java vs Rust output for manual RGB/CRGB
   merges and all algorithms before switching callers.
+
+---
+
+## Phase F3 — manual merge through core FFI
+
+**Commit:** pending
+
+**Goal:** switch manual merge creation/update to the core-backed save-based merge
+hook while keeping auto-merge detection/composition unchanged.
+
+### Changes
+- `RgbMergeDetector.manualMerge` has a save-path-aware overload. When all sources
+  are album-backed and a save path is available, it calls
+  `NativeGbcam.mergeRgbFromSave`; if that fails it deletes the partial output and
+  falls back to the previous Java PNG writer.
+- `GalleryController` passes `gallery.savePath` for manual merge creation and
+  detail-dialog order/algorithm updates.
+- Auto merge still uses the existing Java `evaluate`/`writeMergedPng` path and
+  still requires contiguous display indices.
+
+### Verification
+- `cargo test -p gbxcam-core -p gbxcam-ffi` — ✅.
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ⬜ pending: create manual RGB/CRGB from non-contiguous slots, change
+  order/algorithm, restart/manual-merges round-trip, and confirm auto-merge still
+  only appears for contiguous groups.

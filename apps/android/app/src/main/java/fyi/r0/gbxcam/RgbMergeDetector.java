@@ -85,19 +85,24 @@ final class RgbMergeDetector {
             String order,
             File outputRoot,
             String defaultAlgorithm) {
+        return manualMerge(sources, count, order, outputRoot, defaultAlgorithm, null);
+    }
+
+    static GalleryPhoto manualMerge(
+            GalleryPhoto[] sources,
+            int count,
+            String order,
+            File outputRoot,
+            String defaultAlgorithm,
+            String savePath) {
         if (!hasValidSources(sources, count)) return null;
         MergeLayout layout = count == 3 ? layoutFromOrder3(order) : layoutFromOrder4(order);
         if (layout == null) return null;
-        ImageData[] images = new ImageData[count];
-        for (int i = 0; i < count; i++) {
-            images[i] = ImageData.from(sources[i]);
-            if (images[i] == null) return null;
-        }
         File mergeDir = new File(outputRoot, "rgb-merged-manual");
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
         MergeAlgorithm resolved = MergeAlgorithm.resolve(defaultAlgorithm, layout.clearIndex >= 0);
         File out = uniqueManualMergeFile(mergeDir, sources, count, layout.label, resolved.id());
-        if (!writeMergedPng(images, layout, out, resolved)) return null;
+        if (!writeManualMergePng(sources, count, savePath, layout, out, resolved)) return null;
         return GalleryPhoto.builder(
                         out.getName(), out.getAbsolutePath(),
                         sources[0].displayIndex, -1,
@@ -194,6 +199,46 @@ final class RgbMergeDetector {
     private static String safeFilePart(String value) {
         if (value == null || value.isEmpty()) return "merge";
         return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private static boolean writeManualMergePng(
+            GalleryPhoto[] sources, int count, String savePath, MergeLayout layout, File out, MergeAlgorithm algorithm) {
+        if (savePath != null && !savePath.isEmpty() && allAlbumBacked(sources, count)) {
+            try {
+                NativeGbcam.mergeRgbFromSave(savePath, out.getAbsolutePath(),
+                        sourceSlotsCsv(sources, count), layout.label, algorithm.id());
+                return out.isFile();
+            } catch (Throwable ignored) {
+                if (out.exists() && !out.delete()) out.deleteOnExit();
+            }
+        }
+
+        ImageData[] images = new ImageData[count];
+        for (int i = 0; i < count; i++) {
+            images[i] = ImageData.from(sources[i]);
+            if (images[i] == null) return false;
+        }
+        return writeMergedPng(images, layout, out, algorithm);
+    }
+
+    private static boolean allAlbumBacked(GalleryPhoto[] sources, int count) {
+        for (int i = 0; i < count; i++) {
+            if (sources[i] == null || !sources[i].isAlbumBacked()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String sourceSlotsCsv(GalleryPhoto[] sources, int count) {
+        StringBuilder csv = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (csv.length() > 0) {
+                csv.append(',');
+            }
+            csv.append(sources[i].slot.index());
+        }
+        return csv.toString();
     }
 
     private static boolean hasValidSources(GalleryPhoto[] sources, int count) {
