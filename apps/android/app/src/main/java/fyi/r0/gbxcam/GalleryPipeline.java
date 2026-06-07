@@ -60,7 +60,8 @@ final class GalleryPipeline {
         }
         List<GalleryPhoto> sourcePhotos = monoSourcePhotos(gallery);
         GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, sourcePhotos, new File(gallery.outputDir),
-                settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(), settings.mergeAlgorithmOverrides());
+                gallery.savePath, settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(),
+                settings.mergeAlgorithmOverrides());
         int added = merged.photos.size() - gallery.photos.size();
         if (added > 0) {
             logger.accept("Auto-merged " + added + " RGB " + (added == 1 ? "set" : "sets") + ".");

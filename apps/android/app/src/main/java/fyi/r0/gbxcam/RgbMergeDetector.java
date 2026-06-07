@@ -37,6 +37,7 @@ final class RgbMergeDetector {
             GalleryState gallery,
             List<GalleryPhoto> sourcePhotos,
             File outputRoot,
+            String savePath,
             String order4,
             String order3,
             String defaultAlgorithm,
@@ -51,11 +52,11 @@ final class RgbMergeDetector {
             MergeCandidate candidate = null;
             if (i + 4 <= gallery.photos.size()) {
                 candidate = evaluate(gallery.photos, sourcePhotos, i, 4, mergeDir, mergedCount + 1,
-                        order4, defaultAlgorithm, algorithmOverrides);
+                        savePath, order4, defaultAlgorithm, algorithmOverrides);
             }
             if (candidate == null && i + 3 <= gallery.photos.size()) {
                 candidate = evaluate(gallery.photos, sourcePhotos, i, 3, mergeDir, mergedCount + 1,
-                        order3, defaultAlgorithm, algorithmOverrides);
+                        savePath, order3, defaultAlgorithm, algorithmOverrides);
             }
 
             if (candidate == null) {
@@ -263,6 +264,7 @@ final class RgbMergeDetector {
             List<GalleryPhoto> sourcePhotos,
             int start, int count,
             File mergeDir, int mergeNumber,
+            String savePath,
             String order,
             String defaultAlgorithm,
             Map<String, String> algorithmOverrides) {
@@ -302,7 +304,7 @@ final class RgbMergeDetector {
 
         File out = new File(mergeDir, String.format(Locale.US, "RGB_%02d_from_%02d_%s.png",
                 mergeNumber, source[0].displayIndex + 1, layout.label));
-        if (!writeMergedPng(images, layout, out, resolved)) return null;
+        if (!writeAutoMergePng(source, count, savePath, images, layout, out, resolved)) return null;
 
         GalleryPhoto merged = GalleryPhoto.builder(
                         out.getName(), out.getAbsolutePath(),
@@ -383,6 +385,27 @@ final class RgbMergeDetector {
     }
 
     // --- PNG writing & algorithm dispatch -------------------------------------
+
+    private static boolean writeAutoMergePng(
+            GalleryPhoto[] sources,
+            int count,
+            String savePath,
+            ImageData[] images,
+            MergeLayout layout,
+            File out,
+            MergeAlgorithm algorithm) {
+        if (savePath != null && !savePath.isEmpty() && allAlbumBacked(sources, count)) {
+            try {
+                NativeGbcam.mergeRgbFromSave(savePath, out.getAbsolutePath(),
+                        sourceSlotsCsv(sources, count), layout.label, algorithm.id());
+                return out.isFile();
+            } catch (Throwable ignored) {
+                if (out.exists() && !out.delete()) out.deleteOnExit();
+            }
+        }
+
+        return writeMergedPng(images, layout, out, algorithm);
+    }
 
     private static boolean writeMergedPng(ImageData[] images, MergeLayout layout, File out, MergeAlgorithm algorithm) {
         int[] pixels = mergePixels(images, layout, algorithm);

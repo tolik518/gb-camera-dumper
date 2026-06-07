@@ -18,7 +18,7 @@ Each phase is its own commit; every phase must compile
 | Slot | `Slot` value object | ✅ done |
 | F | FFI as a context boundary (merge → core) | 🔄 started |
 
-Phases A–E landed; F not started.
+Phases A–E and Slot landed; Phase F is underway.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -334,6 +334,37 @@ hook while keeping auto-merge detection/composition unchanged.
 ### Verification
 - `cargo test -p gbxcam-core -p gbxcam-ffi` — ✅.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
-- On-device — ⬜ pending: create manual RGB/CRGB from non-contiguous slots, change
-  order/algorithm, restart/manual-merges round-trip, and confirm auto-merge still
-  only appears for contiguous groups.
+- On-device — ✅: created non-contiguous manual RGB (`17,20,25`) and CRGB
+  (`17,20,25,28`) merges, changed the RGB algorithm in detail, verified
+  `manual-merges.json` stores exact source slots, force-restarted and confirmed
+  both manual merges re-inject from disk, confirmed selecting only two photos does
+  not expose a merge action, and confirmed auto merges remain contiguous
+  (`Auto Adapt 05-08`, `Auto Adapt 10-13`).
+
+---
+
+## Phase F4 — auto-merge composition through core FFI
+
+**Commit:** `94e0685`
+
+**Goal:** keep Java's auto-merge detection/order selection intact, but route the
+accepted auto-merge PNG writer through the same save-based core merge hook used by
+manual merges.
+
+### Changes
+- `GalleryPipeline` now passes `gallery.savePath` into auto-merge processing.
+- `RgbMergeDetector.evaluate` still performs the existing Java pHash/dHash/NCC
+  detection and still only accepts contiguous display-index groups.
+- Once a candidate is accepted, `writeAutoMergePng` calls
+  `NativeGbcam.mergeRgbFromSave(savePath, outPath, sourceSlotsCsv, order,
+  algorithm)` when the source photos are album-backed; if native writing fails it
+  deletes any partial output and falls back to the previous Java `writeMergedPng`
+  path.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ✅: deleted `rgb-merged/RGB_*.png`, cold-started the app, confirmed
+  cached gallery load regenerated `RGB_01_from_05_CRGB.png` and
+  `RGB_02_from_10_CRGB.png`, UI still shows contiguous auto merges
+  (`Auto Adapt 05-08`, `Auto Adapt 10-13`), existing non-contiguous manual merges
+  still inject from `manual-merges.json`, and logcat has no app/native crash.
