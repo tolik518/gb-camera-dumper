@@ -719,6 +719,23 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         });
     }
 
+    @Override
+    public void deleteOrRecoverDetailPhoto(GalleryPhoto photo) {
+        GalleryState gallery = screen.gallery();
+        GalleryPhoto target = findCurrentPhoto(photo, gallery);
+        if (target == null) {
+            onLog("Action failed: photo is no longer in the current gallery.");
+            return;
+        }
+        GalleryState singleSelection = gallery.withSelection(Selection.empty().with(target, true));
+        screen.showGallery(singleSelection);
+        if (target.isDeletedAlbumPhoto()) {
+            onRecoverSelectedRequested();
+        } else if (target.isActiveAlbumPhoto() || target.isManualMerge()) {
+            onDeleteSelectedRequested();
+        }
+    }
+
     private static GalleryPhoto findCurrentPhoto(GalleryPhoto photo, GalleryState gallery) {
         if (photo == null || gallery == null) return null;
         for (GalleryPhoto current : gallery.photos) {

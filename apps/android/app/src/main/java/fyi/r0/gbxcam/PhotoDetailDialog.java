@@ -3,6 +3,7 @@ package fyi.r0.gbxcam;
 import android.app.Activity;
 import android.app.Dialog;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.text.TextUtils;
@@ -40,6 +41,7 @@ final class PhotoDetailDialog {
         void shareSinglePhoto(GalleryPhoto photo);
         /** Commit a pending order/algorithm change, then share the re-merged result. */
         void applyDetailChangesThenShare(GalleryPhoto photo, String order, String algorithm);
+        void deleteOrRecoverDetailPhoto(GalleryPhoto photo);
     }
 
     private final Activity activity;
@@ -74,6 +76,7 @@ final class PhotoDetailDialog {
         String[]       orderRef       = { photo.mergedKind() != null && !photo.mergedKind().isEmpty() ? photo.mergedKind()
                                           : MergeOrder.defaultFor(photo.mergedSourceCount()) };
         boolean[]      orderChangedRef = { false };
+        boolean[]      suppressApplyOnDismissRef = { false };
         int[]          genRef         = { 0 };
 
         // The scrollable photo content slot is rebuilt on every navigation;
@@ -83,6 +86,7 @@ final class PhotoDetailDialog {
 
         UiStyle.Palette colors0 = UiStyle.palette(activity);
         Button shareBtn = UiStyle.button(activity, "Share", screen.accentColor(), colors0.surfaceRaised, screen.accentColor());
+        Button albumActionBtn = UiStyle.button(activity, "Delete", Color.WHITE, colors0.danger, colors0.danger);
 
         // Header title refs — updated on every navigation
         TextView[] titleViewRef    = { null };
@@ -121,6 +125,8 @@ final class PhotoDetailDialog {
                     host.shareSinglePhoto(p);
                 }
             });
+
+            bindAlbumActionButton(albumActionBtn, dialog, p, suppressApplyOnDismissRef);
         };
 
         // Swipe left/right anywhere in the photo area to navigate.
@@ -197,14 +203,26 @@ final class PhotoDetailDialog {
         scrollParams.setMargins(0, dp(4), 0, 0);
         outer.addView(photoScroll, scrollParams);
 
+        LinearLayout footer = new LinearLayout(activity);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams shareBtnParams = new LinearLayout.LayoutParams(
+                0, dp(44), 2);
+        LinearLayout.LayoutParams albumActionParams = new LinearLayout.LayoutParams(
+                0, dp(44), 1);
+        albumActionParams.setMargins(dp(8), 0, 0, 0);
+        footer.addView(shareBtn, shareBtnParams);
+        footer.addView(albumActionBtn, albumActionParams);
+        LinearLayout.LayoutParams footerParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(44));
-        shareBtnParams.setMargins(0, dp(8), 0, 0);
-        outer.addView(shareBtn, shareBtnParams);
+        footerParams.setMargins(0, dp(8), 0, 0);
+        outer.addView(footer, footerParams);
 
         dialog.setContentView(outer);
         dialog.setOnDismissListener(d -> {
-            if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].isMerge())
+            if (!suppressApplyOnDismissRef[0]
+                    && (algoChangedRef[0] || orderChangedRef[0])
+                    && photoRef[0].isMerge())
                 host.applyOrSaveDetailChanges(photoRef[0], orderRef[0], algoRef[0]);
         });
         UiStyle.sizeDialog(dialog, activity, 32, 560);
@@ -220,6 +238,36 @@ final class PhotoDetailDialog {
                     dialog.getWindow().setAttributes(wp);
                 }
             }
+        });
+    }
+
+    private void bindAlbumActionButton(
+            Button button,
+            Dialog dialog,
+            GalleryPhoto photo,
+            boolean[] suppressApplyOnDismissRef) {
+        UiStyle.Palette colors = UiStyle.palette(activity);
+        if (photo.isDeletedAlbumPhoto()) {
+            button.setText("Recover");
+            button.setTextColor(screen.accentColor());
+            button.setBackground(UiStyle.buttonBackground(
+                    activity,
+                    colors.surfaceRaised,
+                    UiStyle.blend(screen.accentColor(), colors.background, 0.72f),
+                    colors.disabledBackground,
+                    screen.accentColor()));
+            button.setEnabled(true);
+        } else {
+            button.setText("Delete");
+            button.setTextColor(Color.WHITE);
+            button.setBackground(UiStyle.dangerButtonBackground(activity));
+            button.setEnabled(photo.isActiveAlbumPhoto() || photo.isManualMerge());
+        }
+        button.setOnClickListener(v -> {
+            if (!button.isEnabled()) return;
+            suppressApplyOnDismissRef[0] = true;
+            host.deleteOrRecoverDetailPhoto(photo);
+            dialog.dismiss();
         });
     }
 
