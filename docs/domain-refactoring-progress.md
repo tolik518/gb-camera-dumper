@@ -242,7 +242,7 @@ working selection into its own value object.
 
 ## Slot value object
 
-**Commit:** pending
+**Commit:** `1442c74`
 
 **Goal:** finish the C/D-deferred slot typing by moving the `-1` sentinel out of
 normal gallery readers.
