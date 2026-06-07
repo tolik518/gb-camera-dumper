@@ -107,6 +107,7 @@ final class RgbMergeDetector {
                 .mergedKind(layout.label)
                 .mergedSourceCount(count)
                 .mergedSourceStartDisplayIndex(sources[0].displayIndex)
+                .mergedSourceSlots(sourceSlots(sources, count))
                 .mergedAlgorithm(resolved.id())
                 .manualMerge(true)
                 .build();
@@ -164,6 +165,14 @@ final class RgbMergeDetector {
             sb.append(sources[i].slot.twoDigitLabel());
         }
         return sb.toString();
+    }
+
+    private static int[] sourceSlots(GalleryPhoto[] sources, int count) {
+        int[] slots = new int[count];
+        for (int i = 0; i < count; i++) {
+            slots[i] = sources[i].slot.index();
+        }
+        return slots;
     }
 
     private static File uniqueManualMergeFile(

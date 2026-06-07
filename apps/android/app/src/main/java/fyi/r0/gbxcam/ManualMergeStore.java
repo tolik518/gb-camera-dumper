@@ -77,6 +77,14 @@ final class ManualMergeStore {
                 obj.put("mergedKind", m.mergedKind() != null ? m.mergedKind() : "");
                 obj.put("mergedSourceCount", m.mergedSourceCount());
                 obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex());
+                int[] sourceSlots = m.mergedSourceSlots();
+                if (sourceSlots != null && sourceSlots.length > 0) {
+                    JSONArray slots = new JSONArray();
+                    for (int slot : sourceSlots) {
+                        slots.put(slot);
+                    }
+                    obj.put("mergedSourceSlots", slots);
+                }
                 obj.put("mergedAlgorithm", m.mergedAlgorithm() != null ? m.mergedAlgorithm() : "");
                 obj.put("deleted", m.deleted);
                 obj.put("manualMerge", m.isManualMerge());
@@ -109,6 +117,7 @@ final class ManualMergeStore {
                 JSONObject obj = arr.getJSONObject(i);
                 String path = obj.getString("path");
                 if (!new File(path).exists()) continue;
+                int sourceCount = obj.optInt("mergedSourceCount", 0);
                 manualMerges.add(GalleryPhoto.builder(
                                 obj.getString("name"),
                                 path,
@@ -118,8 +127,9 @@ final class ManualMergeStore {
                         .metadataValid(true)
                         .mergedRgb(true)
                         .mergedKind(obj.optString("mergedKind", ""))
-                        .mergedSourceCount(obj.optInt("mergedSourceCount", 0))
+                        .mergedSourceCount(sourceCount)
                         .mergedSourceStartDisplayIndex(obj.optInt("mergedSourceStartDisplayIndex", -1))
+                        .mergedSourceSlots(readSourceSlots(obj, path, sourceCount))
                         .mergedAlgorithm(obj.optString("mergedAlgorithm", ""))
                         // Fall back to the old path heuristic for files written before
                         // the explicit manualMerge field existed.
@@ -156,6 +166,10 @@ final class ManualMergeStore {
 
     /** Index at which {@code merge} should be inserted into {@code photos}, or -1 if its sources are absent. */
     static int insertIndex(List<GalleryPhoto> photos, GalleryPhoto merge) {
+        int[] sourceSlots = merge.mergedSourceSlots();
+        if (sourceSlots != null && sourceSlots.length > 0) {
+            return insertIndexAfterSourceSlots(photos, merge, sourceSlots);
+        }
         int endIdx = merge.mergedSourceStartDisplayIndex() + merge.mergedSourceCount() - 1;
         int insertAt = -1;
         for (int i = 0; i < photos.size(); i++) {
@@ -176,5 +190,108 @@ final class ManualMergeStore {
             insertAt++;
         }
         return insertAt;
+    }
+
+    private static int insertIndexAfterSourceSlots(List<GalleryPhoto> photos, GalleryPhoto merge, int[] sourceSlots) {
+        int lastSourceIndex = -1;
+        for (int slot : sourceSlots) {
+            int index = indexOfActiveSlot(photos, slot);
+            if (index < 0) {
+                return -1;
+            }
+            lastSourceIndex = Math.max(lastSourceIndex, index);
+        }
+        int insertAt = lastSourceIndex + 1;
+        while (insertAt < photos.size()) {
+            GalleryPhoto p = photos.get(insertAt);
+            if (!p.isMerge()
+                    || !sameSourceSlots(p.mergedSourceSlots(), sourceSlots)
+                    || p.mergedSourceCount() != merge.mergedSourceCount()) {
+                break;
+            }
+            insertAt++;
+        }
+        return insertAt;
+    }
+
+    private static int indexOfActiveSlot(List<GalleryPhoto> photos, int slot) {
+        for (int i = 0; i < photos.size(); i++) {
+            GalleryPhoto p = photos.get(i);
+            if (!p.isMerge() && !p.deleted && p.isAlbumBacked() && p.slot.index() == slot) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean sameSourceSlots(int[] left, int[] right) {
+        if (left == null || right == null || left.length != right.length) {
+            return false;
+        }
+        for (int i = 0; i < left.length; i++) {
+            if (left[i] != right[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int[] readSourceSlots(JSONObject obj, String path, int sourceCount) {
+        JSONArray slots = obj.optJSONArray("mergedSourceSlots");
+        if (slots != null) {
+            int[] parsed = readSourceSlots(slots, sourceCount);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return sourceSlotsFromLegacyName(path, sourceCount);
+    }
+
+    private static int[] readSourceSlots(JSONArray slots, int sourceCount) {
+        if (sourceCount <= 0 || slots.length() != sourceCount) {
+            return null;
+        }
+        int[] parsed = new int[sourceCount];
+        for (int i = 0; i < sourceCount; i++) {
+            int slot = slots.optInt(i, -1);
+            if (Slot.fromPhysicalIndex(slot) == null) {
+                return null;
+            }
+            parsed[i] = slot;
+        }
+        return parsed;
+    }
+
+    private static int[] sourceSlotsFromLegacyName(String path, int sourceCount) {
+        if (sourceCount <= 0) {
+            return null;
+        }
+        String name = new File(path).getName();
+        int start = name.indexOf("MANUAL_s");
+        if (start < 0) {
+            return null;
+        }
+        start += "MANUAL_s".length();
+        int end = name.indexOf("_n", start);
+        if (end < 0) {
+            return null;
+        }
+        String[] parts = name.substring(start, end).split("-");
+        if (parts.length != sourceCount) {
+            return null;
+        }
+        int[] slots = new int[sourceCount];
+        for (int i = 0; i < parts.length; i++) {
+            try {
+                int slot = Integer.parseInt(parts[i]) - 1;
+                if (Slot.fromPhysicalIndex(slot) == null) {
+                    return null;
+                }
+                slots[i] = slot;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return slots;
     }
 }

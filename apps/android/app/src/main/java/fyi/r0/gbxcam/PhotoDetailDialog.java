@@ -450,19 +450,32 @@ final class PhotoDetailDialog {
             Bitmap preview = null;
             try {
                 List<GalleryPhoto> monoPhotos = pipeline.monoSourcePhotos(gallery);
-                int startIdx = mergedPhoto.mergedSourceStartDisplayIndex();
                 int count = mergedPhoto.mergedSourceCount();
 
                 // Build a display-index → mono-photo map so we're immune to merged photos
                 // being interspersed in gallery.photos and to empty-deleted filtering offsets.
                 Map<Integer, GalleryPhoto> monoByIndex = new HashMap<>();
+                Map<Integer, GalleryPhoto> monoBySlot = new HashMap<>();
                 for (GalleryPhoto mp : monoPhotos) {
-                    if (!mp.isMerge()) monoByIndex.put(mp.displayIndex, mp);
+                    if (!mp.isMerge()) {
+                        monoByIndex.put(mp.displayIndex, mp);
+                        if (mp.isAlbumBacked()) {
+                            monoBySlot.put(mp.slot.index(), mp);
+                        }
+                    }
                 }
 
                 GalleryPhoto[] sourceForPreview = new GalleryPhoto[count];
-                for (int pos = 0; pos < count; pos++) {
-                    sourceForPreview[pos] = monoByIndex.get(startIdx + pos);
+                int[] slots = mergedPhoto.mergedSourceSlots();
+                if (mergedPhoto.isManualMerge() && slots != null && slots.length == count) {
+                    for (int pos = 0; pos < count; pos++) {
+                        sourceForPreview[pos] = monoBySlot.get(slots[pos]);
+                    }
+                } else {
+                    int startIdx = mergedPhoto.mergedSourceStartDisplayIndex();
+                    for (int pos = 0; pos < count; pos++) {
+                        sourceForPreview[pos] = monoByIndex.get(startIdx + pos);
+                    }
                 }
                 preview = RgbMergeDetector.previewMerge(
                         sourceForPreview, order, count, algorithm);
@@ -538,6 +551,23 @@ final class PhotoDetailDialog {
     }
 
     private String mergedSourceRange(GalleryPhoto photo) {
+        int[] slots = photo.mergedSourceSlots();
+        if (photo.isManualMerge() && slots != null && slots.length > 0) {
+            StringBuilder label = new StringBuilder();
+            for (int i = 0; i < slots.length; i++) {
+                Slot slot = Slot.fromPhysicalIndex(slots[i]);
+                if (slot == null) {
+                    continue;
+                }
+                if (label.length() > 0) {
+                    label.append(',');
+                }
+                label.append(slot.twoDigitLabel());
+            }
+            if (label.length() > 0) {
+                return label.toString();
+            }
+        }
         int start = photo.mergedSourceStartDisplayIndex() + 1;
         int end = start + Math.max(0, photo.mergedSourceCount() - 1);
         return String.format(Locale.US, "%02d-%02d", start, end);

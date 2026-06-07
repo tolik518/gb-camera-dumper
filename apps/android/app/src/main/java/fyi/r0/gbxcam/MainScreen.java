@@ -676,6 +676,23 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private String mergedSourceRange(GalleryPhoto photo) {
+        int[] slots = photo.mergedSourceSlots();
+        if (photo.isManualMerge() && slots != null && slots.length > 0) {
+            StringBuilder label = new StringBuilder();
+            for (int i = 0; i < slots.length; i++) {
+                Slot slot = Slot.fromPhysicalIndex(slots[i]);
+                if (slot == null) {
+                    continue;
+                }
+                if (label.length() > 0) {
+                    label.append(',');
+                }
+                label.append(slot.twoDigitLabel());
+            }
+            if (label.length() > 0) {
+                return label.toString();
+            }
+        }
         int start = photo.mergedSourceStartDisplayIndex() + 1;
         int end = start + Math.max(0, photo.mergedSourceCount() - 1);
         return String.format(Locale.US, "%02d-%02d", start, end);

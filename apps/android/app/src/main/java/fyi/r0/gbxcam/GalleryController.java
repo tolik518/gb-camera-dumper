@@ -791,17 +791,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             AppCallback<GalleryPhoto> onApplied) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
-        int start = photo.mergedSourceStartDisplayIndex();
         int count = photo.mergedSourceCount();
-        List<GalleryPhoto> sources = new ArrayList<>();
-        for (GalleryPhoto p : gallery.photos) {
-            if (!p.isMerge() && !p.deleted && p.isAlbumBacked()
-                    && p.displayIndex >= start && p.displayIndex < start + count) {
-                sources.add(p);
-            }
-        }
+        List<GalleryPhoto> sources = manualMergeSources(photo, gallery);
         if (sources.size() != count) { onLog("Source photos not found for merge update."); return; }
-        sortByDisplayIndex(sources);
         // Capture the timestamp before queuing so we can detect if a concurrent
         // onManualMergeRequested has re-created the old file while we were running.
         long taskStartedAt = System.currentTimeMillis();
@@ -838,6 +830,43 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 if (onApplied != null) onApplied.accept(updated);
             });
         });
+    }
+
+    private static List<GalleryPhoto> manualMergeSources(GalleryPhoto merge, GalleryState gallery) {
+        int[] sourceSlots = merge.mergedSourceSlots();
+        if (sourceSlots != null && sourceSlots.length > 0) {
+            List<GalleryPhoto> sources = new ArrayList<>();
+            for (int slot : sourceSlots) {
+                GalleryPhoto source = findActiveSlot(gallery, slot);
+                if (source == null) {
+                    return Collections.emptyList();
+                }
+                sources.add(source);
+            }
+            return sources;
+        }
+
+        int start = merge.mergedSourceStartDisplayIndex();
+        int count = merge.mergedSourceCount();
+        List<GalleryPhoto> sources = new ArrayList<>();
+        for (GalleryPhoto p : gallery.photos) {
+            if (!p.isMerge() && !p.deleted && p.isAlbumBacked()
+                    && p.displayIndex >= start && p.displayIndex < start + count) {
+                sources.add(p);
+            }
+        }
+        sortByDisplayIndex(sources);
+        return sources;
+    }
+
+    private static GalleryPhoto findActiveSlot(GalleryState gallery, int slot) {
+        for (GalleryPhoto photo : gallery.photos) {
+            if (!photo.isMerge() && !photo.deleted && photo.isAlbumBacked()
+                    && photo.slot.index() == slot) {
+                return photo;
+            }
+        }
+        return null;
     }
 
     /** Handles the import/export-save document picker results routed from the Activity. */

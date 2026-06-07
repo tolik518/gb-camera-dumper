@@ -17,15 +17,17 @@ final class MergeInfo {
     final String kind;
     final int sourceCount;
     final int sourceStartDisplayIndex;
+    final int[] sourceSlots;
     /** {@link MergeAlgorithm} id (was {@code mergedAlgorithm}). */
     final String algorithm;
     final boolean manual;
 
     MergeInfo(String kind, int sourceCount, int sourceStartDisplayIndex,
-            String algorithm, boolean manual) {
+            int[] sourceSlots, String algorithm, boolean manual) {
         this.kind = kind;
         this.sourceCount = sourceCount;
         this.sourceStartDisplayIndex = sourceStartDisplayIndex;
+        this.sourceSlots = copy(sourceSlots);
         this.algorithm = algorithm;
         this.manual = manual;
     }
@@ -37,5 +39,14 @@ final class MergeInfo {
 
     static String identity(String kind, int sourceStartDisplayIndex, int sourceCount) {
         return (kind == null ? "" : kind) + ":" + sourceStartDisplayIndex + ":" + sourceCount;
+    }
+
+    private static int[] copy(int[] slots) {
+        if (slots == null || slots.length == 0) {
+            return null;
+        }
+        int[] out = new int[slots.length];
+        System.arraycopy(slots, 0, out, 0, slots.length);
+        return out;
     }
 }

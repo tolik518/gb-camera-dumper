@@ -33,7 +33,8 @@ final class GalleryPhoto {
         this.ownerUserId = b.ownerUserId;
         this.merge = b.mergedRgb
                 ? new MergeInfo(b.mergedKind, b.mergedSourceCount,
-                        b.mergedSourceStartDisplayIndex, b.mergedAlgorithm, b.manualMerge)
+                        b.mergedSourceStartDisplayIndex, b.mergedSourceSlots,
+                        b.mergedAlgorithm, b.manualMerge)
                 : null;
     }
 
@@ -56,6 +57,7 @@ final class GalleryPhoto {
                 .mergedKind(mergedKind())
                 .mergedSourceCount(mergedSourceCount())
                 .mergedSourceStartDisplayIndex(mergedSourceStartDisplayIndex())
+                .mergedSourceSlots(mergedSourceSlots())
                 .mergedAlgorithm(mergedAlgorithm())
                 .manualMerge(isManualMerge());
     }
@@ -103,6 +105,15 @@ final class GalleryPhoto {
         return merge != null ? merge.sourceStartDisplayIndex : -1;
     }
 
+    int[] mergedSourceSlots() {
+        if (merge == null || merge.sourceSlots == null || merge.sourceSlots.length == 0) {
+            return null;
+        }
+        int[] out = new int[merge.sourceSlots.length];
+        System.arraycopy(merge.sourceSlots, 0, out, 0, merge.sourceSlots.length);
+        return out;
+    }
+
     String mergedAlgorithm() {
         return merge != null ? merge.algorithm : "";
     }
@@ -133,6 +144,7 @@ final class GalleryPhoto {
         private String mergedKind = "";
         private int mergedSourceCount;
         private int mergedSourceStartDisplayIndex = -1;
+        private int[] mergedSourceSlots;
         private String mergedAlgorithm = "";
         private boolean manualMerge;
 
@@ -157,6 +169,7 @@ final class GalleryPhoto {
         Builder mergedKind(String v) { this.mergedKind = v; return this; }
         Builder mergedSourceCount(int v) { this.mergedSourceCount = v; return this; }
         Builder mergedSourceStartDisplayIndex(int v) { this.mergedSourceStartDisplayIndex = v; return this; }
+        Builder mergedSourceSlots(int[] v) { this.mergedSourceSlots = v; return this; }
         Builder mergedAlgorithm(String v) { this.mergedAlgorithm = v; return this; }
         Builder manualMerge(boolean v) { this.manualMerge = v; return this; }
 
