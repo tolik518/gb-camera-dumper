@@ -495,16 +495,16 @@ final class MainScreen implements PaletteMenu.Host {
         if (gallery == null) return;
         if (selected) {
             selectMode = true;
+            gallery = gallery.withSelection(Selection.all(gallery.photos));
             for (int i = 0; i < gallery.photos.size(); i++) {
                 GalleryPhoto photo = gallery.photos.get(i);
-                photo.selected = true;
                 if (tileHolders != null && i < tileHolders.length) {
                     applySelectionToTile(tileHolders[i], photo);
                 }
             }
             updateActions();
         } else {
-            for (GalleryPhoto photo : gallery.photos) photo.selected = false;
+            gallery = gallery.withSelection(Selection.empty());
             exitSelectMode();
         }
     }
@@ -517,9 +517,10 @@ final class MainScreen implements PaletteMenu.Host {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(6));
-        tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        boolean selected = isSelected(photo);
+        tile.setBackground(tileBackground(selected, photo.deleted));
         tile.setContentDescription(photoAccessibilityLabel(photo)
-                + (photo.selected ? ", selected" : ", not selected"));
+                + (selected ? ", selected" : ", not selected"));
 
         View.OnClickListener tileClick = v -> {
             if (selectMode) togglePhotoSelection(photo);
@@ -550,15 +551,15 @@ final class MainScreen implements PaletteMenu.Host {
                 LinearLayout.LayoutParams.MATCH_PARENT));
 
         TextView selectionMarker = new TextView(context);
-        selectionMarker.setText(photo.selected ? "✓" : "");
+        selectionMarker.setText(selected ? "✓" : "");
         selectionMarker.setTextColor(accentText);
         selectionMarker.setTextSize(14);
         selectionMarker.setTypeface(Typeface.DEFAULT_BOLD);
         selectionMarker.setGravity(Gravity.CENTER);
-        selectionMarker.setBackground(checkBackground(photo.selected));
-        selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+        selectionMarker.setBackground(checkBackground(selected));
+        selectionMarker.setContentDescription(selected ? "Selected" : "Not selected");
         if (selectMode) {
-            selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+            selectionMarker.setAlpha(selected ? 1.0f : 0.74f);
         } else {
             selectionMarker.setAlpha(0f);
         }
@@ -687,8 +688,9 @@ final class MainScreen implements PaletteMenu.Host {
 
     private void togglePhotoSelection(GalleryPhoto photo) {
         if (gallery == null) return;
-        photo.selected = !photo.selected;
-        listener.onPhotoSelectionChanged(photo, photo.selected);
+        gallery = gallery.withSelection(gallery.selection.toggle(photo));
+        boolean selected = gallery.isSelected(photo);
+        listener.onPhotoSelectionChanged(photo, selected);
         int idx = gallery.photos.indexOf(photo);
         if (tileHolders != null && idx >= 0 && idx < tileHolders.length) {
             applySelectionToTile(tileHolders[idx], photo);
@@ -701,18 +703,19 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private void applySelectionToTile(TileHolder holder, GalleryPhoto photo) {
-        holder.tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        boolean selected = isSelected(photo);
+        holder.tile.setBackground(tileBackground(selected, photo.deleted));
         holder.tile.setContentDescription(photoAccessibilityLabel(photo)
-                + (photo.selected ? ", selected" : ", not selected"));
+                + (selected ? ", selected" : ", not selected"));
         holder.selectionMarker.setTextColor(accentText);
-        holder.selectionMarker.setText(photo.selected ? "✓" : "");
-        holder.selectionMarker.setBackground(checkBackground(photo.selected));
+        holder.selectionMarker.setText(selected ? "✓" : "");
+        holder.selectionMarker.setBackground(checkBackground(selected));
         if (selectMode) {
-            holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+            holder.selectionMarker.setAlpha(selected ? 1.0f : 0.74f);
         } else {
             holder.selectionMarker.setAlpha(0f);
         }
-        holder.selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+        holder.selectionMarker.setContentDescription(selected ? "Selected" : "Not selected");
     }
 
     private void exitSelectMode() {
@@ -726,6 +729,10 @@ final class MainScreen implements PaletteMenu.Host {
         for (TileHolder holder : tileHolders) {
             if (holder != null) applySelectionToTile(holder, holder.photo);
         }
+    }
+
+    private boolean isSelected(GalleryPhoto photo) {
+        return gallery != null && gallery.isSelected(photo);
     }
 
     private void refreshGalleryPalette(int paletteIndex) {

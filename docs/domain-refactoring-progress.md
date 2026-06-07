@@ -14,10 +14,10 @@ Each phase is its own commit; every phase must compile
 | B | `Palette` value object | ✅ done |
 | C | `SlotSet` (`Slot` deferred to D) | ✅ done |
 | D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`; `Slot` deferred) | ✅ done |
-| E | extract `Selection` (optional) | ⬜ not started |
+| E | extract `Selection` off `GalleryPhoto` | ✅ done |
 | F | FFI as a context boundary (merge → core) | ⬜ not started |
 
-Phases A–D landed; E–F not started.
+Phases A–E landed; F not started.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -207,6 +207,33 @@ the `mergedRgb` boolean discriminator.
 ---
 
 ## Next (when resumed)
-Phase E (optional) — extract `Selection` off `GalleryPhoto` (the mutable
-`selected` flag; ~58 sites). Or Phase F — move RGB merge into `gbcam-core`
-(largest; spans Rust). Plus the deferred `Slot` typing from C/D.
+Phase F — move RGB merge into `gbcam-core` (largest; spans Rust). Plus the
+deferred `Slot` typing from C/D.
+
+---
+
+## Phase E — `Selection`
+
+**Commit:** `9783a4b`
+
+**Goal:** remove the last mutable field from `GalleryPhoto` by moving the
+working selection into its own value object.
+
+### Changes
+- New `Selection` value object: album photos are selected by physical slot, merged
+  photos by output path, with a fallback transient key for non-album/non-merge
+  photos. It owns select-all, toggle, retention against a new photo list, and the
+  selection count projections.
+- `GalleryPhoto`: removed mutable `selected`; photos are now immutable read-model
+  values.
+- `GalleryState`: now carries `Selection`; the existing `selected*Count()` APIs
+  delegate to it, and `copySelectionFrom` is now a non-mutating state copy.
+- Readers updated across `MainScreen`, `GalleryController`, `SlotSet`, and
+  `PhotoExporter`. Single-photo sharing no longer temporarily mutates every photo;
+  it passes a one-photo `Selection` to the exporter.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ⬜ pending: selection mode/toggle/select-all/deselect-all, save/share
+  selected, delete/recover selected, move selected first, manual merge create, and
+  selection retention across palette recolor/manual merge update.

@@ -81,7 +81,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (gallery == null) return;
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && !photo.deleted && !photo.isMerge() && photo.physicalSlot >= 0) {
+            if (gallery.isSelected(photo) && !photo.deleted && !photo.isMerge() && photo.physicalSlot >= 0) {
                 sources.add(photo);
             }
         }
@@ -311,7 +311,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = photos.size() - 1; i >= 0; i--) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isManualMerge()) continue;
+            if (!gallery.isSelected(p) || !p.isManualMerge()) continue;
             photos.remove(i);
             new File(p.path).delete();
             mergeStore.removeByPath(p.path);
@@ -327,7 +327,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isActiveAlbumPhoto() || p.isMerge()) continue;
+            if (!gallery.isSelected(p) || !p.isActiveAlbumPhoto() || p.isMerge()) continue;
             photos.set(i, p.withDeleted(true));
             newSlots.add(String.valueOf(p.physicalSlot));
             changed = true;
@@ -345,7 +345,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isDeletedAlbumPhoto() || p.isMerge()) continue;
+            if (!gallery.isSelected(p) || !p.isDeletedAlbumPhoto() || p.isMerge()) continue;
             if (!localDeleted.contains(String.valueOf(p.physicalSlot))) continue;
             photos.set(i, p.withDeleted(false));
             toRestore.add(String.valueOf(p.physicalSlot));
@@ -421,7 +421,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     private static Set<String> selectedDeletedSlotKeys(GalleryState gallery) {
         Set<String> slots = new HashSet<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && photo.isDeletedAlbumPhoto() && !photo.isMerge()) {
+            if (gallery.isSelected(photo) && photo.isDeletedAlbumPhoto() && !photo.isMerge()) {
                 slots.add(String.valueOf(photo.physicalSlot));
             }
         }
@@ -714,15 +714,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 onLog("Share failed: photo is no longer in the current gallery.");
                 return;
             }
-            // Save and temporarily replace selection so exportSelectedScaled picks up just this photo.
-            boolean[] prev = new boolean[gallery.photos.size()];
-            for (int i = 0; i < gallery.photos.size(); i++) {
-                prev[i] = gallery.photos.get(i).selected;
-                gallery.photos.get(i).selected = (gallery.photos.get(i) == target);
-            }
-            doShareSelected(gallery, scale);
-            for (int i = 0; i < gallery.photos.size(); i++) gallery.photos.get(i).selected = prev[i];
-            screen.showGallery(gallery);
+            doShareSelected(gallery.withSelection(Selection.empty().with(target, true)), scale);
         });
     }
 
@@ -780,8 +772,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 GalleryState finalGallery = gallery;
                 postToUi(() -> {
                     if (recolorGeneration.get() != generation) return;
-                    GalleryState withMerges = mergeStore.inject(finalGallery);
-                    withMerges.copySelectionFrom(previous);
+                    GalleryState withMerges = mergeStore.inject(finalGallery)
+                            .copySelectionFrom(previous);
                     screen.showGallery(withMerges);
                     if (logChange) onLog("Palette changed: " + withMerges.palette.name);
                     if (onApplied != null) onApplied.run();
@@ -827,7 +819,6 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     new File(updated.path).delete();
                     return;
                 }
-                updated.selected = photo.selected;
                 if (!mergeStore.replaceVariant(photo.path, updated)) {
                     new File(updated.path).delete();
                     return;
@@ -838,7 +829,11 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 for (int i = 0; i < photos.size(); i++) {
                     if (photos.get(i).path.equals(photo.path)) { photos.set(i, updated); break; }
                 }
-                screen.showGallery(current.withPhotos(photos));
+                Selection selection = current.selection;
+                if (current.isSelected(photo)) {
+                    selection = selection.with(photo, false).with(updated, true);
+                }
+                screen.showGallery(current.withPhotos(photos).withSelection(selection));
                 onLog("Merge updated: " + order + " / " + RgbMergeDetector.algorithmShortLabel(algorithm));
                 if (onApplied != null) onApplied.accept(updated);
             });

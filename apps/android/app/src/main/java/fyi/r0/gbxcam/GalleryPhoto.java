@@ -16,7 +16,6 @@ final class GalleryPhoto {
     final String ownerUserId;
     /** Merge descriptor when this photo is an RGB merge; {@code null} for ordinary photos. */
     final MergeInfo merge;
-    boolean selected;
 
     private GalleryPhoto(Builder b) {
         this.name = b.name;
@@ -43,7 +42,7 @@ final class GalleryPhoto {
         return new Builder(name, path, displayIndex, physicalSlot, width, height);
     }
 
-    /** A builder seeded with this photo's fields (mutable {@code selected} is not copied). */
+    /** A builder seeded with this photo's fields. */
     Builder toBuilder() {
         return new Builder(name, path, displayIndex, physicalSlot, width, height)
                 .indexedPixels(indexedPixels)

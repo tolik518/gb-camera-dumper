@@ -114,7 +114,7 @@ final class PhotoExporter {
         ContentResolver resolver = context.getContentResolver();
         ArrayList<Uri> uris = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (!isExportable(photo, true, includeDeleted)) continue;
+            if (!isExportable(gallery, photo, true, includeDeleted)) continue;
             String jpegName = jpegName(photo.name);
             ContentValues values = new ContentValues();
             values.put(MediaStore.Images.Media.DISPLAY_NAME, jpegName);
@@ -148,7 +148,7 @@ final class PhotoExporter {
         File out = ensureDir(new File(AppFiles.appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
                 "Cannot create dir");
         for (GalleryPhoto photo : gallery.photos) {
-            if (!isExportable(photo, true, includeDeleted)) continue;
+            if (!isExportable(gallery, photo, true, includeDeleted)) continue;
             String jpegName = jpegName(photo.name);
             try (FileOutputStream stream = new FileOutputStream(new File(out, jpegName))) {
                 writeScaledJpeg(photo, palette, scale, stream);
@@ -214,7 +214,7 @@ final class PhotoExporter {
         ContentResolver resolver = context.getContentResolver();
         ArrayList<Uri> uris = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (!isExportable(photo, selectedOnly, includeDeleted)) {
+            if (!isExportable(gallery, photo, selectedOnly, includeDeleted)) {
                 continue;
             }
 
@@ -259,7 +259,7 @@ final class PhotoExporter {
         File out = ensureDir(new File(AppFiles.appFilesDir(context, Environment.DIRECTORY_PICTURES), album),
                 "Could not create export directory");
         for (GalleryPhoto photo : gallery.photos) {
-            if (isExportable(photo, selectedOnly, includeDeleted)) {
+            if (isExportable(gallery, photo, selectedOnly, includeDeleted)) {
                 try (FileOutputStream stream = new FileOutputStream(new File(out, photo.name))) {
                     writePhoto(photo, palette, stream);
                 }
@@ -271,15 +271,15 @@ final class PhotoExporter {
     private static int eligiblePhotoCount(GalleryState gallery, boolean selectedOnly, boolean includeDeleted) {
         int count = 0;
         for (GalleryPhoto photo : gallery.photos) {
-            if (isExportable(photo, selectedOnly, includeDeleted)) {
+            if (isExportable(gallery, photo, selectedOnly, includeDeleted)) {
                 count++;
             }
         }
         return count;
     }
 
-    private static boolean isExportable(GalleryPhoto photo, boolean selectedOnly, boolean includeDeleted) {
-        if (selectedOnly && !photo.selected) {
+    private static boolean isExportable(GalleryState gallery, GalleryPhoto photo, boolean selectedOnly, boolean includeDeleted) {
+        if (selectedOnly && !gallery.isSelected(photo)) {
             return false;
         }
         return includeDeleted || !photo.deleted;

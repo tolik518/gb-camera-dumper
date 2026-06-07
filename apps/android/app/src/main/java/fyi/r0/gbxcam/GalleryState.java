@@ -17,6 +17,7 @@ final class GalleryState {
     final int validationErrors;
     final int validationWarnings;
     final List<GalleryPhoto> photos;
+    final Selection selection;
 
     GalleryState(
             String connected,
@@ -26,6 +27,19 @@ final class GalleryState {
             int validationErrors,
             int validationWarnings,
             List<GalleryPhoto> photos) {
+        this(connected, savePath, outputDir, palette, validationErrors, validationWarnings,
+                photos, Selection.empty());
+    }
+
+    private GalleryState(
+            String connected,
+            String savePath,
+            String outputDir,
+            Palette palette,
+            int validationErrors,
+            int validationWarnings,
+            List<GalleryPhoto> photos,
+            Selection selection) {
         this.connected = connected;
         this.savePath = savePath;
         this.outputDir = outputDir;
@@ -33,6 +47,7 @@ final class GalleryState {
         this.validationErrors = validationErrors;
         this.validationWarnings = validationWarnings;
         this.photos = photos;
+        this.selection = selection.retainFor(photos);
     }
 
     static GalleryState fromJson(String json) throws JSONException {
@@ -81,7 +96,8 @@ final class GalleryState {
                 palette,
                 validationErrors,
                 validationWarnings,
-                photos);
+                photos,
+                selection);
     }
 
     /** A copy of this state with a different photos list; all other fields preserved. */
@@ -93,75 +109,48 @@ final class GalleryState {
                 palette,
                 validationErrors,
                 validationWarnings,
-                photos);
+                photos,
+                selection);
+    }
+
+    GalleryState withSelection(Selection selection) {
+        return new GalleryState(
+                connected,
+                savePath,
+                outputDir,
+                palette,
+                validationErrors,
+                validationWarnings,
+                photos,
+                selection);
+    }
+
+    boolean isSelected(GalleryPhoto photo) {
+        return selection.contains(photo);
     }
 
     int selectedCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected) {
-                count++;
-            }
-        }
-        return count;
+        return selection.count(photos);
     }
 
     int selectedManualMergeCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isManualMerge()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.manualMergeCount(photos);
     }
 
     int selectedMergeableCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isMergeableSource()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.mergeableCount(photos);
     }
 
     int selectedActiveCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isActiveAlbumPhoto()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.activeCount(photos);
     }
 
     int selectedDeletedCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isDeletedAlbumPhoto()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.deletedCount(photos);
     }
 
-    void copySelectionFrom(GalleryState previous) {
-        for (GalleryPhoto photo : photos) {
-            for (GalleryPhoto old : previous.photos) {
-                if (sameSelectionIdentity(photo, old)) {
-                    photo.selected = old.selected;
-                    break;
-                }
-            }
-        }
-    }
-
-    private static boolean sameSelectionIdentity(GalleryPhoto photo, GalleryPhoto old) {
-        if (photo.isAlbumBacked() && old.isAlbumBacked()) {
-            return photo.physicalSlot == old.physicalSlot;
-        }
-        return photo.isMerge() && old.isMerge() && photo.path.equals(old.path);
+    GalleryState copySelectionFrom(GalleryState previous) {
+        return withSelection(previous.selection);
     }
 
     private static byte[] decodeIndexedPixels(String encoded) {

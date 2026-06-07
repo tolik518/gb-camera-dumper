@@ -23,7 +23,7 @@ final class SlotSet {
     static SlotSet selected(GalleryState gallery, boolean deleted) {
         List<Integer> slots = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && photo.deleted == deleted && photo.isAlbumBacked()) {
+            if (gallery.isSelected(photo) && photo.deleted == deleted && photo.isAlbumBacked()) {
                 slots.add(photo.physicalSlot);
             }
         }
@@ -51,7 +51,7 @@ final class SlotSet {
 
     private static void appendActive(List<Integer> slots, GalleryState gallery, boolean selected) {
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.isActiveAlbumPhoto() && photo.selected == selected) {
+            if (photo.isActiveAlbumPhoto() && gallery.isSelected(photo) == selected) {
                 slots.add(photo.physicalSlot);
             }
         }
