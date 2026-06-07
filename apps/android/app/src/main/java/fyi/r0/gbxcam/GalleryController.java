@@ -319,7 +319,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             changed = true;
         }
         if (changed) mergeStore.save();
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     private GalleryState markSelectedCameraPhotosDeletedLocally(GalleryState gallery) {
@@ -335,7 +335,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         }
         if (!changed) return gallery;
         settings.addLocallyDeletedSlots(newSlots);
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     private GalleryState recoverSelectedCameraPhotosLocally(GalleryState gallery) {
@@ -354,7 +354,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         }
         if (!changed) return gallery;
         settings.removeLocallyDeletedSlots(toRestore);
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     @Override
