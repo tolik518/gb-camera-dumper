@@ -22,13 +22,6 @@ final class RgbMergeDetector {
     static final String[] ALGORITHM_IDS = MergeAlgorithm.allIds();
     static final String[] ALGORITHM_LABELS = MergeAlgorithm.allLabels();
 
-    // --- Detection thresholds --------------------------------------------------
-
-    private static final int RGB_PHASH_MAX_DISTANCE  = 14;
-    private static final int CRGB_PHASH_MAX_DISTANCE = 22;
-    private static final int DHASH_MAX_DISTANCE      = 24;
-    private static final int SHIFT_RANGE             = 8;
-    private static final double NCC_MIN              = 0.65;
     private static final int IMAGE_WIDTH             = 128;
     private static final int IMAGE_HEIGHT            = 112;
 
@@ -38,7 +31,6 @@ final class RgbMergeDetector {
 
     static GalleryState addAutoMergedPhotos(
             GalleryState gallery,
-            List<GalleryPhoto> sourcePhotos,
             File outputRoot,
             String savePath,
             String order4,
@@ -46,48 +38,12 @@ final class RgbMergeDetector {
             String defaultAlgorithm,
             Map<String, String> algorithmOverrides) {
 
-        List<GalleryPhoto> output = new ArrayList<>();
         File mergeDir = new File(outputRoot, "rgb-merged");
         deleteOldMergedFiles(mergeDir);
 
         GalleryState coreMerged = addAutoMergedPhotosFromCore(gallery, mergeDir, savePath,
                 order4, order3, defaultAlgorithm, algorithmOverrides);
-        if (coreMerged != null) {
-            return coreMerged;
-        }
-
-        int mergedCount = 0;
-
-        for (int i = 0; i < gallery.photos.size();) {
-            MergeCandidate candidate = null;
-            if (i + 4 <= gallery.photos.size()) {
-                candidate = evaluate(gallery.photos, sourcePhotos, i, 4, mergeDir, mergedCount + 1,
-                        savePath, order4, defaultAlgorithm, algorithmOverrides);
-            }
-            if (candidate == null && i + 3 <= gallery.photos.size()) {
-                candidate = evaluate(gallery.photos, sourcePhotos, i, 3, mergeDir, mergedCount + 1,
-                        savePath, order3, defaultAlgorithm, algorithmOverrides);
-            }
-
-            if (candidate == null) {
-                output.add(gallery.photos.get(i));
-                i++;
-                continue;
-            }
-
-            for (int s = 0; s < candidate.count; s++) {
-                output.add(gallery.photos.get(i + s));
-            }
-            output.add(candidate.photo);
-            mergedCount++;
-            i += candidate.count;
-        }
-
-        if (mergedCount == 0) {
-            return gallery;
-        }
-
-        return gallery.withPhotos(output);
+        return coreMerged != null ? coreMerged : gallery;
     }
 
     private static GalleryState addAutoMergedPhotosFromCore(
@@ -403,73 +359,7 @@ final class RgbMergeDetector {
         }
     }
 
-    private static MergeCandidate evaluate(
-            List<GalleryPhoto> photos,
-            List<GalleryPhoto> sourcePhotos,
-            int start, int count,
-            File mergeDir, int mergeNumber,
-            String savePath,
-            String order,
-            String defaultAlgorithm,
-            Map<String, String> algorithmOverrides) {
-
-        GalleryPhoto[] source = new GalleryPhoto[count];
-        ImageData[] images = new ImageData[count];
-        for (int offset = 0; offset < count; offset++) {
-            GalleryPhoto photo = photos.get(start + offset);
-            if (photo.deleted || photo.isMerge() || !photo.isAlbumBacked()
-                    || photo.displayIndex != photos.get(start).displayIndex + offset) {
-                return null;
-            }
-            if (start + offset >= sourcePhotos.size()) return null;
-            source[offset] = photo;
-            images[offset] = ImageData.from(sourcePhotos.get(start + offset));
-            if (images[offset] == null) return null;
-        }
-
-        MergeLayout layout = layoutFor(images, count, order);
-        if (layout == null) return null;
-
-        int reference = referenceIndex(images, layout);
-        for (int i = 0; i < images.length; i++) {
-            if (i != reference && bestNcc(images[reference].blurred, images[i].blurred) < NCC_MIN) {
-                return null;
-            }
-        }
-
-        if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
-
-        // Resolve algorithm
-        String identity = MergeInfo.identity(layout.label, source[0].displayIndex, count);
-        String requested = (algorithmOverrides != null && algorithmOverrides.containsKey(identity))
-                ? algorithmOverrides.get(identity)
-                : defaultAlgorithm;
-        MergeAlgorithm resolved = MergeAlgorithm.resolve(requested, layout.clearIndex >= 0);
-
-        File out = new File(mergeDir, String.format(Locale.US, "RGB_%02d_from_%02d_%s.png",
-                mergeNumber, source[0].displayIndex + 1, layout.label));
-        if (!writeAutoMergePng(source, count, savePath, images, layout, out, resolved)) return null;
-
-        GalleryPhoto merged = GalleryPhoto.builder(
-                        out.getName(), out.getAbsolutePath(),
-                        source[0].displayIndex, -1,
-                        IMAGE_WIDTH, IMAGE_HEIGHT)
-                .metadataValid(true)
-                .mergedRgb(true)
-                .mergedKind(layout.label)
-                .mergedSourceCount(count)
-                .mergedSourceStartDisplayIndex(source[0].displayIndex)
-                .mergedAlgorithm(resolved.id())
-                .build();
-        return new MergeCandidate(count, merged);
-    }
-
     // --- Layout helpers --------------------------------------------------------
-
-    private static MergeLayout layoutFor(ImageData[] images, int count, String order) {
-        MergeLayout layout = count == 3 ? layoutFromOrder3(order) : layoutFromOrder4(order);
-        return layout != null && hashesPass(images, layout) ? layout : null;
-    }
 
     static MergeLayout layoutFromOrder4(String order) {
         if (order == null || order.length() != 4) return null;
@@ -502,54 +392,7 @@ final class RgbMergeDetector {
         return new MergeLayout(order, -1, r, g, b);
     }
 
-    private static boolean hashesPass(ImageData[] images, MergeLayout layout) {
-        int[] ci = layout.colorIndices;
-        for (int i = 0; i < ci.length; i++) {
-            for (int j = i + 1; j < ci.length; j++) {
-                if (Long.bitCount(images[ci[i]].pHash ^ images[ci[j]].pHash) > layout.pHashMaxDistance) return false;
-                if (Long.bitCount(images[ci[i]].dHash ^ images[ci[j]].dHash) > DHASH_MAX_DISTANCE) return false;
-            }
-        }
-        return true;
-    }
-
-    private static int referenceIndex(ImageData[] images, MergeLayout layout) {
-        int[] ci = layout.colorIndices;
-        int best = ci[0];
-        double bestAvg = Double.MAX_VALUE;
-        for (int idx : ci) {
-            double total = 0.0;
-            for (int jdx : ci) {
-                if (idx != jdx) total += Long.bitCount(images[idx].pHash ^ images[jdx].pHash);
-            }
-            double avg = total / Math.max(1, ci.length - 1);
-            if (avg < bestAvg) { bestAvg = avg; best = idx; }
-        }
-        return best;
-    }
-
     // --- PNG writing & algorithm dispatch -------------------------------------
-
-    private static boolean writeAutoMergePng(
-            GalleryPhoto[] sources,
-            int count,
-            String savePath,
-            ImageData[] images,
-            MergeLayout layout,
-            File out,
-            MergeAlgorithm algorithm) {
-        if (savePath != null && !savePath.isEmpty() && allAlbumBacked(sources, count)) {
-            try {
-                NativeGbcam.mergeRgbFromSave(savePath, out.getAbsolutePath(),
-                        sourceSlotsCsv(sources, count), layout.label, algorithm.id());
-                return out.isFile();
-            } catch (Throwable ignored) {
-                if (out.exists() && !out.delete()) out.deleteOnExit();
-            }
-        }
-
-        return writeMergedPng(images, layout, out, algorithm);
-    }
 
     private static boolean writeMergedPng(ImageData[] images, MergeLayout layout, File out, MergeAlgorithm algorithm) {
         int[] pixels = mergePixels(images, layout, algorithm);
@@ -782,55 +625,7 @@ final class RgbMergeDetector {
         return Math.min(255, Math.max(0, v));
     }
 
-    // --- Perceptual hashing & NCC -------------------------------------------
-
-    private static double bestNcc(int[] reference, int[] candidate) {
-        double best = -1.0;
-        for (int dy = -SHIFT_RANGE; dy <= SHIFT_RANGE; dy++) {
-            for (int dx = -SHIFT_RANGE; dx <= SHIFT_RANGE; dx++) {
-                best = Math.max(best, ncc(reference, candidate, dx, dy));
-            }
-        }
-        return best;
-    }
-
-    private static double ncc(int[] a, int[] b, int dx, int dy) {
-        int xStart = Math.max(0, dx);
-        int xEnd   = Math.min(IMAGE_WIDTH,  IMAGE_WIDTH  + dx);
-        int yStart = Math.max(0, dy);
-        int yEnd   = Math.min(IMAGE_HEIGHT, IMAGE_HEIGHT + dy);
-        int count  = Math.max(0, xEnd - xStart) * Math.max(0, yEnd - yStart);
-        if (count == 0) return -1.0;
-
-        double sumA = 0, sumB = 0;
-        for (int y = yStart; y < yEnd; y++) {
-            for (int x = xStart; x < xEnd; x++) {
-                sumA += a[y * IMAGE_WIDTH + x];
-                sumB += b[(y - dy) * IMAGE_WIDTH + (x - dx)];
-            }
-        }
-        double meanA = sumA / count, meanB = sumB / count;
-        double num = 0, dA = 0, dB = 0;
-        for (int y = yStart; y < yEnd; y++) {
-            for (int x = xStart; x < xEnd; x++) {
-                double da = a[y * IMAGE_WIDTH + x] - meanA;
-                double db = b[(y - dy) * IMAGE_WIDTH + (x - dx)] - meanB;
-                num += da * db;
-                dA  += da * da;
-                dB  += db * db;
-            }
-        }
-        double denom = Math.sqrt(dA * dB);
-        return denom == 0.0 ? -1.0 : num / denom;
-    }
-
     // --- Inner classes -------------------------------------------------------
-
-    private static final class MergeCandidate {
-        final int count;
-        final GalleryPhoto photo;
-        MergeCandidate(int count, GalleryPhoto photo) { this.count = count; this.photo = photo; }
-    }
 
     private static final class CoreMergeCandidate {
         final int[] sourceSlots;
@@ -859,8 +654,6 @@ final class RgbMergeDetector {
         final int redIndex;
         final int greenIndex;
         final int blueIndex;
-        final int[] colorIndices;
-        final int pHashMaxDistance;
 
         MergeLayout(String label, int clearIndex, int redIndex, int greenIndex, int blueIndex) {
             this.label = label;
@@ -868,19 +661,14 @@ final class RgbMergeDetector {
             this.redIndex = redIndex;
             this.greenIndex = greenIndex;
             this.blueIndex = blueIndex;
-            this.colorIndices = new int[]{ redIndex, greenIndex, blueIndex };
-            this.pHashMaxDistance = clearIndex >= 0 ? CRGB_PHASH_MAX_DISTANCE : RGB_PHASH_MAX_DISTANCE;
         }
     }
 
     private static final class ImageData {
         final int[] gray;
-        final int[] blurred;
-        final long pHash;
-        final long dHash;
 
-        private ImageData(int[] gray, int[] blurred, long pHash, long dHash) {
-            this.gray = gray; this.blurred = blurred; this.pHash = pHash; this.dHash = dHash;
+        private ImageData(int[] gray) {
+            this.gray = gray;
         }
 
         static ImageData from(GalleryPhoto photo) {
@@ -904,7 +692,7 @@ final class RgbMergeDetector {
                             + 0.587f * ((c >> 8) & 0xFF)
                             + 0.114f * (c & 0xFF));
                 }
-                return new ImageData(gray, blur(gray), pHash(gray), dHash(gray));
+                return new ImageData(gray);
             } finally {
                 if (scaled != bitmap) scaled.recycle();
                 bitmap.recycle();
@@ -932,59 +720,4 @@ final class RgbMergeDetector {
         return out;
     }
 
-    private static long dHash(int[] gray) {
-        int[] small = resize(gray, 9, 8);
-        long hash = 0L;
-        int bit = 0;
-        for (int y = 0; y < 8; y++) {
-            for (int x = 0; x < 8; x++) {
-                if (small[y * 9 + x] > small[y * 9 + x + 1]) hash |= 1L << bit;
-                bit++;
-            }
-        }
-        return hash;
-    }
-
-    private static long pHash(int[] gray) {
-        int[] small = resize(gray, 32, 32);
-        double[] coeffs = new double[64];
-        int index = 0;
-        for (int v = 0; v < 8; v++) {
-            for (int u = 0; u < 8; u++) {
-                coeffs[index++] = dctCoefficient(small, u, v);
-            }
-        }
-        double sum = 0.0;
-        for (int i = 1; i < coeffs.length; i++) sum += coeffs[i];
-        double avg = sum / (coeffs.length - 1);
-        long hash = 0L;
-        for (int i = 1; i < coeffs.length; i++) {
-            if (coeffs[i] > avg) hash |= 1L << (i - 1);
-        }
-        return hash;
-    }
-
-    private static double dctCoefficient(int[] values, int u, int v) {
-        double sum = 0.0;
-        for (int y = 0; y < 32; y++) {
-            for (int x = 0; x < 32; x++) {
-                sum += values[y * 32 + x]
-                        * Math.cos(((2 * x + 1) * u * Math.PI) / 64.0)
-                        * Math.cos(((2 * y + 1) * v * Math.PI) / 64.0);
-            }
-        }
-        return sum;
-    }
-
-    private static int[] resize(int[] gray, int width, int height) {
-        int[] out = new int[width * height];
-        for (int y = 0; y < height; y++) {
-            int sy = Math.min(IMAGE_HEIGHT - 1, (y * IMAGE_HEIGHT) / height);
-            for (int x = 0; x < width; x++) {
-                int sx = Math.min(IMAGE_WIDTH - 1, (x * IMAGE_WIDTH) / width);
-                out[y * width + x] = gray[sy * IMAGE_WIDTH + sx];
-            }
-        }
-        return out;
-    }
 }

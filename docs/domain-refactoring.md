@@ -309,13 +309,13 @@ rendering remains in Java from `indexedPixels`.
   reference-channel choice, candidate selection, threshold constants, and
   algorithm override identity resolution. Current tests cover synthetic
   candidates and rejection cases.
-- **F7 mostly done:** Android calls
+- **F7 done:** Android calls
   `NativeGbcam.detectRgbMergesFromSave(...)` first, validates physical slots and
-  contiguous display indices in Java, and falls back to the old Java detector if
-  native detection or native PNG writing fails.
-- **F8 remaining:** delete duplicated Java production detection/composition only
-  after a real-save/device parity pass shows the fallback is not needed. Keep the
-  preview code until a core preview hook exists, or document it as UI-only.
+  contiguous display indices in Java, and writes accepted PNGs through core.
+- **F8 done:** after a device smoke test loaded the cached save and auto-merged 2
+  RGB sets through the native path, the old Java production detector/fallback was
+  removed. Java still keeps merge composition for photo-detail previews and the
+  manual-merge non-save-backed fallback.
 - **F9 done:** `gallery_json` writes grayscale album PNGs. Palette switching does
   not rewrite disk cache and RGB/CRGB merge PNGs remain RGB outputs because they
   are palette-independent merge results.
@@ -330,11 +330,9 @@ read-model rename (`GalleryState` → `GalleryView`, or just a class-doc note
 saying it *is* a read model). Land these whenever you're already editing the
 file; never as a standalone churn commit.
 
-Remaining commit order: real-save/device parity pass → remove Java production
-fallback/detection → optional core preview hook or document Java preview as
+Remaining optional polish: add a core preview hook if photo-detail previews need
+to match saved output exactly; otherwise keep the Java preview path documented as
 UI-only.
-switch with fallback → F8 Java cleanup → F9 palette-independent cached album
-PNGs. F9 can move earlier if it stays isolated from RGB detection.
 
 ---
 

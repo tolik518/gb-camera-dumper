@@ -20,12 +20,12 @@ Each phase is its own commit; every phase must compile
 | F2 | save-based RGB merge FFI hook | ✅ done |
 | F3 | manual merge writes through core | ✅ done |
 | F4 | auto merge writes through core | ✅ done |
-| F5-F8 | move auto detection/parity/cleanup | ⬜ remaining |
-| F9 | palette-independent cached album PNGs | ⬜ remaining |
+| F5-F8 | move auto detection/parity/cleanup | ✅ done |
+| F9 | palette-independent cached album PNGs | ✅ done |
 
-Phases A–E, Slot, and Phase F1-F4 landed. What remains is the
-auto-detection half of Phase F, cleanup after parity is proven, and the
-palette-cache boundary follow-up from `android-refactoring.md` §7.2.
+Phases A–E, Slot, and Phase F landed. Remaining work is optional polish only:
+move the Java preview path to core if exact preview parity becomes important, or
+keep it documented as UI-only.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -427,20 +427,20 @@ asks Rust for candidates, validates every candidate against the transformed Java
 gallery (current display order, locally deleted state, no merge photos, physical
 slot match), and writes accepted PNGs through `mergeRgbFromSave`.
 
-The old Java detector/composer remains as a production fallback if native
-detection or native PNG writing throws. Fallback is intentionally not deleted
-until a real-save/device pass confirms native parity. Phone testing was skipped
-for this pass at user request.
+Device smoke test on 2026-06-07 installed the APK, loaded the cached save, and
+auto-merged 2 RGB sets through the native path with no JNI/linkage/runtime
+errors. That cleared the trust gate for removing Java production fallback code.
 
 ### F8 — cleanup after trust
 
 **Goal:** remove the duplicated Java RGB merge implementation once Rust detection
 has enough coverage.
 
-**Status (2026-06-07):** still trust-gated. Production prefers Rust detection and
-Rust composition now, but Java detection/composition remains for fallback and UI
-preview. Removing it before real-save/device parity would make regressions harder
-to recover from.
+**Status (2026-06-07):** done. The Java production auto detector, pHash/dHash,
+shifted NCC, and auto-write fallback were removed after the device smoke test.
+Production auto detection and PNG composition now live in core. Java still keeps
+the merge composition code needed by photo-detail previews and as a manual-merge
+fallback when sources are not save-backed.
 
 **Plan:**
 - Delete Java composition algorithms and detection helpers that are no longer used
@@ -455,8 +455,8 @@ to recover from.
   `SlotSet`; they remain Java presentation/read-model language even after Rust
   owns detection.
 
-**Done when:** production RGB merge detection and PNG composition both live in
-core, Java has no duplicate production detector, and all persisted JSON/prefs stay
+**Done:** production RGB merge detection and PNG composition both live in core,
+Java has no duplicate production detector, and all persisted JSON/prefs stay
 compatible.
 
 ### F9 — palette-independent cached album PNGs
