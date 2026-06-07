@@ -291,7 +291,7 @@ composition algorithms first, without changing Android behavior yet.
 
 ## Phase F2 — save-based RGB merge FFI hook
 
-**Commit:** pending
+**Commit:** `e4cfe09`
 
 **Goal:** expose a narrow core-backed RGB merge operation to Android without
 changing runtime behavior yet.
