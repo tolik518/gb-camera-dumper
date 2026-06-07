@@ -47,7 +47,7 @@ final class PhotoRenderer {
         }
     }
 
-    private static boolean canRenderIndexed(GalleryPhoto photo) {
+    static boolean canRenderIndexed(GalleryPhoto photo) {
         if (photo.isMerge() || photo.indexedPixels == null || photo.width <= 0 || photo.height <= 0) {
             return false;
         }

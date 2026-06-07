@@ -757,12 +757,14 @@ final class MainScreen implements PaletteMenu.Host {
             return;
         }
 
-        int gen = displayGeneration.incrementAndGet();
+        displayGeneration.incrementAndGet();
         for (TileHolder holder : tileHolders) {
             if (holder == null) {
                 continue;
             }
-            renderPhotoInto(holder.photo, holder.image, gen, paletteIndex);
+            if (PhotoRenderer.canRenderIndexed(holder.photo)) {
+                renderPhotoIntoNow(holder.photo, holder.image, paletteIndex);
+            }
             applySelectionToTile(holder, holder.photo);
         }
     }
@@ -782,8 +784,12 @@ final class MainScreen implements PaletteMenu.Host {
                 });
             });
         } else {
-            image.setImageBitmap(PhotoRenderer.renderBitmap(photo, palette));
+            renderPhotoIntoNow(photo, image, paletteIndex);
         }
+    }
+
+    private void renderPhotoIntoNow(GalleryPhoto photo, ImageView image, int paletteIndex) {
+        image.setImageBitmap(PhotoRenderer.renderBitmap(photo, paletteColorsForIndex(paletteIndex)));
     }
 
     private GradientDrawable tileBackground(boolean selected, boolean deleted) {
