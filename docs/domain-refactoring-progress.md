@@ -214,7 +214,7 @@ deferred `Slot` typing from C/D.
 
 ## Phase E — `Selection`
 
-**Commit:** `9783a4b`
+**Commit:** `3e96cf4`
 
 **Goal:** remove the last mutable field from `GalleryPhoto` by moving the
 working selection into its own value object.
