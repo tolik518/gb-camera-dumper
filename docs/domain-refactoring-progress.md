@@ -267,7 +267,7 @@ normal gallery readers.
 
 ## Phase F1 — RGB merge composition in core
 
-**Commit:** pending
+**Commit:** `c80953e`
 
 **Goal:** start moving RGB merge into `gbcam-core` by extracting the pure channel
 composition algorithms first, without changing Android behavior yet.
