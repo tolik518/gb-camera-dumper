@@ -345,7 +345,7 @@ hook while keeping auto-merge detection/composition unchanged.
 
 ## Phase F4 — auto-merge composition through core FFI
 
-**Commit:** `94e0685`
+**Commit:** `61493de`
 
 **Goal:** keep Java's auto-merge detection/order selection intact, but route the
 accepted auto-merge PNG writer through the same save-based core merge hook used by
