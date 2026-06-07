@@ -13,18 +13,18 @@ import java.util.List;
  * rather than on {@code GalleryState} (the read model).
  */
 final class SlotSet {
-    private final List<Integer> slots;
+    private final List<Slot> slots;
 
-    private SlotSet(List<Integer> slots) {
+    private SlotSet(List<Slot> slots) {
         this.slots = slots;
     }
 
     /** Selected album photos matching {@code deleted}, in gallery order. */
     static SlotSet selected(GalleryState gallery, boolean deleted) {
-        List<Integer> slots = new ArrayList<>();
+        List<Slot> slots = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
             if (gallery.isSelected(photo) && photo.deleted == deleted && photo.isAlbumBacked()) {
-                slots.add(photo.physicalSlot);
+                slots.add(photo.slot);
             }
         }
         return new SlotSet(slots);
@@ -32,10 +32,10 @@ final class SlotSet {
 
     /** All active (non-deleted, album-backed) photos, in gallery order. */
     static SlotSet active(GalleryState gallery) {
-        List<Integer> slots = new ArrayList<>();
+        List<Slot> slots = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
             if (photo.isActiveAlbumPhoto()) {
-                slots.add(photo.physicalSlot);
+                slots.add(photo.slot);
             }
         }
         return new SlotSet(slots);
@@ -43,16 +43,16 @@ final class SlotSet {
 
     /** Active photos with selected ones first, preserving order within each group. */
     static SlotSet selectedActiveFirst(GalleryState gallery) {
-        List<Integer> slots = new ArrayList<>();
+        List<Slot> slots = new ArrayList<>();
         appendActive(slots, gallery, true);
         appendActive(slots, gallery, false);
         return new SlotSet(slots);
     }
 
-    private static void appendActive(List<Integer> slots, GalleryState gallery, boolean selected) {
+    private static void appendActive(List<Slot> slots, GalleryState gallery, boolean selected) {
         for (GalleryPhoto photo : gallery.photos) {
             if (photo.isActiveAlbumPhoto() && gallery.isSelected(photo) == selected) {
-                slots.add(photo.physicalSlot);
+                slots.add(photo.slot);
             }
         }
     }
@@ -64,11 +64,11 @@ final class SlotSet {
     /** Comma-separated slot numbers, e.g. {@code "3,7,12"} — the FFI wire form. */
     String toCsv() {
         StringBuilder csv = new StringBuilder();
-        for (int slot : slots) {
+        for (Slot slot : slots) {
             if (csv.length() > 0) {
                 csv.append(',');
             }
-            csv.append(slot);
+            csv.append(slot.index());
         }
         return csv.toString();
     }

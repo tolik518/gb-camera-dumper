@@ -4,7 +4,7 @@ final class GalleryPhoto {
     final String name;
     final String path;
     final int displayIndex;
-    final int physicalSlot;
+    final Slot slot;
     final int width;
     final int height;
     final byte[] indexedPixels;
@@ -21,7 +21,7 @@ final class GalleryPhoto {
         this.name = b.name;
         this.path = b.path;
         this.displayIndex = b.displayIndex;
-        this.physicalSlot = b.physicalSlot;
+        this.slot = Slot.fromPhysicalIndex(b.physicalSlot);
         this.width = b.width;
         this.height = b.height;
         this.indexedPixels = b.indexedPixels;
@@ -44,7 +44,7 @@ final class GalleryPhoto {
 
     /** A builder seeded with this photo's fields. */
     Builder toBuilder() {
-        return new Builder(name, path, displayIndex, physicalSlot, width, height)
+        return new Builder(name, path, displayIndex, physicalSlot(), width, height)
                 .indexedPixels(indexedPixels)
                 .blank(blank)
                 .deleted(deleted)
@@ -61,7 +61,7 @@ final class GalleryPhoto {
     }
 
     boolean isAlbumBacked() {
-        return physicalSlot >= 0;
+        return slot != null;
     }
 
     boolean isActiveAlbumPhoto() {
@@ -83,6 +83,10 @@ final class GalleryPhoto {
 
     boolean isMergeableSource() {
         return !deleted && !isMerge() && isAlbumBacked();
+    }
+
+    int physicalSlot() {
+        return slot != null ? slot.index() : -1;
     }
 
     // Null-safe accessors preserving the former field semantics (ordinary photos

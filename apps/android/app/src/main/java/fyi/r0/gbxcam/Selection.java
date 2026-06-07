@@ -119,7 +119,7 @@ final class Selection {
 
     private static String key(GalleryPhoto photo) {
         if (photo.isAlbumBacked()) {
-            return "slot:" + photo.physicalSlot;
+            return "slot:" + photo.slot.key();
         }
         if (photo.isMerge()) {
             return "merge:" + photo.path;

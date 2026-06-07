@@ -81,7 +81,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (gallery == null) return;
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (gallery.isSelected(photo) && !photo.deleted && !photo.isMerge() && photo.physicalSlot >= 0) {
+            if (gallery.isSelected(photo) && !photo.deleted && !photo.isMerge() && photo.isAlbumBacked()) {
                 sources.add(photo);
             }
         }
@@ -329,7 +329,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             GalleryPhoto p = photos.get(i);
             if (!gallery.isSelected(p) || !p.isActiveAlbumPhoto() || p.isMerge()) continue;
             photos.set(i, p.withDeleted(true));
-            newSlots.add(String.valueOf(p.physicalSlot));
+            newSlots.add(p.slot.key());
             changed = true;
         }
         if (!changed) return gallery;
@@ -346,9 +346,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
             if (!gallery.isSelected(p) || !p.isDeletedAlbumPhoto() || p.isMerge()) continue;
-            if (!localDeleted.contains(String.valueOf(p.physicalSlot))) continue;
+            if (!localDeleted.contains(p.slot.key())) continue;
             photos.set(i, p.withDeleted(false));
-            toRestore.add(String.valueOf(p.physicalSlot));
+            toRestore.add(p.slot.key());
             changed = true;
         }
         if (!changed) return gallery;
@@ -422,7 +422,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         Set<String> slots = new HashSet<>();
         for (GalleryPhoto photo : gallery.photos) {
             if (gallery.isSelected(photo) && photo.isDeletedAlbumPhoto() && !photo.isMerge()) {
-                slots.add(String.valueOf(photo.physicalSlot));
+                slots.add(photo.slot.key());
             }
         }
         return slots;
@@ -740,7 +740,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     && left.path.equals(right.path);
         }
         if (left.isAlbumBacked() && right.isAlbumBacked()) {
-            return left.physicalSlot == right.physicalSlot;
+            return left.slot.equals(right.slot);
         }
         return left.displayIndex == right.displayIndex
                 && left.name != null
@@ -795,7 +795,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         int count = photo.mergedSourceCount();
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto p : gallery.photos) {
-            if (!p.isMerge() && !p.deleted && p.physicalSlot >= 0
+            if (!p.isMerge() && !p.deleted && p.isAlbumBacked()
                     && p.displayIndex >= start && p.displayIndex < start + count) {
                 sources.add(p);
             }

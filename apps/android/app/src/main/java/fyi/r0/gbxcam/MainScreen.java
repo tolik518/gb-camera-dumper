@@ -670,7 +670,7 @@ final class MainScreen implements PaletteMenu.Host {
             String meta = photoMeta(photo);
             if (!meta.isEmpty()) label.append(", ").append(meta);
         } else if (photo.isAlbumBacked()) {
-            label.append(", slot ").append(photo.physicalSlot + 1);
+            label.append(", slot ").append(photo.slot.displayNumber());
         }
         return label.toString();
     }

@@ -284,7 +284,9 @@ final class PhotoDetailDialog {
             infoRow.addView(detailChip(
                     photo.isMerge() ? mergedSourceLabel(photo) : "Album " + String.format(Locale.US, "%02d", photo.displayIndex + 1),
                     textMuted, panel, borderSoft));
-            if (!photo.isMerge()) infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
+            if (!photo.isMerge() && photo.isAlbumBacked()) {
+                infoRow.addView(detailChip("Slot " + photo.slot.displayNumber(), textMuted, panel, borderSoft));
+            }
             infoRow.addView(detailChip(photo.width + "×" + photo.height, textMuted, panel, borderSoft));
             infoRow.addView(detailChip("Border " + photo.border, textMuted, panel, borderSoft));
             inner.addView(infoRow, infoParams);
@@ -507,9 +509,9 @@ final class PhotoDetailDialog {
                     photo.mergedAlgorithm());
         }
         String label = photo.deleted ? "Recoverable" : "Album";
-        if (photo.physicalSlot >= 0) {
+        if (photo.isAlbumBacked()) {
             return label + " " + String.format(Locale.US, "%02d", photo.displayIndex + 1)
-                    + " · Slot " + (photo.physicalSlot + 1);
+                    + " · Slot " + photo.slot.displayNumber();
         }
         return label + " " + String.format(Locale.US, "%02d", photo.displayIndex + 1);
     }

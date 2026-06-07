@@ -161,7 +161,7 @@ final class RgbMergeDetector {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < count; i++) {
             if (i > 0) sb.append('-');
-            sb.append(String.format(Locale.US, "%02d", sources[i].physicalSlot + 1));
+            sb.append(sources[i].slot.twoDigitLabel());
         }
         return sb.toString();
     }
@@ -217,7 +217,7 @@ final class RgbMergeDetector {
         ImageData[] images = new ImageData[count];
         for (int offset = 0; offset < count; offset++) {
             GalleryPhoto photo = photos.get(start + offset);
-            if (photo.deleted || photo.isMerge() || photo.physicalSlot < 0
+            if (photo.deleted || photo.isMerge() || !photo.isAlbumBacked()
                     || photo.displayIndex != photos.get(start).displayIndex + offset) {
                 return null;
             }

@@ -12,9 +12,10 @@ Each phase is its own commit; every phase must compile
 | A2 | `MergeOrder` value object | ✅ done |
 | A3 | `MergeIdentity` | ↪ folded into Phase D (see plan) |
 | B | `Palette` value object | ✅ done |
-| C | `SlotSet` (`Slot` deferred to D) | ✅ done |
-| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`; `Slot` deferred) | ✅ done |
+| C | `SlotSet` | ✅ done |
+| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`) | ✅ done |
 | E | extract `Selection` off `GalleryPhoto` | ✅ done |
+| Slot | `Slot` value object | ✅ done |
 | F | FFI as a context boundary (merge → core) | ⬜ not started |
 
 Phases A–E landed; F not started.
@@ -207,8 +208,7 @@ the `mergedRgb` boolean discriminator.
 ---
 
 ## Next (when resumed)
-Phase F — move RGB merge into `gbcam-core` (largest; spans Rust). Plus the
-deferred `Slot` typing from C/D.
+Phase F — move RGB merge into `gbcam-core` (largest; spans Rust).
 
 ---
 
@@ -237,3 +237,27 @@ working selection into its own value object.
 - On-device — ⬜ pending: selection mode/toggle/select-all/deselect-all, save/share
   selected, delete/recover selected, move selected first, manual merge create, and
   selection retention across palette recolor/manual merge update.
+
+---
+
+## Slot value object
+
+**Commit:** pending
+
+**Goal:** finish the C/D-deferred slot typing by moving the `-1` sentinel out of
+normal gallery readers.
+
+### Changes
+- New nullable `Slot` value object on `GalleryPhoto`; `null` means the photo is
+  not album-backed. The builder still accepts the JSON `physicalSlot` int, so the
+  FFI/gallery wire shape is unchanged.
+- `SlotSet` now carries `Slot` values internally and only converts to zero-indexed
+  CSV at the FFI boundary.
+- Presentation, selection identity, locally-deleted-slot keys, merge file naming,
+  and merge detection now read through `Slot` / `isAlbumBacked()` instead of direct
+  `physicalSlot >= 0` checks or `+ 1` arithmetic.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device — ⬜ pending: same slot-sensitive pass as Phase C/E (delete, recover,
+  move selected first, manual merge filenames/source labels, detail slot labels).
