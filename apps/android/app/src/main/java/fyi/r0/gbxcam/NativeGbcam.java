@@ -55,5 +55,12 @@ final class NativeGbcam {
 
     static native String loadGalleryFromSave(String savePath, String outputDir, int paletteIndex);
 
+    static native String mergeRgbFromSave(
+            String savePath,
+            String outputPath,
+            String physicalSlotsCsv,
+            String order,
+            String algorithm);
+
     static native boolean isGameBoyCameraInserted(int fd);
 }

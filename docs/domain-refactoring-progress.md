@@ -286,3 +286,28 @@ composition algorithms first, without changing Android behavior yet.
 - `cargo test -p gbxcam-core` — ✅ 36 tests passing, including new RGB merge tests.
 - Android compile/on-device — ⬜ not applicable for this slice; no Java behavior
   changed.
+
+---
+
+## Phase F2 — save-based RGB merge FFI hook
+
+**Commit:** pending
+
+**Goal:** expose a narrow core-backed RGB merge operation to Android without
+changing runtime behavior yet.
+
+### Changes
+- New `NativeGbcam.mergeRgbFromSave(savePath, outputPath, physicalSlotsCsv, order,
+  algorithm)` declaration.
+- New JNI implementation loads the save, resolves exact physical source slots,
+  converts their indexed pixels to grayscale, calls `gbxcam_core::merge_rgb_gray8`,
+  writes the RGB PNG via core, and returns the output path.
+- Added `write_rgb_png` to `gbcam-core`.
+- This is intentionally not wired into `RgbMergeDetector` yet; Java remains the
+  source of truth until parity is tested on real saves.
+
+### Verification
+- `cargo test -p gbxcam-core -p gbxcam-ffi` — ✅.
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- On-device/parity — ⬜ pending: compare Java vs Rust output for manual RGB/CRGB
+  merges and all algorithms before switching callers.

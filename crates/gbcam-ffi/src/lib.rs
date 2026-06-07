@@ -1,7 +1,7 @@
 use gbxcam_core::{
-    apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, palette_colors,
-    palette_labels, write_palette_png, GbcamSave, PaletteId, PhotoKind, ValidationSeverity,
-    DEFAULT_PALETTE_INDEX,
+    apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, indexed_to_gray8,
+    merge_rgb_gray8, palette_colors, palette_labels, write_palette_png, write_rgb_png, GbcamSave,
+    PaletteId, PhotoKind, RgbMergeAlgorithm, RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
@@ -280,6 +280,45 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromSave<'local
     })
 }
 
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_mergeRgbFromSave<'local>(
+    env: jni::EnvUnowned<'local>,
+    _class: JClass<'local>,
+    save_path: JString<'local>,
+    output_path: JString<'local>,
+    physical_slots_csv: JString<'local>,
+    order: JString<'local>,
+    algorithm: JString<'local>,
+) -> jstring {
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let output_path = match java_path(env, output_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let physical_slots_csv = match java_string(env, physical_slots_csv) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let order = match java_string(env, order) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let algorithm = match java_string(env, algorithm) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        java_result(
+            env,
+            merge_rgb_from_save(save_path, output_path, &physical_slots_csv, &order, &algorithm),
+            "RGB merge failed",
+        )
+    })
+}
+
 // Safety: called directly from a JNI native method; env is a valid non-null
 // JNIEnv* for the duration of the call.
 fn with_jni<'local, F>(env: &jni::EnvUnowned<'local>, f: F) -> jstring
@@ -523,6 +562,47 @@ fn load_gallery_from_save(
     gallery_json(&save, &output_dir, &save_path, &info, palette)
 }
 
+fn merge_rgb_from_save(
+    save_path: PathBuf,
+    output_path: PathBuf,
+    physical_slots_csv: &str,
+    order: &str,
+    algorithm: &str,
+) -> AppResult<String> {
+    let slots = parse_physical_slots(physical_slots_csv)?;
+    let merge_order = RgbMergeOrder::parse(order)?;
+    if slots.len() != merge_order.source_count() {
+        return Err(format!(
+            "merge order {order} expects {} sources, got {}",
+            merge_order.source_count(),
+            slots.len()
+        )
+        .into());
+    }
+
+    let save = std::fs::read(&save_path)?;
+    let photos = extract_photos(&save)?;
+    let mut gray_sources = Vec::with_capacity(slots.len());
+    for slot in slots {
+        let photo = photos
+            .iter()
+            .find(|photo| photo.kind == PhotoKind::Album && photo.physical_slot == Some(slot))
+            .ok_or_else(|| format!("source slot {slot} not found"))?;
+        gray_sources.push(indexed_to_gray8(&photo.pixels_indexed));
+    }
+    let source_refs = gray_sources
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<&[u8]>>();
+    let algorithm = RgbMergeAlgorithm::resolve(algorithm, merge_order.has_clear());
+    let rgb = merge_rgb_gray8(&source_refs, &merge_order, algorithm)?;
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_rgb_png(&output_path, &rgb)?;
+    Ok(output_path.to_string_lossy().into_owned())
+}
+
 fn with_gbxcart_session<T, P, F>(
     fd: jint,
     progress: &mut P,
@@ -751,5 +831,20 @@ mod tests {
         assert!(indexed_pixels_blank(&[]));
         assert!(indexed_pixels_blank(&[2, 2, 2]));
         assert!(!indexed_pixels_blank(&[2, 2, 1]));
+    }
+
+    #[test]
+    fn merge_rgb_from_save_rejects_source_count_before_reading_save() {
+        let err = merge_rgb_from_save(
+            PathBuf::from("/definitely/not/a/save.sav"),
+            PathBuf::from("/tmp/out.png"),
+            "0,1,2",
+            "CRGB",
+            "basic",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("expects 4 sources, got 3"));
     }
 }
