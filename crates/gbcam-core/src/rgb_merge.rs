@@ -1,5 +1,12 @@
+use crate::{indexed_to_gray8, Photo, PhotoKind};
+
 const IMAGE_WIDTH: usize = 128;
 const IMAGE_HEIGHT: usize = 112;
+const RGB_PHASH_MAX_DISTANCE: u32 = 14;
+const CRGB_PHASH_MAX_DISTANCE: u32 = 22;
+const DHASH_MAX_DISTANCE: u32 = 24;
+const SHIFT_RANGE: isize = 8;
+const NCC_MIN: f64 = 0.65;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RgbMergeAlgorithm {
@@ -174,6 +181,190 @@ pub enum RgbMergeError {
         expected: usize,
         actual: usize,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoRgbMergeOptions<'a> {
+    pub order4: &'a str,
+    pub order3: &'a str,
+    pub default_algorithm: &'a str,
+    pub algorithm_overrides: &'a [(String, String)],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoRgbMergeCandidate {
+    pub source_slots: Vec<usize>,
+    pub source_start_display_index: usize,
+    pub source_count: usize,
+    pub order: String,
+    pub algorithm: String,
+    pub identity: String,
+}
+
+pub fn detect_auto_rgb_merge_candidates(
+    photos: &[Photo],
+    options: AutoRgbMergeOptions<'_>,
+) -> Vec<AutoRgbMergeCandidate> {
+    let album_photos = photos
+        .iter()
+        .filter(|photo| photo.kind == PhotoKind::Album)
+        .collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    let mut i = 0;
+
+    while i < album_photos.len() {
+        let candidate = if i + 4 <= album_photos.len() {
+            evaluate_auto_candidate(&album_photos, i, 4, options.order4, &options)
+        } else {
+            None
+        }
+        .or_else(|| {
+            if i + 3 <= album_photos.len() {
+                evaluate_auto_candidate(&album_photos, i, 3, options.order3, &options)
+            } else {
+                None
+            }
+        });
+
+        if let Some(candidate) = candidate {
+            i += candidate.source_count;
+            candidates.push(candidate);
+        } else {
+            i += 1;
+        }
+    }
+
+    candidates
+}
+
+fn evaluate_auto_candidate(
+    photos: &[&Photo],
+    start: usize,
+    count: usize,
+    order: &str,
+    options: &AutoRgbMergeOptions<'_>,
+) -> Option<AutoRgbMergeCandidate> {
+    let start_display = photos.get(start)?.display_index?;
+    let mut source_slots = Vec::with_capacity(count);
+    let mut images = Vec::with_capacity(count);
+
+    for offset in 0..count {
+        let photo = photos.get(start + offset)?;
+        if photo.deleted || photo.display_index? != start_display + offset {
+            return None;
+        }
+        source_slots.push(photo.physical_slot?);
+        images.push(AutoImageData::from_photo(photo)?);
+    }
+
+    let order = RgbMergeOrder::parse(order).ok()?;
+    if order.source_count() != count || !hashes_pass(&images, &order) {
+        return None;
+    }
+
+    let reference = reference_index(&images, &order);
+    for i in 0..images.len() {
+        if i != reference && best_ncc(&images[reference].blurred, &images[i].blurred) < NCC_MIN {
+            return None;
+        }
+    }
+
+    let identity = merge_identity(order.label(), start_display, count);
+    let requested = options
+        .algorithm_overrides
+        .iter()
+        .find(|(key, _)| key == &identity)
+        .map(|(_, value)| value.as_str())
+        .unwrap_or(options.default_algorithm);
+    let algorithm = RgbMergeAlgorithm::resolve(requested, order.has_clear());
+
+    Some(AutoRgbMergeCandidate {
+        source_slots,
+        source_start_display_index: start_display,
+        source_count: count,
+        order: order.label().to_string(),
+        algorithm: algorithm.id().to_string(),
+        identity,
+    })
+}
+
+fn merge_identity(order: &str, source_start_display_index: usize, source_count: usize) -> String {
+    format!("{order}:{source_start_display_index}:{source_count}")
+}
+
+fn hashes_pass(images: &[AutoImageData], order: &RgbMergeOrder) -> bool {
+    let indices = color_indices(order);
+    for i in 0..indices.len() {
+        for j in i + 1..indices.len() {
+            if (images[indices[i]].p_hash ^ images[indices[j]].p_hash).count_ones()
+                > p_hash_max_distance(order)
+            {
+                return false;
+            }
+            if (images[indices[i]].d_hash ^ images[indices[j]].d_hash).count_ones()
+                > DHASH_MAX_DISTANCE
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn p_hash_max_distance(order: &RgbMergeOrder) -> u32 {
+    if order.has_clear() {
+        CRGB_PHASH_MAX_DISTANCE
+    } else {
+        RGB_PHASH_MAX_DISTANCE
+    }
+}
+
+fn color_indices(order: &RgbMergeOrder) -> [usize; 3] {
+    [order.red_index(), order.green_index(), order.blue_index()]
+}
+
+fn reference_index(images: &[AutoImageData], order: &RgbMergeOrder) -> usize {
+    let indices = color_indices(order);
+    let mut best = indices[0];
+    let mut best_avg = f64::MAX;
+    for &idx in &indices {
+        let mut total = 0u32;
+        for &jdx in &indices {
+            if idx != jdx {
+                total += (images[idx].p_hash ^ images[jdx].p_hash).count_ones();
+            }
+        }
+        let avg = total as f64 / (indices.len().saturating_sub(1).max(1) as f64);
+        if avg < best_avg {
+            best_avg = avg;
+            best = idx;
+        }
+    }
+    best
+}
+
+#[derive(Debug, Clone)]
+struct AutoImageData {
+    blurred: Vec<u8>,
+    p_hash: u64,
+    d_hash: u64,
+}
+
+impl AutoImageData {
+    fn from_photo(photo: &Photo) -> Option<Self> {
+        let gray = indexed_to_gray8(&photo.pixels_indexed);
+        if gray.len() != IMAGE_WIDTH * IMAGE_HEIGHT {
+            return None;
+        }
+        let blurred = blur(&gray);
+        let p_hash = p_hash(&gray);
+        let d_hash = d_hash(&gray);
+        Some(Self {
+            blurred,
+            p_hash,
+            d_hash,
+        })
+    }
 }
 
 pub fn merge_rgb_gray8(
@@ -458,6 +649,127 @@ fn hsv_to_rgb(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {
     )
 }
 
+fn best_ncc(reference: &[u8], candidate: &[u8]) -> f64 {
+    let mut best = -1.0;
+    for dy in -SHIFT_RANGE..=SHIFT_RANGE {
+        for dx in -SHIFT_RANGE..=SHIFT_RANGE {
+            best = f64::max(best, ncc(reference, candidate, dx, dy));
+        }
+    }
+    best
+}
+
+fn ncc(a: &[u8], b: &[u8], dx: isize, dy: isize) -> f64 {
+    if a.len() != IMAGE_WIDTH * IMAGE_HEIGHT || b.len() != IMAGE_WIDTH * IMAGE_HEIGHT {
+        return -1.0;
+    }
+
+    let x_start = dx.max(0) as usize;
+    let x_end = (IMAGE_WIDTH as isize).min(IMAGE_WIDTH as isize + dx) as usize;
+    let y_start = dy.max(0) as usize;
+    let y_end = (IMAGE_HEIGHT as isize).min(IMAGE_HEIGHT as isize + dy) as usize;
+    let count = x_end.saturating_sub(x_start) * y_end.saturating_sub(y_start);
+    if count == 0 {
+        return -1.0;
+    }
+
+    let mut sum_a = 0.0;
+    let mut sum_b = 0.0;
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            sum_a += a[y * IMAGE_WIDTH + x] as f64;
+            sum_b +=
+                b[(y as isize - dy) as usize * IMAGE_WIDTH + (x as isize - dx) as usize] as f64;
+        }
+    }
+
+    let mean_a = sum_a / count as f64;
+    let mean_b = sum_b / count as f64;
+    let mut num = 0.0;
+    let mut d_a = 0.0;
+    let mut d_b = 0.0;
+    for y in y_start..y_end {
+        for x in x_start..x_end {
+            let a_value = a[y * IMAGE_WIDTH + x] as f64 - mean_a;
+            let b_value = b[(y as isize - dy) as usize * IMAGE_WIDTH + (x as isize - dx) as usize]
+                as f64
+                - mean_b;
+            num += a_value * b_value;
+            d_a += a_value * a_value;
+            d_b += b_value * b_value;
+        }
+    }
+
+    let denom = f64::sqrt(d_a * d_b);
+    if denom == 0.0 {
+        -1.0
+    } else {
+        num / denom
+    }
+}
+
+fn d_hash(gray: &[u8]) -> u64 {
+    let small = resize(gray, 9, 8);
+    let mut hash = 0u64;
+    let mut bit = 0;
+    for y in 0..8 {
+        for x in 0..8 {
+            if small[y * 9 + x] > small[y * 9 + x + 1] {
+                hash |= 1u64 << bit;
+            }
+            bit += 1;
+        }
+    }
+    hash
+}
+
+fn p_hash(gray: &[u8]) -> u64 {
+    let small = resize(gray, 32, 32);
+    let mut coeffs = [0.0; 64];
+    let mut index = 0;
+    for v in 0..8 {
+        for u in 0..8 {
+            coeffs[index] = dct_coefficient(&small, u, v);
+            index += 1;
+        }
+    }
+    let avg = coeffs[1..].iter().sum::<f64>() / (coeffs.len() - 1) as f64;
+    let mut hash = 0u64;
+    for i in 1..coeffs.len() {
+        if coeffs[i] > avg {
+            hash |= 1u64 << (i - 1);
+        }
+    }
+    hash
+}
+
+fn dct_coefficient(values: &[u8], u: usize, v: usize) -> f64 {
+    let mut sum = 0.0;
+    for y in 0..32 {
+        for x in 0..32 {
+            sum += values[y * 32 + x] as f64
+                * (((2 * x + 1) * u) as f64 * std::f64::consts::PI / 64.0).cos()
+                * (((2 * y + 1) * v) as f64 * std::f64::consts::PI / 64.0).cos();
+        }
+    }
+    sum
+}
+
+fn resize(gray: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut out = vec![0; width * height];
+    if gray.len() != IMAGE_WIDTH * IMAGE_HEIGHT {
+        return out;
+    }
+    for y in 0..height {
+        let sy = ((y * IMAGE_HEIGHT) / height).min(IMAGE_HEIGHT - 1);
+        for x in 0..width {
+            let sx = ((x * IMAGE_WIDTH) / width).min(IMAGE_WIDTH - 1);
+            out[y * width + x] = gray[sy * IMAGE_WIDTH + sx];
+        }
+    }
+    out
+}
+
 fn blur(gray: &[u8]) -> Vec<u8> {
     if gray.len() == IMAGE_WIDTH * IMAGE_HEIGHT {
         return blur_dimensions(gray, IMAGE_WIDTH, IMAGE_HEIGHT);
@@ -568,5 +880,100 @@ mod tests {
         .unwrap();
 
         assert_eq!(rgb.len(), 6);
+    }
+
+    #[test]
+    fn detects_four_source_auto_candidate_before_three_source() {
+        let photos = (0..4)
+            .map(|index| album_photo(index, index, false, patterned_pixels()))
+            .collect::<Vec<_>>();
+
+        let candidates = detect_auto_rgb_merge_candidates(
+            &photos,
+            AutoRgbMergeOptions {
+                order4: "CRGB",
+                order3: "RGB",
+                default_algorithm: "norm",
+                algorithm_overrides: &[],
+            },
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].source_slots, vec![0, 1, 2, 3]);
+        assert_eq!(candidates[0].source_start_display_index, 0);
+        assert_eq!(candidates[0].source_count, 4);
+        assert_eq!(candidates[0].order, "CRGB");
+        assert_eq!(candidates[0].algorithm, "norm");
+        assert_eq!(candidates[0].identity, "CRGB:0:4");
+    }
+
+    #[test]
+    fn auto_candidate_uses_algorithm_override_identity() {
+        let photos = (0..3)
+            .map(|index| album_photo(index + 2, index, false, patterned_pixels()))
+            .collect::<Vec<_>>();
+        let overrides = vec![("BGR:2:3".to_string(), "sat_boost".to_string())];
+
+        let candidates = detect_auto_rgb_merge_candidates(
+            &photos,
+            AutoRgbMergeOptions {
+                order4: "CRGB",
+                order3: "BGR",
+                default_algorithm: "norm",
+                algorithm_overrides: &overrides,
+            },
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].order, "BGR");
+        assert_eq!(candidates[0].algorithm, "sat_boost");
+        assert_eq!(candidates[0].identity, "BGR:2:3");
+    }
+
+    #[test]
+    fn deleted_or_non_contiguous_sources_do_not_auto_merge() {
+        let deleted = vec![
+            album_photo(0, 0, false, patterned_pixels()),
+            album_photo(1, 1, true, patterned_pixels()),
+            album_photo(2, 2, false, patterned_pixels()),
+        ];
+        let non_contiguous = vec![
+            album_photo(0, 0, false, patterned_pixels()),
+            album_photo(2, 1, false, patterned_pixels()),
+            album_photo(3, 2, false, patterned_pixels()),
+        ];
+
+        let options = AutoRgbMergeOptions {
+            order4: "CRGB",
+            order3: "RGB",
+            default_algorithm: "norm",
+            algorithm_overrides: &[],
+        };
+        assert!(detect_auto_rgb_merge_candidates(&deleted, options.clone()).is_empty());
+        assert!(detect_auto_rgb_merge_candidates(&non_contiguous, options).is_empty());
+    }
+
+    fn album_photo(
+        display_index: usize,
+        physical_slot: usize,
+        deleted: bool,
+        pixels_indexed: Vec<u8>,
+    ) -> Photo {
+        Photo {
+            name: format!("IMG_PC{:02}.png", display_index + 1),
+            width: IMAGE_WIDTH as u32,
+            height: IMAGE_HEIGHT as u32,
+            pixels_indexed,
+            kind: PhotoKind::Album,
+            display_index: Some(display_index),
+            physical_slot: Some(physical_slot),
+            deleted,
+        }
+    }
+
+    fn patterned_pixels() -> Vec<u8> {
+        (0..IMAGE_WIDTH * IMAGE_HEIGHT)
+            .map(|index| ((index / IMAGE_WIDTH + index % IMAGE_WIDTH) % 4) as u8)
+            .collect()
     }
 }

@@ -1,12 +1,13 @@
 use gbxcam_core::{
-    apply_album_delete, apply_album_recover, apply_album_reorder, extract_photos, indexed_to_gray8,
-    merge_rgb_gray8, palette_colors, palette_labels, write_palette_png, write_rgb_png, GbcamSave,
-    PaletteId, PhotoKind, RgbMergeAlgorithm, RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
+    apply_album_delete, apply_album_recover, apply_album_reorder, detect_auto_rgb_merge_candidates,
+    extract_photos, indexed_to_gray8, merge_rgb_gray8, palette_colors, palette_labels, write_png,
+    write_rgb_png, AutoRgbMergeOptions, GbcamSave, PaletteId, PhotoKind, RgbMergeAlgorithm,
+    RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
 use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
 use jni::objects::{JClass, JObject, JString, JValue};
-use jni::sys::{jboolean, jint, jstring};
 use jni::strings::JNIString;
+use jni::sys::{jboolean, jint, jstring};
 use jni::Env;
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -38,7 +39,9 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_version(
     env: jni::EnvUnowned,
     _class: JClass,
 ) -> jstring {
-    with_jni(&env, |env| java_string_or_throw(env, env!("CARGO_PKG_VERSION").to_string()))
+    with_jni(&env, |env| {
+        java_string_or_throw(env, env!("CARGO_PKG_VERSION").to_string())
+    })
 }
 
 #[no_mangle]
@@ -95,7 +98,12 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromFd<'local>(
         };
         let result = {
             let mut progress = JniProgress::new(env, progress);
-            load_gallery_from_fd(fd, output_dir, palette_from_jint(palette_index), &mut progress)
+            load_gallery_from_fd(
+                fd,
+                output_dir,
+                palette_from_jint(palette_index),
+                &mut progress,
+            )
         };
         java_result(env, result, "GB Camera gallery load failed")
     })
@@ -313,8 +321,59 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_mergeRgbFromSave<'local>(
         };
         java_result(
             env,
-            merge_rgb_from_save(save_path, output_path, &physical_slots_csv, &order, &algorithm),
+            merge_rgb_from_save(
+                save_path,
+                output_path,
+                &physical_slots_csv,
+                &order,
+                &algorithm,
+            ),
             "RGB merge failed",
+        )
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_detectRgbMergesFromSave<'local>(
+    env: jni::EnvUnowned<'local>,
+    _class: JClass<'local>,
+    save_path: JString<'local>,
+    order4: JString<'local>,
+    order3: JString<'local>,
+    default_algorithm: JString<'local>,
+    algorithm_overrides_json: JString<'local>,
+) -> jstring {
+    with_jni(&env, |env| {
+        let save_path = match java_path(env, save_path) {
+            Ok(path) => path,
+            Err(e) => return throw(env, e),
+        };
+        let order4 = match java_string(env, order4) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let order3 = match java_string(env, order3) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let default_algorithm = match java_string(env, default_algorithm) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        let algorithm_overrides_json = match java_string(env, algorithm_overrides_json) {
+            Ok(value) => value,
+            Err(e) => return throw(env, e),
+        };
+        java_result(
+            env,
+            detect_rgb_merges_from_save(
+                save_path,
+                &order4,
+                &order3,
+                &default_algorithm,
+                &algorithm_overrides_json,
+            ),
+            "RGB merge detection failed",
         )
     })
 }
@@ -603,6 +662,55 @@ fn merge_rgb_from_save(
     Ok(output_path.to_string_lossy().into_owned())
 }
 
+fn detect_rgb_merges_from_save(
+    save_path: PathBuf,
+    order4: &str,
+    order3: &str,
+    default_algorithm: &str,
+    algorithm_overrides_json: &str,
+) -> AppResult<String> {
+    let overrides = parse_algorithm_overrides(algorithm_overrides_json)?;
+    let save = std::fs::read(&save_path)?;
+    let photos = extract_photos(&save)?;
+    let candidates = detect_auto_rgb_merge_candidates(
+        &photos,
+        AutoRgbMergeOptions {
+            order4,
+            order3,
+            default_algorithm,
+            algorithm_overrides: &overrides,
+        },
+    );
+    let out = candidates
+        .into_iter()
+        .map(|candidate| {
+            serde_json::json!({
+                "sourceSlots": candidate.source_slots,
+                "sourceStartDisplayIndex": candidate.source_start_display_index,
+                "sourceCount": candidate.source_count,
+                "order": candidate.order,
+                "algorithm": candidate.algorithm,
+                "identity": candidate.identity,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string(&out)?)
+}
+
+fn parse_algorithm_overrides(json: &str) -> AppResult<Vec<(String, String)>> {
+    if json.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    let Some(object) = value.as_object() else {
+        return Ok(Vec::new());
+    };
+    Ok(object
+        .iter()
+        .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string())))
+        .collect())
+}
+
 fn with_gbxcart_session<T, P, F>(
     fd: jint,
     progress: &mut P,
@@ -643,7 +751,7 @@ fn gallery_json(
     let mut photos_json: Vec<serde_json::Value> = Vec::new();
     for photo in photos.iter().filter(|p| p.kind == PhotoKind::Album) {
         let path = output_dir.join(&photo.name);
-        write_palette_png(&path, &photo.pixels_indexed, palette)?;
+        write_png(&path, &indexed_to_gray8(&photo.pixels_indexed))?;
 
         let mut obj = serde_json::json!({
             "name": photo.name,
@@ -795,7 +903,10 @@ fn java_string_or_throw(env: &mut Env<'_>, value: String) -> jstring {
 }
 
 fn throw(env: &mut Env<'_>, message: String) -> jstring {
-    let _ = env.throw_new(jni::jni_str!("java/lang/RuntimeException"), JNIString::from(message));
+    let _ = env.throw_new(
+        jni::jni_str!("java/lang/RuntimeException"),
+        JNIString::from(message),
+    );
     std::ptr::null_mut()
 }
 

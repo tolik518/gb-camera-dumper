@@ -12,6 +12,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 final class RgbMergeDetector {
 
     // --- Algorithm tables (single source: MergeAlgorithm) ----------------------
@@ -46,6 +49,13 @@ final class RgbMergeDetector {
         List<GalleryPhoto> output = new ArrayList<>();
         File mergeDir = new File(outputRoot, "rgb-merged");
         deleteOldMergedFiles(mergeDir);
+
+        GalleryState coreMerged = addAutoMergedPhotosFromCore(gallery, mergeDir, savePath,
+                order4, order3, defaultAlgorithm, algorithmOverrides);
+        if (coreMerged != null) {
+            return coreMerged;
+        }
+
         int mergedCount = 0;
 
         for (int i = 0; i < gallery.photos.size();) {
@@ -78,6 +88,140 @@ final class RgbMergeDetector {
         }
 
         return gallery.withPhotos(output);
+    }
+
+    private static GalleryState addAutoMergedPhotosFromCore(
+            GalleryState gallery,
+            File mergeDir,
+            String savePath,
+            String order4,
+            String order3,
+            String defaultAlgorithm,
+            Map<String, String> algorithmOverrides) {
+        if (savePath == null || savePath.isEmpty()) return null;
+
+        List<CoreMergeCandidate> candidates;
+        try {
+            candidates = parseCoreMergeCandidates(NativeGbcam.detectRgbMergesFromSave(
+                    savePath, order4, order3, defaultAlgorithm, overridesJson(algorithmOverrides)));
+        } catch (Throwable ignored) {
+            return null;
+        }
+        if (candidates.isEmpty()) return gallery;
+
+        List<GalleryPhoto> output = new ArrayList<>();
+        int candidateIndex = 0;
+        int mergedCount = 0;
+        for (int i = 0; i < gallery.photos.size();) {
+            GalleryPhoto current = gallery.photos.get(i);
+            while (candidateIndex < candidates.size()
+                    && candidates.get(candidateIndex).sourceStartDisplayIndex < current.displayIndex) {
+                candidateIndex++;
+            }
+
+            CoreMergeCandidate candidate = candidateIndex < candidates.size()
+                    && candidates.get(candidateIndex).sourceStartDisplayIndex == current.displayIndex
+                    ? candidates.get(candidateIndex)
+                    : null;
+            GalleryPhoto[] sources = candidate != null ? validatedSources(gallery.photos, i, candidate) : null;
+            if (candidate == null || sources == null) {
+                output.add(current);
+                i++;
+                continue;
+            }
+
+            MergeLayout layout = candidate.sourceCount == 3
+                    ? layoutFromOrder3(candidate.order)
+                    : layoutFromOrder4(candidate.order);
+            MergeAlgorithm algorithm = MergeAlgorithm.resolve(candidate.algorithm, layout.clearIndex >= 0);
+            if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
+            File out = new File(mergeDir, String.format(Locale.US, "RGB_%02d_from_%02d_%s.png",
+                    mergedCount + 1, sources[0].displayIndex + 1, layout.label));
+            try {
+                NativeGbcam.mergeRgbFromSave(savePath, out.getAbsolutePath(),
+                        sourceSlotsCsv(sources, candidate.sourceCount), layout.label, algorithm.id());
+            } catch (Throwable ignored) {
+                if (out.exists() && !out.delete()) out.deleteOnExit();
+                return null;
+            }
+            if (!out.isFile()) return null;
+
+            for (int s = 0; s < candidate.sourceCount; s++) {
+                output.add(sources[s]);
+            }
+            output.add(GalleryPhoto.builder(
+                            out.getName(), out.getAbsolutePath(),
+                            sources[0].displayIndex, -1,
+                            IMAGE_WIDTH, IMAGE_HEIGHT)
+                    .metadataValid(true)
+                    .mergedRgb(true)
+                    .mergedKind(layout.label)
+                    .mergedSourceCount(candidate.sourceCount)
+                    .mergedSourceStartDisplayIndex(sources[0].displayIndex)
+                    .mergedAlgorithm(algorithm.id())
+                    .build());
+            mergedCount++;
+            candidateIndex++;
+            i += candidate.sourceCount;
+        }
+
+        return mergedCount == 0 ? gallery : gallery.withPhotos(output);
+    }
+
+    private static GalleryPhoto[] validatedSources(
+            List<GalleryPhoto> photos,
+            int start,
+            CoreMergeCandidate candidate) {
+        if (candidate.sourceCount != 3 && candidate.sourceCount != 4) return null;
+        MergeLayout layout = candidate.sourceCount == 3
+                ? layoutFromOrder3(candidate.order)
+                : layoutFromOrder4(candidate.order);
+        if (layout == null) return null;
+        if (start + candidate.sourceCount > photos.size()) return null;
+
+        GalleryPhoto first = photos.get(start);
+        if (first.displayIndex != candidate.sourceStartDisplayIndex) return null;
+        GalleryPhoto[] sources = new GalleryPhoto[candidate.sourceCount];
+        for (int offset = 0; offset < candidate.sourceCount; offset++) {
+            GalleryPhoto photo = photos.get(start + offset);
+            if (photo.deleted || photo.isMerge() || !photo.isAlbumBacked()) return null;
+            if (photo.displayIndex != first.displayIndex + offset) return null;
+            if (candidate.sourceSlots[offset] != photo.slot.index()) return null;
+            sources[offset] = photo;
+        }
+        return sources;
+    }
+
+    private static List<CoreMergeCandidate> parseCoreMergeCandidates(String json) throws Exception {
+        JSONArray arr = new JSONArray(json);
+        List<CoreMergeCandidate> candidates = new ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject obj = arr.getJSONObject(i);
+            JSONArray slotsJson = obj.getJSONArray("sourceSlots");
+            int count = obj.getInt("sourceCount");
+            if (slotsJson.length() != count) continue;
+            int[] slots = new int[count];
+            for (int s = 0; s < count; s++) {
+                slots[s] = slotsJson.getInt(s);
+            }
+            candidates.add(new CoreMergeCandidate(
+                    slots,
+                    obj.getInt("sourceStartDisplayIndex"),
+                    count,
+                    obj.getString("order"),
+                    obj.getString("algorithm")));
+        }
+        return candidates;
+    }
+
+    private static String overridesJson(Map<String, String> algorithmOverrides) throws Exception {
+        JSONObject obj = new JSONObject();
+        if (algorithmOverrides != null) {
+            for (Map.Entry<String, String> entry : algorithmOverrides.entrySet()) {
+                obj.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return obj.toString();
     }
 
     static GalleryPhoto manualMerge(
@@ -686,6 +830,27 @@ final class RgbMergeDetector {
         final int count;
         final GalleryPhoto photo;
         MergeCandidate(int count, GalleryPhoto photo) { this.count = count; this.photo = photo; }
+    }
+
+    private static final class CoreMergeCandidate {
+        final int[] sourceSlots;
+        final int sourceStartDisplayIndex;
+        final int sourceCount;
+        final String order;
+        final String algorithm;
+
+        CoreMergeCandidate(
+                int[] sourceSlots,
+                int sourceStartDisplayIndex,
+                int sourceCount,
+                String order,
+                String algorithm) {
+            this.sourceSlots = sourceSlots;
+            this.sourceStartDisplayIndex = sourceStartDisplayIndex;
+            this.sourceCount = sourceCount;
+            this.order = order;
+            this.algorithm = algorithm;
+        }
     }
 
     static final class MergeLayout {

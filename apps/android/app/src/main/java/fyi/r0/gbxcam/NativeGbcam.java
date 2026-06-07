@@ -62,5 +62,12 @@ final class NativeGbcam {
             String order,
             String algorithm);
 
+    static native String detectRgbMergesFromSave(
+            String savePath,
+            String order4,
+            String order3,
+            String defaultAlgorithm,
+            String algorithmOverridesJson);
+
     static native boolean isGameBoyCameraInserted(int fd);
 }

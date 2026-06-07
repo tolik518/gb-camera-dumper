@@ -2,7 +2,10 @@ use std::fs;
 use std::path::Path;
 
 pub mod rgb_merge;
-pub use rgb_merge::{merge_rgb_gray8, RgbMergeAlgorithm, RgbMergeError, RgbMergeOrder};
+pub use rgb_merge::{
+    detect_auto_rgb_merge_candidates, merge_rgb_gray8, AutoRgbMergeCandidate, AutoRgbMergeOptions,
+    RgbMergeAlgorithm, RgbMergeError, RgbMergeOrder,
+};
 
 pub const MAPPER_MAC_GBD: u8 = 0xFC;
 pub const SRAM_BANKS: usize = 16;
