@@ -4,7 +4,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Consumer;
 
 /**
  * The decode-side gallery transform chain shared by every load path (camera read,
@@ -18,9 +17,9 @@ import java.util.function.Consumer;
  */
 final class GalleryPipeline {
     private final AppSettings settings;
-    private final Consumer<String> logger;
+    private final AppCallback<String> logger;
 
-    GalleryPipeline(AppSettings settings, Consumer<String> logger) {
+    GalleryPipeline(AppSettings settings, AppCallback<String> logger) {
         this.settings = settings;
         this.logger = logger;
     }
@@ -45,8 +44,8 @@ final class GalleryPipeline {
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.isActiveAlbumPhoto() || p.mergedRgb) continue;
-            if (!deleted.contains(String.valueOf(p.physicalSlot))) continue;
+            if (!p.isActiveAlbumPhoto() || p.isMerge()) continue;
+            if (!deleted.contains(p.slot.key())) continue;
             photos.set(i, p.withDeleted(true));
             changed = true;
         }
@@ -59,9 +58,9 @@ final class GalleryPipeline {
         if (!settings.autoRgbMerge()) {
             return gallery;
         }
-        List<GalleryPhoto> sourcePhotos = monoSourcePhotos(gallery);
-        GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, sourcePhotos, new File(gallery.outputDir),
-                settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(), settings.mergeAlgorithmOverrides());
+        GalleryState merged = RgbMergeDetector.addAutoMergedPhotos(gallery, new File(gallery.outputDir),
+                gallery.savePath, settings.rgb4Order(), settings.rgb3Order(), settings.mergeAlgorithm(),
+                settings.mergeAlgorithmOverrides());
         int added = merged.photos.size() - gallery.photos.size();
         if (added > 0) {
             logger.accept("Auto-merged " + added + " RGB " + (added == 1 ? "set" : "sets") + ".");
@@ -85,10 +84,10 @@ final class GalleryPipeline {
         return gallery.withPhotos(filtered);
     }
 
-    /** The mono (grayscale) source photos used to compute RGB merges. */
+    /** The mono (grayscale) source photos used by the Java UI preview path. */
     List<GalleryPhoto> monoSourcePhotos(GalleryState gallery) {
         int monoPaletteIndex = NativeGbcam.defaultPaletteIndex();
-        if (gallery.paletteIndex == monoPaletteIndex) {
+        if (gallery.palette.index == monoPaletteIndex) {
             return gallery.photos;
         }
         try {

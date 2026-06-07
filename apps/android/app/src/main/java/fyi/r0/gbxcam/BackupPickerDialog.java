@@ -17,7 +17,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.Executor;
-import java.util.function.Consumer;
 
 /**
  * The save-backup picker dialog: a scrollable list of backup saves with a 2×2
@@ -29,11 +28,11 @@ final class BackupPickerDialog {
     private final MainScreen screen;
     private final BackupRepository backups;
     private final Executor previewExecutor;
-    private final Consumer<Runnable> postToUi;
-    private final Consumer<File> onSelected;
+    private final AppCallback<Runnable> postToUi;
+    private final AppCallback<File> onSelected;
 
     BackupPickerDialog(Activity activity, MainScreen screen, BackupRepository backups,
-            Executor previewExecutor, Consumer<Runnable> postToUi, Consumer<File> onSelected) {
+            Executor previewExecutor, AppCallback<Runnable> postToUi, AppCallback<File> onSelected) {
         this.activity = activity;
         this.screen = screen;
         this.backups = backups;

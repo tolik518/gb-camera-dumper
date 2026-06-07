@@ -81,7 +81,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (gallery == null) return;
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && !photo.deleted && !photo.mergedRgb && photo.physicalSlot >= 0) {
+            if (gallery.isSelected(photo) && !photo.deleted && !photo.isMerge() && photo.isAlbumBacked()) {
                 sources.add(photo);
             }
         }
@@ -89,15 +89,16 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (count != 3 && count != 4) return;
         sortByDisplayIndex(sources);
         String order = count == 3 ? settings.rgb3Order() : settings.rgb4Order();
-        screen.setBusy(true, "Merging " + count + " photos...");
+        screen.setBusy(true, "Merging " + count + " photos...", BusyDialog.Direction.TO_GBCAM);
         runInBackground(() -> {
             GalleryPhoto merged = RgbMergeDetector.manualMerge(
                     sources.toArray(new GalleryPhoto[0]),
                     count, order,
                     new File(gallery.outputDir),
-                    settings.mergeAlgorithm());
+                    settings.mergeAlgorithm(),
+                    gallery.savePath);
             postToUi(() -> {
-                screen.setBusy(false, null);
+                screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                 if (merged == null) {
                     onLog("Manual merge failed.");
                     return;
@@ -152,7 +153,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         }
         try {
             PhotoExporter.ExportResult result = PhotoExporter.exportSelected(
-                    activity, gallery, palettes.colorsFor(gallery.paletteIndex), settings.exportDeleted());
+                    activity, gallery, palettes.colorsFor(gallery.palette.index), settings.exportDeleted());
             onLog("Saved " + result.imageCount + " " + plural(result.imageCount, "photo") + ":\n" + result.summary());
         } catch (Exception e) {
             onLog("Save failed: " + e.toString());
@@ -171,7 +172,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (selected == 0) return;
         try {
             PhotoExporter.ExportResult result = PhotoExporter.exportSelectedScaled(
-                    activity, gallery, palettes.colorsFor(gallery.paletteIndex),
+                    activity, gallery, palettes.colorsFor(gallery.palette.index),
                     settings.exportDeleted(), scale);
             if (result.imageUris.isEmpty()) {
                 onLog("Share unavailable for this Android version. Saved:\n" + result.summary());
@@ -311,14 +312,14 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = photos.size() - 1; i >= 0; i--) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isManualMerge()) continue;
+            if (!gallery.isSelected(p) || !p.isManualMerge()) continue;
             photos.remove(i);
             new File(p.path).delete();
             mergeStore.removeByPath(p.path);
             changed = true;
         }
         if (changed) mergeStore.save();
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     private GalleryState markSelectedCameraPhotosDeletedLocally(GalleryState gallery) {
@@ -327,14 +328,14 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isActiveAlbumPhoto() || p.mergedRgb) continue;
+            if (!gallery.isSelected(p) || !p.isActiveAlbumPhoto() || p.isMerge()) continue;
             photos.set(i, p.withDeleted(true));
-            newSlots.add(String.valueOf(p.physicalSlot));
+            newSlots.add(p.slot.key());
             changed = true;
         }
         if (!changed) return gallery;
         settings.addLocallyDeletedSlots(newSlots);
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     private GalleryState recoverSelectedCameraPhotosLocally(GalleryState gallery) {
@@ -345,15 +346,15 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isDeletedAlbumPhoto() || p.mergedRgb) continue;
-            if (!localDeleted.contains(String.valueOf(p.physicalSlot))) continue;
+            if (!gallery.isSelected(p) || !p.isDeletedAlbumPhoto() || p.isMerge()) continue;
+            if (!localDeleted.contains(p.slot.key())) continue;
             photos.set(i, p.withDeleted(false));
-            toRestore.add(String.valueOf(p.physicalSlot));
+            toRestore.add(p.slot.key());
             changed = true;
         }
         if (!changed) return gallery;
         settings.removeLocallyDeletedSlots(toRestore);
-        return gallery.withPhotos(photos);
+        return gallery.withPhotos(photos).withSelection(Selection.empty());
     }
 
     @Override
@@ -384,10 +385,10 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private void recoverSelectedFromCachedSave(GalleryState gallery) {
-        String slots = gallery.selectedPhysicalSlotsCsv(true);
+        String slots = SlotSet.selected(gallery, true).toCsv();
         if (slots.isEmpty()) return;
         Set<String> restoredSlots = selectedDeletedSlotKeys(gallery);
-        screen.setBusy(true, "Recovering selected deleted photos...");
+        screen.setBusy(true, "Recovering selected deleted photos...", BusyDialog.Direction.TO_GBCAM);
         runInBackground(() -> {
             try {
                 String json = NativeGbcam.recoverPhotosFromSave(
@@ -406,13 +407,13 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     mergeStore.load();
                     shown = mergeStore.inject(shown);
                     screen.showGallery(shown);
-                    screen.setBusy(false, null);
+                    screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                     onLog("Recovered selected deleted photos from cached save.");
                 });
             } catch (Exception e) {
                 postToUi(() -> {
                     onError("Error: " + e.toString());
-                    screen.setBusy(false, null);
+                    screen.setBusy(false, null, BusyDialog.Direction.TO_GBCAM);
                 });
             }
         });
@@ -421,8 +422,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     private static Set<String> selectedDeletedSlotKeys(GalleryState gallery) {
         Set<String> slots = new HashSet<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && photo.isDeletedAlbumPhoto() && !photo.mergedRgb) {
-                slots.add(String.valueOf(photo.physicalSlot));
+            if (gallery.isSelected(photo) && photo.isDeletedAlbumPhoto() && !photo.isMerge()) {
+                slots.add(photo.slot.key());
             }
         }
         return slots;
@@ -435,7 +436,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             return;
         }
 
-        String csv = gallery.selectedActiveFirstPhysicalSlotsCsv();
+        String csv = SlotSet.selectedActiveFirst(gallery).toCsv();
         confirmOrRun(
                 "Move selected photos first?",
                 "This rewrites the album order so selected active photos appear first. A save backup is kept in the app dumps folder.",
@@ -453,7 +454,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             return;
         }
 
-        String csv = gallery.activePhysicalSlotsCsv();
+        String csv = SlotSet.active(gallery).toCsv();
         confirmOrRun(
                 "Compact album order?",
                 "This rewrites active photos into contiguous album positions and leaves deleted slots hidden. A save backup is kept in the app dumps folder.",
@@ -530,9 +531,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     @Override
-    public void onBusyChanged(boolean busy, String message) {
+    public void onBusyChanged(boolean busy, String message, BusyDialog.Direction direction) {
         if (destroyed) return;
-        screen.setBusy(busy, message);
+        screen.setBusy(busy, message, direction);
     }
 
     @Override
@@ -550,7 +551,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         gallery = pipeline.process(gallery, false);
         mergeStore.load();
         gallery = mergeStore.inject(gallery);
-        backups.rememberPalette(new File(gallery.savePath), gallery.paletteIndex);
+        backups.rememberPalette(new File(gallery.savePath), gallery.palette.index);
         screen.showGallery(gallery);
         onCameraLoaded.run();
         int loaded = gallery.photos.size();
@@ -655,8 +656,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             // The committed manual merge is a brand-new photo object; share it directly.
             applyManualMergeChanges(photo, order, algorithm, this::shareSinglePhoto);
         } else {
-            int start = photo.mergedSourceStartDisplayIndex;
-            int count = photo.mergedSourceCount;
+            int start = photo.mergedSourceStartDisplayIndex();
+            int count = photo.mergedSourceCount();
             settings.saveMergeAlgorithmOverride(photo, algorithm);
             // Recolor regenerates the auto-merge in place; share whatever auto-merge now
             // covers this source range (there is exactly one auto-merge per range).
@@ -671,9 +672,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         GalleryState g = screen.gallery();
         if (g == null) return null;
         for (GalleryPhoto p : g.photos) {
-            if (p.mergedRgb && !p.isManualMerge()
-                    && p.mergedSourceStartDisplayIndex == sourceStart
-                    && p.mergedSourceCount == sourceCount) {
+            if (p.isMerge() && !p.isManualMerge()
+                    && p.mergedSourceStartDisplayIndex() == sourceStart
+                    && p.mergedSourceCount() == sourceCount) {
                 return p;
             }
         }
@@ -714,16 +715,25 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 onLog("Share failed: photo is no longer in the current gallery.");
                 return;
             }
-            // Save and temporarily replace selection so exportSelectedScaled picks up just this photo.
-            boolean[] prev = new boolean[gallery.photos.size()];
-            for (int i = 0; i < gallery.photos.size(); i++) {
-                prev[i] = gallery.photos.get(i).selected;
-                gallery.photos.get(i).selected = (gallery.photos.get(i) == target);
-            }
-            doShareSelected(gallery, scale);
-            for (int i = 0; i < gallery.photos.size(); i++) gallery.photos.get(i).selected = prev[i];
-            screen.showGallery(gallery);
+            doShareSelected(gallery.withSelection(Selection.empty().with(target, true)), scale);
         });
+    }
+
+    @Override
+    public void deleteOrRecoverDetailPhoto(GalleryPhoto photo) {
+        GalleryState gallery = screen.gallery();
+        GalleryPhoto target = findCurrentPhoto(photo, gallery);
+        if (target == null) {
+            onLog("Action failed: photo is no longer in the current gallery.");
+            return;
+        }
+        GalleryState singleSelection = gallery.withSelection(Selection.empty().with(target, true));
+        screen.showGallery(singleSelection);
+        if (target.isDeletedAlbumPhoto()) {
+            onRecoverSelectedRequested();
+        } else if (target.isActiveAlbumPhoto() || target.isManualMerge()) {
+            onDeleteSelectedRequested();
+        }
     }
 
     private static GalleryPhoto findCurrentPhoto(GalleryPhoto photo, GalleryState gallery) {
@@ -742,13 +752,13 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private static boolean samePhotoIdentity(GalleryPhoto left, GalleryPhoto right) {
-        if (left.mergedRgb || right.mergedRgb) {
-            return left.mergedRgb == right.mergedRgb
+        if (left.isMerge() || right.isMerge()) {
+            return left.isMerge() == right.isMerge()
                     && left.path != null
                     && left.path.equals(right.path);
         }
         if (left.isAlbumBacked() && right.isAlbumBacked()) {
-            return left.physicalSlot == right.physicalSlot;
+            return left.slot.equals(right.slot);
         }
         return left.displayIndex == right.displayIndex
                 && left.name != null
@@ -780,10 +790,10 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 GalleryState finalGallery = gallery;
                 postToUi(() -> {
                     if (recolorGeneration.get() != generation) return;
-                    GalleryState withMerges = mergeStore.inject(finalGallery);
-                    withMerges.copySelectionFrom(previous);
+                    GalleryState withMerges = mergeStore.inject(finalGallery)
+                            .copySelectionFrom(previous);
                     screen.showGallery(withMerges);
-                    if (logChange) onLog("Palette changed: " + withMerges.paletteName);
+                    if (logChange) onLog("Palette changed: " + withMerges.palette.name);
                     if (onApplied != null) onApplied.run();
                 });
             } catch (Exception e) {
@@ -796,27 +806,19 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private void applyManualMergeChanges(GalleryPhoto photo, String order, String algorithm,
-            java.util.function.Consumer<GalleryPhoto> onApplied) {
+            AppCallback<GalleryPhoto> onApplied) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
-        int start = photo.mergedSourceStartDisplayIndex;
-        int count = photo.mergedSourceCount;
-        List<GalleryPhoto> sources = new ArrayList<>();
-        for (GalleryPhoto p : gallery.photos) {
-            if (!p.mergedRgb && !p.deleted && p.physicalSlot >= 0
-                    && p.displayIndex >= start && p.displayIndex < start + count) {
-                sources.add(p);
-            }
-        }
+        int count = photo.mergedSourceCount();
+        List<GalleryPhoto> sources = manualMergeSources(photo, gallery);
         if (sources.size() != count) { onLog("Source photos not found for merge update."); return; }
-        sortByDisplayIndex(sources);
         // Capture the timestamp before queuing so we can detect if a concurrent
         // onManualMergeRequested has re-created the old file while we were running.
         long taskStartedAt = System.currentTimeMillis();
         runInBackground(() -> {
             GalleryPhoto updated = RgbMergeDetector.manualMerge(
                     sources.toArray(new GalleryPhoto[0]),
-                    count, order, new File(gallery.outputDir), algorithm);
+                    count, order, new File(gallery.outputDir), algorithm, gallery.savePath);
             postToUi(() -> {
                 if (updated == null) { onLog("Merge update failed."); return; }
                 // If the old file was written after this task started, a concurrent
@@ -827,7 +829,6 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                     new File(updated.path).delete();
                     return;
                 }
-                updated.selected = photo.selected;
                 if (!mergeStore.replaceVariant(photo.path, updated)) {
                     new File(updated.path).delete();
                     return;
@@ -838,11 +839,52 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
                 for (int i = 0; i < photos.size(); i++) {
                     if (photos.get(i).path.equals(photo.path)) { photos.set(i, updated); break; }
                 }
-                screen.showGallery(current.withPhotos(photos));
+                Selection selection = current.selection;
+                if (current.isSelected(photo)) {
+                    selection = selection.with(photo, false).with(updated, true);
+                }
+                screen.showGallery(current.withPhotos(photos).withSelection(selection));
                 onLog("Merge updated: " + order + " / " + RgbMergeDetector.algorithmShortLabel(algorithm));
                 if (onApplied != null) onApplied.accept(updated);
             });
         });
+    }
+
+    private static List<GalleryPhoto> manualMergeSources(GalleryPhoto merge, GalleryState gallery) {
+        int[] sourceSlots = merge.mergedSourceSlots();
+        if (sourceSlots != null && sourceSlots.length > 0) {
+            List<GalleryPhoto> sources = new ArrayList<>();
+            for (int slot : sourceSlots) {
+                GalleryPhoto source = findActiveSlot(gallery, slot);
+                if (source == null) {
+                    return Collections.emptyList();
+                }
+                sources.add(source);
+            }
+            return sources;
+        }
+
+        int start = merge.mergedSourceStartDisplayIndex();
+        int count = merge.mergedSourceCount();
+        List<GalleryPhoto> sources = new ArrayList<>();
+        for (GalleryPhoto p : gallery.photos) {
+            if (!p.isMerge() && !p.deleted && p.isAlbumBacked()
+                    && p.displayIndex >= start && p.displayIndex < start + count) {
+                sources.add(p);
+            }
+        }
+        sortByDisplayIndex(sources);
+        return sources;
+    }
+
+    private static GalleryPhoto findActiveSlot(GalleryState gallery, int slot) {
+        for (GalleryPhoto photo : gallery.photos) {
+            if (!photo.isMerge() && !photo.deleted && photo.isAlbumBacked()
+                    && photo.slot.index() == slot) {
+                return photo;
+            }
+        }
+        return null;
     }
 
     /** Handles the import/export-save document picker results routed from the Activity. */

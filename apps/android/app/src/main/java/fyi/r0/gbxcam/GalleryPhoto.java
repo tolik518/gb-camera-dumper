@@ -4,7 +4,7 @@ final class GalleryPhoto {
     final String name;
     final String path;
     final int displayIndex;
-    final int physicalSlot;
+    final Slot slot;
     final int width;
     final int height;
     final byte[] indexedPixels;
@@ -14,23 +14,14 @@ final class GalleryPhoto {
     final boolean copy;
     final boolean metadataValid;
     final String ownerUserId;
-    final boolean mergedRgb;
-    final String mergedKind;
-    final int mergedSourceCount;
-    final int mergedSourceStartDisplayIndex;
-    final String mergedAlgorithm;
-    final boolean manualMerge;
-    boolean selected;
-
-    static String mergeIdentity(String kind, int sourceStartDisplayIndex, int sourceCount) {
-        return nullToEmpty(kind) + ":" + sourceStartDisplayIndex + ":" + sourceCount;
-    }
+    /** Merge descriptor when this photo is an RGB merge; {@code null} for ordinary photos. */
+    final MergeInfo merge;
 
     private GalleryPhoto(Builder b) {
         this.name = b.name;
         this.path = b.path;
         this.displayIndex = b.displayIndex;
-        this.physicalSlot = b.physicalSlot;
+        this.slot = Slot.fromPhysicalIndex(b.physicalSlot);
         this.width = b.width;
         this.height = b.height;
         this.indexedPixels = b.indexedPixels;
@@ -40,12 +31,11 @@ final class GalleryPhoto {
         this.copy = b.copy;
         this.metadataValid = b.metadataValid;
         this.ownerUserId = b.ownerUserId;
-        this.mergedRgb = b.mergedRgb;
-        this.mergedKind = b.mergedKind;
-        this.mergedSourceCount = b.mergedSourceCount;
-        this.mergedSourceStartDisplayIndex = b.mergedSourceStartDisplayIndex;
-        this.mergedAlgorithm = b.mergedAlgorithm;
-        this.manualMerge = b.manualMerge;
+        this.merge = b.mergedRgb
+                ? new MergeInfo(b.mergedKind, b.mergedSourceCount,
+                        b.mergedSourceStartDisplayIndex, b.mergedSourceSlots,
+                        b.mergedAlgorithm, b.manualMerge)
+                : null;
     }
 
     static Builder builder(String name, String path, int displayIndex,
@@ -53,9 +43,9 @@ final class GalleryPhoto {
         return new Builder(name, path, displayIndex, physicalSlot, width, height);
     }
 
-    /** A builder seeded with this photo's fields (mutable {@code selected} is not copied). */
+    /** A builder seeded with this photo's fields. */
     Builder toBuilder() {
-        return new Builder(name, path, displayIndex, physicalSlot, width, height)
+        return new Builder(name, path, displayIndex, physicalSlot(), width, height)
                 .indexedPixels(indexedPixels)
                 .blank(blank)
                 .deleted(deleted)
@@ -63,16 +53,17 @@ final class GalleryPhoto {
                 .copy(copy)
                 .metadataValid(metadataValid)
                 .ownerUserId(ownerUserId)
-                .mergedRgb(mergedRgb)
-                .mergedKind(mergedKind)
-                .mergedSourceCount(mergedSourceCount)
-                .mergedSourceStartDisplayIndex(mergedSourceStartDisplayIndex)
-                .mergedAlgorithm(mergedAlgorithm)
-                .manualMerge(manualMerge);
+                .mergedRgb(isMerge())
+                .mergedKind(mergedKind())
+                .mergedSourceCount(mergedSourceCount())
+                .mergedSourceStartDisplayIndex(mergedSourceStartDisplayIndex())
+                .mergedSourceSlots(mergedSourceSlots())
+                .mergedAlgorithm(mergedAlgorithm())
+                .manualMerge(isManualMerge());
     }
 
     boolean isAlbumBacked() {
-        return physicalSlot >= 0;
+        return slot != null;
     }
 
     boolean isActiveAlbumPhoto() {
@@ -83,24 +74,56 @@ final class GalleryPhoto {
         return deleted && isAlbumBacked();
     }
 
+    /** True when this photo is an RGB merge (replaces the former {@code mergedRgb} flag). */
+    boolean isMerge() {
+        return merge != null;
+    }
+
     boolean isManualMerge() {
-        return manualMerge;
+        return merge != null && merge.manual;
     }
 
     boolean isMergeableSource() {
-        return !deleted && !mergedRgb && isAlbumBacked();
+        return !deleted && !isMerge() && isAlbumBacked();
+    }
+
+    int physicalSlot() {
+        return slot != null ? slot.index() : -1;
+    }
+
+    // Null-safe accessors preserving the former field semantics (ordinary photos
+    // return the old builder defaults).
+    String mergedKind() {
+        return merge != null ? merge.kind : "";
+    }
+
+    int mergedSourceCount() {
+        return merge != null ? merge.sourceCount : 0;
+    }
+
+    int mergedSourceStartDisplayIndex() {
+        return merge != null ? merge.sourceStartDisplayIndex : -1;
+    }
+
+    int[] mergedSourceSlots() {
+        if (merge == null || merge.sourceSlots == null || merge.sourceSlots.length == 0) {
+            return null;
+        }
+        int[] out = new int[merge.sourceSlots.length];
+        System.arraycopy(merge.sourceSlots, 0, out, 0, merge.sourceSlots.length);
+        return out;
+    }
+
+    String mergedAlgorithm() {
+        return merge != null ? merge.algorithm : "";
     }
 
     String mergeIdentity() {
-        return mergeIdentity(mergedKind, mergedSourceStartDisplayIndex, mergedSourceCount);
+        return merge != null ? merge.identity() : MergeInfo.identity("", -1, 0);
     }
 
     GalleryPhoto withDeleted(boolean deleted) {
         return toBuilder().deleted(deleted).build();
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     static final class Builder {
@@ -121,6 +144,7 @@ final class GalleryPhoto {
         private String mergedKind = "";
         private int mergedSourceCount;
         private int mergedSourceStartDisplayIndex = -1;
+        private int[] mergedSourceSlots;
         private String mergedAlgorithm = "";
         private boolean manualMerge;
 
@@ -145,6 +169,7 @@ final class GalleryPhoto {
         Builder mergedKind(String v) { this.mergedKind = v; return this; }
         Builder mergedSourceCount(int v) { this.mergedSourceCount = v; return this; }
         Builder mergedSourceStartDisplayIndex(int v) { this.mergedSourceStartDisplayIndex = v; return this; }
+        Builder mergedSourceSlots(int[] v) { this.mergedSourceSlots = v; return this; }
         Builder mergedAlgorithm(String v) { this.mergedAlgorithm = v; return this; }
         Builder manualMerge(boolean v) { this.manualMerge = v; return this; }
 

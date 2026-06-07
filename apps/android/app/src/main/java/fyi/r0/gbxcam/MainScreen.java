@@ -257,7 +257,6 @@ final class MainScreen implements PaletteMenu.Host {
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
         addActionButton(actions, shareButton);
-        addActionButton(actions, deleteButton);
         root.addView(wrapHorizontal(actions), matchWidthWrapContent());
 
         LinearLayout albumActions = toolbarRow("Album tools");
@@ -273,6 +272,7 @@ final class MainScreen implements PaletteMenu.Host {
         mergeButton.setTextColor(accent);
         mergeButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         addActionButton(albumActions, moveFirstButton);
+        addActionButton(albumActions, deleteButton);
         addActionButton(albumActions, recoverButton);
         addActionButton(albumActions, mergeButton);
         addActionButton(albumActions, compactButton);
@@ -350,7 +350,7 @@ final class MainScreen implements PaletteMenu.Host {
                 dp(120)));
         setLogsVisible(false);
 
-        setBusy(false, null);
+        setBusy(false, null, BusyDialog.Direction.TO_ANDROID);
         updateActions();
     }
 
@@ -363,7 +363,7 @@ final class MainScreen implements PaletteMenu.Host {
         if (selectMode && gallery.selectedCount() == 0) selectMode = false;
         tileHolders = null;
         int gen = displayGeneration.incrementAndGet();
-        setPaletteIndexOnly(gallery.paletteIndex);
+        setPaletteIndexOnly(gallery.palette.index);
         grid.removeAllViews();
         reserveCaptionSpace = hasAnyPhotoMeta(gallery);
         tileHolders = new TileHolder[gallery.photos.size()];
@@ -389,10 +389,10 @@ final class MainScreen implements PaletteMenu.Host {
         updateActions();
     }
 
-    void setBusy(boolean busy, String message) {
+    void setBusy(boolean busy, String message, BusyDialog.Direction direction) {
         this.busy = busy;
         if (busy) {
-            busyOverlay.show(message, accent);
+            busyOverlay.show(message, accent, direction);
         } else if (!busyOverlay.hasError()) {
             busyOverlay.dismiss();
         }
@@ -420,7 +420,7 @@ final class MainScreen implements PaletteMenu.Host {
         this.paletteIndex = safePaletteIndex(paletteIndex);
         applyPaletteIndex(this.paletteIndex);
         if (gallery != null) {
-            gallery = gallery.withPalette(this.paletteIndex, paletteLabels[this.paletteIndex]);
+            gallery = gallery.withPalette(new Palette(this.paletteIndex, paletteLabels[this.paletteIndex]));
             refreshGalleryPalette(this.paletteIndex);
         }
     }
@@ -495,16 +495,16 @@ final class MainScreen implements PaletteMenu.Host {
         if (gallery == null) return;
         if (selected) {
             selectMode = true;
+            gallery = gallery.withSelection(Selection.all(gallery.photos));
             for (int i = 0; i < gallery.photos.size(); i++) {
                 GalleryPhoto photo = gallery.photos.get(i);
-                photo.selected = true;
                 if (tileHolders != null && i < tileHolders.length) {
                     applySelectionToTile(tileHolders[i], photo);
                 }
             }
             updateActions();
         } else {
-            for (GalleryPhoto photo : gallery.photos) photo.selected = false;
+            gallery = gallery.withSelection(Selection.empty());
             exitSelectMode();
         }
     }
@@ -517,9 +517,10 @@ final class MainScreen implements PaletteMenu.Host {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(6), dp(6), dp(6), dp(6));
-        tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        boolean selected = isSelected(photo);
+        tile.setBackground(tileBackground(selected, photo.deleted));
         tile.setContentDescription(photoAccessibilityLabel(photo)
-                + (photo.selected ? ", selected" : ", not selected"));
+                + (selected ? ", selected" : ", not selected"));
 
         View.OnClickListener tileClick = v -> {
             if (selectMode) togglePhotoSelection(photo);
@@ -539,7 +540,7 @@ final class MainScreen implements PaletteMenu.Host {
         FrameLayout imageFrame = new CameraImageFrame(context);
         imageFrame.setOnClickListener(tileClick);
         imageFrame.setOnLongClickListener(tileLongPress);
-        ImageView image = new ImageView(context);
+        ImageView image = new PixelImageView(context);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         image.setAdjustViewBounds(false);
         image.setAlpha(photo.deleted ? 0.72f : 1.0f);
@@ -550,15 +551,15 @@ final class MainScreen implements PaletteMenu.Host {
                 LinearLayout.LayoutParams.MATCH_PARENT));
 
         TextView selectionMarker = new TextView(context);
-        selectionMarker.setText(photo.selected ? "✓" : "");
+        selectionMarker.setText(selected ? "✓" : "");
         selectionMarker.setTextColor(accentText);
         selectionMarker.setTextSize(14);
         selectionMarker.setTypeface(Typeface.DEFAULT_BOLD);
         selectionMarker.setGravity(Gravity.CENTER);
-        selectionMarker.setBackground(checkBackground(photo.selected));
-        selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+        selectionMarker.setBackground(checkBackground(selected));
+        selectionMarker.setContentDescription(selected ? "Selected" : "Not selected");
         if (selectMode) {
-            selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+            selectionMarker.setAlpha(selected ? 1.0f : 0.74f);
         } else {
             selectionMarker.setAlpha(0f);
         }
@@ -595,25 +596,25 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private String photoTitle(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             return (photo.deleted ? "Deleted " : "Merged ") + mergedKindLabel(photo);
         }
         return (photo.deleted ? "Deleted " : "Photo ") + String.format(Locale.US, "%02d", photo.displayIndex + 1);
     }
 
     private String mergedKindLabel(GalleryPhoto photo) {
-        return photo.mergedKind == null || photo.mergedKind.isEmpty() ? "RGB" : photo.mergedKind;
+        return photo.mergedKind() == null || photo.mergedKind().isEmpty() ? "RGB" : photo.mergedKind();
     }
 
     private String photoMeta(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             if (photo.deleted) return "Deleted merge · recoverable";
             String prefix = photo.isManualMerge() ? "Manual" : "Auto";
             StringBuilder meta = new StringBuilder(prefix);
-            if (photo.mergedAlgorithm != null && !photo.mergedAlgorithm.isEmpty()) {
-                meta.append(' ').append(compactAlgorithmLabel(photo.mergedAlgorithm));
+            if (photo.mergedAlgorithm() != null && !photo.mergedAlgorithm().isEmpty()) {
+                meta.append(' ').append(compactAlgorithmLabel(photo.mergedAlgorithm()));
             }
-            if (photo.mergedSourceCount > 0) {
+            if (photo.mergedSourceCount() > 0) {
                 meta.append(' ').append(mergedSourceRange(photo));
             }
             return meta.toString();
@@ -640,7 +641,7 @@ final class MainScreen implements PaletteMenu.Host {
         TextView caption = new TextView(context);
         caption.setText(photoMeta(photo));
         caption.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f)
-                : photo.mergedRgb ? colors.textPrimary : colors.textMuted);
+                : photo.isMerge() ? colors.textPrimary : colors.textMuted);
         caption.setTextSize(10);
         caption.setIncludeFontPadding(false);
         caption.setSingleLine(true);
@@ -665,35 +666,48 @@ final class MainScreen implements PaletteMenu.Host {
 
     private String photoAccessibilityLabel(GalleryPhoto photo) {
         StringBuilder label = new StringBuilder(photoTitle(photo));
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             String meta = photoMeta(photo);
             if (!meta.isEmpty()) label.append(", ").append(meta);
         } else if (photo.isAlbumBacked()) {
-            label.append(", slot ").append(photo.physicalSlot + 1);
+            label.append(", slot ").append(photo.slot.displayNumber());
         }
         return label.toString();
     }
 
     private String mergedSourceRange(GalleryPhoto photo) {
-        int start = photo.mergedSourceStartDisplayIndex + 1;
-        int end = start + Math.max(0, photo.mergedSourceCount - 1);
+        int[] slots = photo.mergedSourceSlots();
+        if (photo.isManualMerge() && slots != null && slots.length > 0) {
+            StringBuilder label = new StringBuilder();
+            for (int i = 0; i < slots.length; i++) {
+                Slot slot = Slot.fromPhysicalIndex(slots[i]);
+                if (slot == null) {
+                    continue;
+                }
+                if (label.length() > 0) {
+                    label.append(',');
+                }
+                label.append(slot.twoDigitLabel());
+            }
+            if (label.length() > 0) {
+                return label.toString();
+            }
+        }
+        int start = photo.mergedSourceStartDisplayIndex() + 1;
+        int end = start + Math.max(0, photo.mergedSourceCount() - 1);
         return String.format(Locale.US, "%02d-%02d", start, end);
     }
 
     private String compactAlgorithmLabel(String id) {
-        if (RgbMergeDetector.ALGO_BASIC.equals(id)) return "Basic";
-        if (RgbMergeDetector.ALGO_CLEAR_LUM.equals(id)) return "Clear";
-        if (RgbMergeDetector.ALGO_NORM.equals(id)) return "Norm";
-        if (RgbMergeDetector.ALGO_NORM_CLEAR_LUM.equals(id)) return "N+Clr";
-        if (RgbMergeDetector.ALGO_SAT_BOOST.equals(id)) return "Sat";
-        if (RgbMergeDetector.ALGO_ADAPTIVE.equals(id)) return "Adapt";
-        return id;
+        MergeAlgorithm a = MergeAlgorithm.fromId(id);
+        return a != null ? a.compactLabel() : id;
     }
 
     private void togglePhotoSelection(GalleryPhoto photo) {
         if (gallery == null) return;
-        photo.selected = !photo.selected;
-        listener.onPhotoSelectionChanged(photo, photo.selected);
+        gallery = gallery.withSelection(gallery.selection.toggle(photo));
+        boolean selected = gallery.isSelected(photo);
+        listener.onPhotoSelectionChanged(photo, selected);
         int idx = gallery.photos.indexOf(photo);
         if (tileHolders != null && idx >= 0 && idx < tileHolders.length) {
             applySelectionToTile(tileHolders[idx], photo);
@@ -706,18 +720,19 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private void applySelectionToTile(TileHolder holder, GalleryPhoto photo) {
-        holder.tile.setBackground(tileBackground(photo.selected, photo.deleted));
+        boolean selected = isSelected(photo);
+        holder.tile.setBackground(tileBackground(selected, photo.deleted));
         holder.tile.setContentDescription(photoAccessibilityLabel(photo)
-                + (photo.selected ? ", selected" : ", not selected"));
+                + (selected ? ", selected" : ", not selected"));
         holder.selectionMarker.setTextColor(accentText);
-        holder.selectionMarker.setText(photo.selected ? "✓" : "");
-        holder.selectionMarker.setBackground(checkBackground(photo.selected));
+        holder.selectionMarker.setText(selected ? "✓" : "");
+        holder.selectionMarker.setBackground(checkBackground(selected));
         if (selectMode) {
-            holder.selectionMarker.setAlpha(photo.selected ? 1.0f : 0.74f);
+            holder.selectionMarker.setAlpha(selected ? 1.0f : 0.74f);
         } else {
             holder.selectionMarker.setAlpha(0f);
         }
-        holder.selectionMarker.setContentDescription(photo.selected ? "Selected" : "Not selected");
+        holder.selectionMarker.setContentDescription(selected ? "Selected" : "Not selected");
     }
 
     private void exitSelectMode() {
@@ -733,17 +748,23 @@ final class MainScreen implements PaletteMenu.Host {
         }
     }
 
+    private boolean isSelected(GalleryPhoto photo) {
+        return gallery != null && gallery.isSelected(photo);
+    }
+
     private void refreshGalleryPalette(int paletteIndex) {
         if (tileHolders == null) {
             return;
         }
 
-        int gen = displayGeneration.incrementAndGet();
+        displayGeneration.incrementAndGet();
         for (TileHolder holder : tileHolders) {
             if (holder == null) {
                 continue;
             }
-            renderPhotoInto(holder.photo, holder.image, gen, paletteIndex);
+            if (PhotoRenderer.canRenderIndexed(holder.photo)) {
+                renderPhotoIntoNow(holder.photo, holder.image, paletteIndex);
+            }
             applySelectionToTile(holder, holder.photo);
         }
     }
@@ -763,8 +784,12 @@ final class MainScreen implements PaletteMenu.Host {
                 });
             });
         } else {
-            image.setImageBitmap(PhotoRenderer.renderBitmap(photo, palette));
+            renderPhotoIntoNow(photo, image, paletteIndex);
         }
+    }
+
+    private void renderPhotoIntoNow(GalleryPhoto photo, ImageView image, int paletteIndex) {
+        image.setImageBitmap(PhotoRenderer.renderBitmap(photo, paletteColorsForIndex(paletteIndex)));
     }
 
     private GradientDrawable tileBackground(boolean selected, boolean deleted) {

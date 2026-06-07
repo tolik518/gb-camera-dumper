@@ -11,15 +11,13 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.util.function.Consumer;
-
 /** The "About" dialog: app version, connected-device info, links, and license. */
 final class AboutDialog {
     private final Activity activity;
-    private final Consumer<String> logger;
+    private final AppCallback<String> logger;
     private final MainScreen screen;
 
-    AboutDialog(Activity activity, MainScreen screen, Consumer<String> logger) {
+    AboutDialog(Activity activity, MainScreen screen, AppCallback<String> logger) {
         this.activity = activity;
         this.screen = screen;
         this.logger = logger;
@@ -51,6 +49,8 @@ final class AboutDialog {
 
         body.addView(aboutRow("Report a bug", "518@returnnull.de",
                 "mailto:518@returnnull.de", colors, accent));
+        body.addView(aboutRow("Join our Discord", "Report bugs, ask for help or feature requests!",
+                "https://discord.gg/ZvXKbCtHRN", colors, accent));
         body.addView(aboutRow("tolik518/GBxCAM-Viewer", 
                 "The app is fully open source! Contributions and feedback are welcome.",
                 "https://github.com/tolik518/GBxCAM-Viewer", colors, accent));

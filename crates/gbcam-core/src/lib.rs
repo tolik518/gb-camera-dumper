@@ -1,6 +1,12 @@
 use std::fs;
 use std::path::Path;
 
+pub mod rgb_merge;
+pub use rgb_merge::{
+    detect_auto_rgb_merge_candidates, merge_rgb_gray8, AutoRgbMergeCandidate, AutoRgbMergeOptions,
+    RgbMergeAlgorithm, RgbMergeError, RgbMergeOrder,
+};
+
 pub const MAPPER_MAC_GBD: u8 = 0xFC;
 pub const SRAM_BANKS: usize = 16;
 pub const BANK_SIZE: usize = 0x2000;
@@ -244,6 +250,8 @@ pub enum GbcamCoreError {
     NoFreeDisplayPosition,
     #[error("duplicate album physical slot: {slot}")]
     DuplicatePhysicalSlot { slot: usize },
+    #[error("invalid RGB pixel count: {actual} bytes is not divisible by 3")]
+    InvalidRgbPixelCount { actual: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -1265,6 +1273,21 @@ pub fn write_palette_png(
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?
         .write_image_data(&indexed_to_rgb8(pixels_indexed, palette))?;
+    Ok(())
+}
+
+pub fn write_rgb_png(path: &Path, pixels_rgb: &[u8]) -> Result<(), GbcamCoreError> {
+    if pixels_rgb.len() % 3 != 0 {
+        return Err(GbcamCoreError::InvalidRgbPixelCount {
+            actual: pixels_rgb.len(),
+        });
+    }
+    let file = fs::File::create(path)?;
+    let height = (pixels_rgb.len() / 3 / IMG_W) as u32;
+    let mut enc = png::Encoder::new(file, IMG_W as u32, height);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()?.write_image_data(pixels_rgb)?;
     Ok(())
 }
 

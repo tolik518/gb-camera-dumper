@@ -167,7 +167,8 @@ final class UiStyle {
             int badgeTextSize,
             boolean monospaceBadge,
             int accent,
-            ChoiceCommitListener listener) {
+            ChoiceCommitListener listener
+    ) {
         Palette colors = palette(context);
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -195,7 +196,7 @@ final class UiStyle {
 
         final int[] currentIndex = { selectedIndex };
         row.setClickable(true);
-        row.setOnClickListener(v -> singleChoiceDialog(context, title, dialogLabels, currentIndex[0], which -> {
+        row.setOnClickListener(v -> singleChoiceDialog(context, title, dialogLabels, currentIndex[0], accent, which -> {
             currentIndex[0] = which;
             String newBadge = listener.onChoice(which);
             badge.setText(newBadge);
@@ -299,6 +300,16 @@ final class UiStyle {
             String[] labels,
             int selectedIndex,
             ChoiceListener listener) {
+        return singleChoiceDialog(context, title, labels, selectedIndex, palette(context).primary, listener);
+    }
+
+    static Dialog singleChoiceDialog(
+            Context context,
+            String title,
+            String[] labels,
+            int selectedIndex,
+            int accent,
+            ChoiceListener listener) {
         Palette colors = palette(context);
         Dialog dialog = baseDialog(context);
 
@@ -313,15 +324,15 @@ final class UiStyle {
             boolean selected = i == selectedIndex;
             TextView item = new TextView(context);
             item.setText(labels[i]);
-            item.setTextColor(selected ? colors.primary : colors.textPrimary);
+            item.setTextColor(selected ? accent : colors.textPrimary);
             item.setTextSize(14);
             item.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             item.setGravity(Gravity.CENTER_VERTICAL);
             item.setSingleLine(true);
             item.setPadding(dp(context, 14), 0, dp(context, 14), 0);
             item.setBackground(rounded(context,
-                    selected ? colors.selectedBackground : colors.surfaceRaised,
-                    selected ? colors.selectedBorder : colors.border,
+                    selected ? blend(accent, colors.background, 0.72f) : colors.surfaceRaised,
+                    selected ? accent : colors.border,
                     8,
                     selected ? 2 : 1));
             item.setOnClickListener(v -> {

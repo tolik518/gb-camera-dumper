@@ -38,6 +38,8 @@ final class BusyDialog {
     private boolean hasError;
     private int lastPercent = -1;
 
+    public enum Direction { TO_ANDROID, TO_GBCAM }
+
     BusyDialog(Context context, View handlerView) {
         this.context = context;
         this.handlerView = handlerView;
@@ -48,7 +50,7 @@ final class BusyDialog {
     }
 
     /** Shows the overlay with an optional {@code message}; {@code accent} colors the percent. */
-    void show(String message, int accent) {
+    void show(String message, int accent, Direction direction) {
         dismiss();
         UiStyle.Palette colors = UiStyle.palette(context);
         Dialog dialog = UiStyle.baseDialog(context);
@@ -60,7 +62,13 @@ final class BusyDialog {
         content.setPadding(dp(32), dp(28), dp(32), dp(28));
         content.setBackground(UiStyle.rounded(context, colors.surface, colors.borderStrong, 14, 1));
 
-        GifView gif = new GifView(context, R.raw.gbcam_logo);
+        GifView gif;
+        if (direction == Direction.TO_ANDROID) {
+            gif = new GifView(context, R.raw.gbcam_logo);
+        } else {
+            gif = new GifView(context, R.raw.gbcam_logo_reversed);
+        }
+
         content.addView(gif, new LinearLayout.LayoutParams(dp(128), dp(64)));
         this.gif = gif;
 

@@ -13,29 +13,41 @@ final class GalleryState {
     final String connected;
     final String savePath;
     final String outputDir;
-    final int paletteIndex;
-    final String paletteName;
+    final Palette palette;
     final int validationErrors;
     final int validationWarnings;
     final List<GalleryPhoto> photos;
+    final Selection selection;
 
     GalleryState(
             String connected,
             String savePath,
             String outputDir,
-            int paletteIndex,
-            String paletteName,
+            Palette palette,
             int validationErrors,
             int validationWarnings,
             List<GalleryPhoto> photos) {
+        this(connected, savePath, outputDir, palette, validationErrors, validationWarnings,
+                photos, Selection.empty());
+    }
+
+    private GalleryState(
+            String connected,
+            String savePath,
+            String outputDir,
+            Palette palette,
+            int validationErrors,
+            int validationWarnings,
+            List<GalleryPhoto> photos,
+            Selection selection) {
         this.connected = connected;
         this.savePath = savePath;
         this.outputDir = outputDir;
-        this.paletteIndex = paletteIndex;
-        this.paletteName = paletteName;
+        this.palette = palette;
         this.validationErrors = validationErrors;
         this.validationWarnings = validationWarnings;
         this.photos = photos;
+        this.selection = selection.retainFor(photos);
     }
 
     static GalleryState fromJson(String json) throws JSONException {
@@ -69,23 +81,23 @@ final class GalleryState {
                 root.getString("connected"),
                 root.getString("savePath"),
                 root.getString("outputDir"),
-                root.optInt("paletteIndex", 0),
-                root.optString("paletteName", "Monochrome - Grayscale"),
+                new Palette(root.optInt("paletteIndex", 0),
+                        root.optString("paletteName", "Monochrome - Grayscale")),
                 root.optInt("validationErrors", 0),
                 root.optInt("validationWarnings", 0),
                 photos);
     }
 
-    GalleryState withPalette(int paletteIndex, String paletteName) {
+    GalleryState withPalette(Palette palette) {
         return new GalleryState(
                 connected,
                 savePath,
                 outputDir,
-                paletteIndex,
-                paletteName,
+                palette,
                 validationErrors,
                 validationWarnings,
-                photos);
+                photos,
+                selection);
     }
 
     /** A copy of this state with a different photos list; all other fields preserved. */
@@ -94,126 +106,51 @@ final class GalleryState {
                 connected,
                 savePath,
                 outputDir,
-                paletteIndex,
-                paletteName,
+                palette,
                 validationErrors,
                 validationWarnings,
-                photos);
+                photos,
+                selection);
+    }
+
+    GalleryState withSelection(Selection selection) {
+        return new GalleryState(
+                connected,
+                savePath,
+                outputDir,
+                palette,
+                validationErrors,
+                validationWarnings,
+                photos,
+                selection);
+    }
+
+    boolean isSelected(GalleryPhoto photo) {
+        return selection.contains(photo);
     }
 
     int selectedCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected) {
-                count++;
-            }
-        }
-        return count;
+        return selection.count(photos);
     }
 
     int selectedManualMergeCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isManualMerge()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.manualMergeCount(photos);
     }
 
     int selectedMergeableCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isMergeableSource()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.mergeableCount(photos);
     }
 
     int selectedActiveCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isActiveAlbumPhoto()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.activeCount(photos);
     }
 
     int selectedDeletedCount() {
-        int count = 0;
-        for (GalleryPhoto photo : photos) {
-            if (photo.selected && photo.isDeletedAlbumPhoto()) {
-                count++;
-            }
-        }
-        return count;
+        return selection.deletedCount(photos);
     }
 
-    String selectedPhysicalSlotsCsv(boolean deleted) {
-        StringBuilder csv = new StringBuilder();
-        for (GalleryPhoto photo : photos) {
-            if (!photo.selected || photo.deleted != deleted || !photo.isAlbumBacked()) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-        return csv.toString();
-    }
-
-    String activePhysicalSlotsCsv() {
-        StringBuilder csv = new StringBuilder();
-        for (GalleryPhoto photo : photos) {
-            if (!photo.isActiveAlbumPhoto()) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-        return csv.toString();
-    }
-
-    String selectedActiveFirstPhysicalSlotsCsv() {
-        StringBuilder csv = new StringBuilder();
-        appendActiveSlots(csv, true);
-        appendActiveSlots(csv, false);
-        return csv.toString();
-    }
-
-    private void appendActiveSlots(StringBuilder csv, boolean selected) {
-        for (GalleryPhoto photo : photos) {
-            if (!photo.isActiveAlbumPhoto() || photo.selected != selected) {
-                continue;
-            }
-            if (csv.length() > 0) {
-                csv.append(',');
-            }
-            csv.append(photo.physicalSlot);
-        }
-    }
-
-    void copySelectionFrom(GalleryState previous) {
-        for (GalleryPhoto photo : photos) {
-            for (GalleryPhoto old : previous.photos) {
-                if (sameSelectionIdentity(photo, old)) {
-                    photo.selected = old.selected;
-                    break;
-                }
-            }
-        }
-    }
-
-    private static boolean sameSelectionIdentity(GalleryPhoto photo, GalleryPhoto old) {
-        if (photo.isAlbumBacked() && old.isAlbumBacked()) {
-            return photo.physicalSlot == old.physicalSlot;
-        }
-        return photo.mergedRgb && old.mergedRgb && photo.path.equals(old.path);
+    GalleryState copySelectionFrom(GalleryState previous) {
+        return withSelection(previous.selection);
     }
 
     private static byte[] decodeIndexedPixels(String encoded) {

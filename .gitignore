@@ -11,3 +11,5 @@
 /apps/android/build/
 /apps/android/local.properties
 /.android-sdk/
+/.idea
+/.claude/
