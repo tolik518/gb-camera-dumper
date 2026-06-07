@@ -217,7 +217,7 @@ final class RgbMergeDetector {
         ImageData[] images = new ImageData[count];
         for (int offset = 0; offset < count; offset++) {
             GalleryPhoto photo = photos.get(start + offset);
-            if (photo.deleted || photo.mergedRgb || photo.physicalSlot < 0
+            if (photo.deleted || photo.isMerge() || photo.physicalSlot < 0
                     || photo.displayIndex != photos.get(start).displayIndex + offset) {
                 return null;
             }
@@ -240,7 +240,7 @@ final class RgbMergeDetector {
         if (!mergeDir.mkdirs() && !mergeDir.isDirectory()) return null;
 
         // Resolve algorithm
-        String identity = GalleryPhoto.mergeIdentity(layout.label, source[0].displayIndex, count);
+        String identity = MergeInfo.identity(layout.label, source[0].displayIndex, count);
         String requested = (algorithmOverrides != null && algorithmOverrides.containsKey(identity))
                 ? algorithmOverrides.get(identity)
                 : defaultAlgorithm;

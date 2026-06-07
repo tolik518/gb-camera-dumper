@@ -595,25 +595,25 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private String photoTitle(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             return (photo.deleted ? "Deleted " : "Merged ") + mergedKindLabel(photo);
         }
         return (photo.deleted ? "Deleted " : "Photo ") + String.format(Locale.US, "%02d", photo.displayIndex + 1);
     }
 
     private String mergedKindLabel(GalleryPhoto photo) {
-        return photo.mergedKind == null || photo.mergedKind.isEmpty() ? "RGB" : photo.mergedKind;
+        return photo.mergedKind() == null || photo.mergedKind().isEmpty() ? "RGB" : photo.mergedKind();
     }
 
     private String photoMeta(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             if (photo.deleted) return "Deleted merge · recoverable";
             String prefix = photo.isManualMerge() ? "Manual" : "Auto";
             StringBuilder meta = new StringBuilder(prefix);
-            if (photo.mergedAlgorithm != null && !photo.mergedAlgorithm.isEmpty()) {
-                meta.append(' ').append(compactAlgorithmLabel(photo.mergedAlgorithm));
+            if (photo.mergedAlgorithm() != null && !photo.mergedAlgorithm().isEmpty()) {
+                meta.append(' ').append(compactAlgorithmLabel(photo.mergedAlgorithm()));
             }
-            if (photo.mergedSourceCount > 0) {
+            if (photo.mergedSourceCount() > 0) {
                 meta.append(' ').append(mergedSourceRange(photo));
             }
             return meta.toString();
@@ -640,7 +640,7 @@ final class MainScreen implements PaletteMenu.Host {
         TextView caption = new TextView(context);
         caption.setText(photoMeta(photo));
         caption.setTextColor(photo.deleted ? blend(colors.danger, colors.textSecondary, 0.42f)
-                : photo.mergedRgb ? colors.textPrimary : colors.textMuted);
+                : photo.isMerge() ? colors.textPrimary : colors.textMuted);
         caption.setTextSize(10);
         caption.setIncludeFontPadding(false);
         caption.setSingleLine(true);
@@ -665,7 +665,7 @@ final class MainScreen implements PaletteMenu.Host {
 
     private String photoAccessibilityLabel(GalleryPhoto photo) {
         StringBuilder label = new StringBuilder(photoTitle(photo));
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             String meta = photoMeta(photo);
             if (!meta.isEmpty()) label.append(", ").append(meta);
         } else if (photo.isAlbumBacked()) {
@@ -675,8 +675,8 @@ final class MainScreen implements PaletteMenu.Host {
     }
 
     private String mergedSourceRange(GalleryPhoto photo) {
-        int start = photo.mergedSourceStartDisplayIndex + 1;
-        int end = start + Math.max(0, photo.mergedSourceCount - 1);
+        int start = photo.mergedSourceStartDisplayIndex() + 1;
+        int end = start + Math.max(0, photo.mergedSourceCount() - 1);
         return String.format(Locale.US, "%02d-%02d", start, end);
     }
 

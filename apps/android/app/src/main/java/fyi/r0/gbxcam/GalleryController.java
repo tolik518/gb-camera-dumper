@@ -81,7 +81,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         if (gallery == null) return;
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && !photo.deleted && !photo.mergedRgb && photo.physicalSlot >= 0) {
+            if (photo.selected && !photo.deleted && !photo.isMerge() && photo.physicalSlot >= 0) {
                 sources.add(photo);
             }
         }
@@ -327,7 +327,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isActiveAlbumPhoto() || p.mergedRgb) continue;
+            if (!p.selected || !p.isActiveAlbumPhoto() || p.isMerge()) continue;
             photos.set(i, p.withDeleted(true));
             newSlots.add(String.valueOf(p.physicalSlot));
             changed = true;
@@ -345,7 +345,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.selected || !p.isDeletedAlbumPhoto() || p.mergedRgb) continue;
+            if (!p.selected || !p.isDeletedAlbumPhoto() || p.isMerge()) continue;
             if (!localDeleted.contains(String.valueOf(p.physicalSlot))) continue;
             photos.set(i, p.withDeleted(false));
             toRestore.add(String.valueOf(p.physicalSlot));
@@ -421,7 +421,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     private static Set<String> selectedDeletedSlotKeys(GalleryState gallery) {
         Set<String> slots = new HashSet<>();
         for (GalleryPhoto photo : gallery.photos) {
-            if (photo.selected && photo.isDeletedAlbumPhoto() && !photo.mergedRgb) {
+            if (photo.selected && photo.isDeletedAlbumPhoto() && !photo.isMerge()) {
                 slots.add(String.valueOf(photo.physicalSlot));
             }
         }
@@ -655,8 +655,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             // The committed manual merge is a brand-new photo object; share it directly.
             applyManualMergeChanges(photo, order, algorithm, this::shareSinglePhoto);
         } else {
-            int start = photo.mergedSourceStartDisplayIndex;
-            int count = photo.mergedSourceCount;
+            int start = photo.mergedSourceStartDisplayIndex();
+            int count = photo.mergedSourceCount();
             settings.saveMergeAlgorithmOverride(photo, algorithm);
             // Recolor regenerates the auto-merge in place; share whatever auto-merge now
             // covers this source range (there is exactly one auto-merge per range).
@@ -671,9 +671,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
         GalleryState g = screen.gallery();
         if (g == null) return null;
         for (GalleryPhoto p : g.photos) {
-            if (p.mergedRgb && !p.isManualMerge()
-                    && p.mergedSourceStartDisplayIndex == sourceStart
-                    && p.mergedSourceCount == sourceCount) {
+            if (p.isMerge() && !p.isManualMerge()
+                    && p.mergedSourceStartDisplayIndex() == sourceStart
+                    && p.mergedSourceCount() == sourceCount) {
                 return p;
             }
         }
@@ -742,8 +742,8 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     private static boolean samePhotoIdentity(GalleryPhoto left, GalleryPhoto right) {
-        if (left.mergedRgb || right.mergedRgb) {
-            return left.mergedRgb == right.mergedRgb
+        if (left.isMerge() || right.isMerge()) {
+            return left.isMerge() == right.isMerge()
                     && left.path != null
                     && left.path.equals(right.path);
         }
@@ -799,11 +799,11 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
             AppCallback<GalleryPhoto> onApplied) {
         GalleryState gallery = screen.gallery();
         if (gallery == null) return;
-        int start = photo.mergedSourceStartDisplayIndex;
-        int count = photo.mergedSourceCount;
+        int start = photo.mergedSourceStartDisplayIndex();
+        int count = photo.mergedSourceCount();
         List<GalleryPhoto> sources = new ArrayList<>();
         for (GalleryPhoto p : gallery.photos) {
-            if (!p.mergedRgb && !p.deleted && p.physicalSlot >= 0
+            if (!p.isMerge() && !p.deleted && p.physicalSlot >= 0
                     && p.displayIndex >= start && p.displayIndex < start + count) {
                 sources.add(p);
             }

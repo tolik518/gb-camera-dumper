@@ -74,12 +74,12 @@ final class ManualMergeStore {
                 obj.put("name", m.name);
                 obj.put("path", m.path);
                 obj.put("displayIndex", m.displayIndex);
-                obj.put("mergedKind", m.mergedKind != null ? m.mergedKind : "");
-                obj.put("mergedSourceCount", m.mergedSourceCount);
-                obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex);
-                obj.put("mergedAlgorithm", m.mergedAlgorithm != null ? m.mergedAlgorithm : "");
+                obj.put("mergedKind", m.mergedKind() != null ? m.mergedKind() : "");
+                obj.put("mergedSourceCount", m.mergedSourceCount());
+                obj.put("mergedSourceStartDisplayIndex", m.mergedSourceStartDisplayIndex());
+                obj.put("mergedAlgorithm", m.mergedAlgorithm() != null ? m.mergedAlgorithm() : "");
                 obj.put("deleted", m.deleted);
-                obj.put("manualMerge", m.manualMerge);
+                obj.put("manualMerge", m.isManualMerge());
                 arr.put(obj);
             }
             File dir = AppFiles.dumpsDir(context);
@@ -142,7 +142,7 @@ final class ManualMergeStore {
             List<GalleryPhoto> list = photos != null ? photos : gallery.photos;
             for (int i = 0; i < list.size(); i++) {
                 GalleryPhoto p = list.get(i);
-                if (p.mergedRgb && p.path.equals(m.path)) { alreadyPresent = true; break; }
+                if (p.isMerge() && p.path.equals(m.path)) { alreadyPresent = true; break; }
             }
             if (alreadyPresent) continue;
             if (photos == null) photos = new ArrayList<>(gallery.photos);
@@ -156,11 +156,11 @@ final class ManualMergeStore {
 
     /** Index at which {@code merge} should be inserted into {@code photos}, or -1 if its sources are absent. */
     static int insertIndex(List<GalleryPhoto> photos, GalleryPhoto merge) {
-        int endIdx = merge.mergedSourceStartDisplayIndex + merge.mergedSourceCount - 1;
+        int endIdx = merge.mergedSourceStartDisplayIndex() + merge.mergedSourceCount() - 1;
         int insertAt = -1;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.mergedRgb && !p.deleted && p.displayIndex == endIdx) {
+            if (!p.isMerge() && !p.deleted && p.displayIndex == endIdx) {
                 insertAt = i + 1;
                 break;
             }
@@ -168,9 +168,9 @@ final class ManualMergeStore {
         if (insertAt < 0) return -1;
         while (insertAt < photos.size()) {
             GalleryPhoto p = photos.get(insertAt);
-            if (!p.mergedRgb
-                    || p.mergedSourceStartDisplayIndex != merge.mergedSourceStartDisplayIndex
-                    || p.mergedSourceCount != merge.mergedSourceCount) {
+            if (!p.isMerge()
+                    || p.mergedSourceStartDisplayIndex() != merge.mergedSourceStartDisplayIndex()
+                    || p.mergedSourceCount() != merge.mergedSourceCount()) {
                 break;
             }
             insertAt++;

@@ -161,7 +161,7 @@ final class GalleryState {
         if (photo.isAlbumBacked() && old.isAlbumBacked()) {
             return photo.physicalSlot == old.physicalSlot;
         }
-        return photo.mergedRgb && old.mergedRgb && photo.path.equals(old.path);
+        return photo.isMerge() && old.isMerge() && photo.path.equals(old.path);
     }
 
     private static byte[] decodeIndexedPixels(String encoded) {

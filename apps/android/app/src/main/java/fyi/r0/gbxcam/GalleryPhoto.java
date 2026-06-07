@@ -14,17 +14,9 @@ final class GalleryPhoto {
     final boolean copy;
     final boolean metadataValid;
     final String ownerUserId;
-    final boolean mergedRgb;
-    final String mergedKind;
-    final int mergedSourceCount;
-    final int mergedSourceStartDisplayIndex;
-    final String mergedAlgorithm;
-    final boolean manualMerge;
+    /** Merge descriptor when this photo is an RGB merge; {@code null} for ordinary photos. */
+    final MergeInfo merge;
     boolean selected;
-
-    static String mergeIdentity(String kind, int sourceStartDisplayIndex, int sourceCount) {
-        return nullToEmpty(kind) + ":" + sourceStartDisplayIndex + ":" + sourceCount;
-    }
 
     private GalleryPhoto(Builder b) {
         this.name = b.name;
@@ -40,12 +32,10 @@ final class GalleryPhoto {
         this.copy = b.copy;
         this.metadataValid = b.metadataValid;
         this.ownerUserId = b.ownerUserId;
-        this.mergedRgb = b.mergedRgb;
-        this.mergedKind = b.mergedKind;
-        this.mergedSourceCount = b.mergedSourceCount;
-        this.mergedSourceStartDisplayIndex = b.mergedSourceStartDisplayIndex;
-        this.mergedAlgorithm = b.mergedAlgorithm;
-        this.manualMerge = b.manualMerge;
+        this.merge = b.mergedRgb
+                ? new MergeInfo(b.mergedKind, b.mergedSourceCount,
+                        b.mergedSourceStartDisplayIndex, b.mergedAlgorithm, b.manualMerge)
+                : null;
     }
 
     static Builder builder(String name, String path, int displayIndex,
@@ -63,12 +53,12 @@ final class GalleryPhoto {
                 .copy(copy)
                 .metadataValid(metadataValid)
                 .ownerUserId(ownerUserId)
-                .mergedRgb(mergedRgb)
-                .mergedKind(mergedKind)
-                .mergedSourceCount(mergedSourceCount)
-                .mergedSourceStartDisplayIndex(mergedSourceStartDisplayIndex)
-                .mergedAlgorithm(mergedAlgorithm)
-                .manualMerge(manualMerge);
+                .mergedRgb(isMerge())
+                .mergedKind(mergedKind())
+                .mergedSourceCount(mergedSourceCount())
+                .mergedSourceStartDisplayIndex(mergedSourceStartDisplayIndex())
+                .mergedAlgorithm(mergedAlgorithm())
+                .manualMerge(isManualMerge());
     }
 
     boolean isAlbumBacked() {
@@ -83,24 +73,43 @@ final class GalleryPhoto {
         return deleted && isAlbumBacked();
     }
 
+    /** True when this photo is an RGB merge (replaces the former {@code mergedRgb} flag). */
+    boolean isMerge() {
+        return merge != null;
+    }
+
     boolean isManualMerge() {
-        return manualMerge;
+        return merge != null && merge.manual;
     }
 
     boolean isMergeableSource() {
-        return !deleted && !mergedRgb && isAlbumBacked();
+        return !deleted && !isMerge() && isAlbumBacked();
+    }
+
+    // Null-safe accessors preserving the former field semantics (ordinary photos
+    // return the old builder defaults).
+    String mergedKind() {
+        return merge != null ? merge.kind : "";
+    }
+
+    int mergedSourceCount() {
+        return merge != null ? merge.sourceCount : 0;
+    }
+
+    int mergedSourceStartDisplayIndex() {
+        return merge != null ? merge.sourceStartDisplayIndex : -1;
+    }
+
+    String mergedAlgorithm() {
+        return merge != null ? merge.algorithm : "";
     }
 
     String mergeIdentity() {
-        return mergeIdentity(mergedKind, mergedSourceStartDisplayIndex, mergedSourceCount);
+        return merge != null ? merge.identity() : MergeInfo.identity("", -1, 0);
     }
 
     GalleryPhoto withDeleted(boolean deleted) {
         return toBuilder().deleted(deleted).build();
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     static final class Builder {

@@ -48,7 +48,7 @@ final class PhotoRenderer {
     }
 
     private static boolean canRenderIndexed(GalleryPhoto photo) {
-        if (photo.mergedRgb || photo.indexedPixels == null || photo.width <= 0 || photo.height <= 0) {
+        if (photo.isMerge() || photo.indexedPixels == null || photo.width <= 0 || photo.height <= 0) {
             return false;
         }
         return photo.indexedPixels.length >= photo.width * photo.height;

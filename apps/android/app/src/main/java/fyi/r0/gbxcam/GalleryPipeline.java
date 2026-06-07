@@ -44,7 +44,7 @@ final class GalleryPipeline {
         boolean changed = false;
         for (int i = 0; i < photos.size(); i++) {
             GalleryPhoto p = photos.get(i);
-            if (!p.isActiveAlbumPhoto() || p.mergedRgb) continue;
+            if (!p.isActiveAlbumPhoto() || p.isMerge()) continue;
             if (!deleted.contains(String.valueOf(p.physicalSlot))) continue;
             photos.set(i, p.withDeleted(true));
             changed = true;

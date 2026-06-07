@@ -69,10 +69,10 @@ final class PhotoDetailDialog {
 
         // Mutable state shared across in-place navigations
         GalleryPhoto[] photoRef       = { photo };
-        String[]       algoRef        = { photo.mergedRgb && photo.mergedAlgorithm != null ? photo.mergedAlgorithm : "" };
+        String[]       algoRef        = { photo.isMerge() && photo.mergedAlgorithm() != null ? photo.mergedAlgorithm() : "" };
         boolean[]      algoChangedRef  = { false };
-        String[]       orderRef       = { photo.mergedKind != null && !photo.mergedKind.isEmpty() ? photo.mergedKind
-                                          : MergeOrder.defaultFor(photo.mergedSourceCount) };
+        String[]       orderRef       = { photo.mergedKind() != null && !photo.mergedKind().isEmpty() ? photo.mergedKind()
+                                          : MergeOrder.defaultFor(photo.mergedSourceCount()) };
         boolean[]      orderChangedRef = { false };
         int[]          genRef         = { 0 };
 
@@ -92,10 +92,10 @@ final class PhotoDetailDialog {
         Runnable[] rebuildRef = { null };
         rebuildRef[0] = () -> {
             GalleryPhoto p = photoRef[0];
-            algoRef[0]         = p.mergedRgb && p.mergedAlgorithm != null ? p.mergedAlgorithm : "";
+            algoRef[0]         = p.isMerge() && p.mergedAlgorithm() != null ? p.mergedAlgorithm() : "";
             algoChangedRef[0]  = false;
-            orderRef[0]        = p.mergedKind != null && !p.mergedKind.isEmpty() ? p.mergedKind
-                                 : MergeOrder.defaultFor(p.mergedSourceCount);
+            orderRef[0]        = p.mergedKind() != null && !p.mergedKind().isEmpty() ? p.mergedKind()
+                                 : MergeOrder.defaultFor(p.mergedSourceCount());
             orderChangedRef[0] = false;
             genRef[0]++;
 
@@ -113,7 +113,7 @@ final class PhotoDetailDialog {
             shareBtn.setOnClickListener(v -> {
                 // Share what's displayed: if order/algorithm changed but isn't committed yet
                 // (the file is only written on dismiss), commit it first, then share the result.
-                if ((algoChangedRef[0] || orderChangedRef[0]) && p.mergedRgb) {
+                if ((algoChangedRef[0] || orderChangedRef[0]) && p.isMerge()) {
                     algoChangedRef[0] = false;   // committed now — don't re-apply on dismiss
                     orderChangedRef[0] = false;
                     host.applyDetailChangesThenShare(p, orderRef[0], algoRef[0]);
@@ -138,13 +138,13 @@ final class PhotoDetailDialog {
                 if (g == null) return false;
                 int idx = g.photos.indexOf(photoRef[0]);
                 if (dx < 0 && idx >= 0 && idx < g.photos.size() - 1) {
-                    if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].mergedRgb)
+                    if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].isMerge())
                         host.applyOrSaveDetailChanges(photoRef[0], orderRef[0], algoRef[0]);
                     photoRef[0] = g.photos.get(idx + 1);
                     rebuildRef[0].run();
                     return true;
                 } else if (dx > 0 && idx > 0) {
-                    if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].mergedRgb)
+                    if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].isMerge())
                         host.applyOrSaveDetailChanges(photoRef[0], orderRef[0], algoRef[0]);
                     photoRef[0] = g.photos.get(idx - 1);
                     rebuildRef[0].run();
@@ -204,7 +204,7 @@ final class PhotoDetailDialog {
 
         dialog.setContentView(outer);
         dialog.setOnDismissListener(d -> {
-            if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].mergedRgb)
+            if ((algoChangedRef[0] || orderChangedRef[0]) && photoRef[0].isMerge())
                 host.applyOrSaveDetailChanges(photoRef[0], orderRef[0], algoRef[0]);
         });
         UiStyle.sizeDialog(dialog, activity, 32, 560);
@@ -255,16 +255,16 @@ final class PhotoDetailDialog {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         statusParams.setMargins(0, dp(8), 0, 0);
         statusRow.addView(detailChip(
-                photo.deleted ? "Deleted" : photo.mergedRgb ? mergedPhotoTitle(photo) : "Original",
+                photo.deleted ? "Deleted" : photo.isMerge() ? mergedPhotoTitle(photo) : "Original",
                 photo.deleted ? danger : accent, panelSoft, photo.deleted ? danger : accent));
-        String mergeKindLabel = photo.mergedRgb
+        String mergeKindLabel = photo.isMerge()
                 ? (photo.isManualMerge() ? "Manually merged" : "Auto-merged")
                 : (photo.copy ? "Copy" : "Camera photo");
         statusRow.addView(detailChip(mergeKindLabel, textSecondary, panelSoft, borderSoft));
-        if (photo.mergedRgb && photo.mergedAlgorithm != null && !photo.mergedAlgorithm.isEmpty()) {
-            statusRow.addView(detailChip(RgbMergeDetector.algorithmShortLabel(photo.mergedAlgorithm), textSecondary, panelSoft, borderSoft));
+        if (photo.isMerge() && photo.mergedAlgorithm() != null && !photo.mergedAlgorithm().isEmpty()) {
+            statusRow.addView(detailChip(RgbMergeDetector.algorithmShortLabel(photo.mergedAlgorithm()), textSecondary, panelSoft, borderSoft));
         }
-        if (!photo.mergedRgb) {
+        if (!photo.isMerge()) {
             statusRow.addView(detailChip(
                     photo.metadataValid ? "Metadata OK" : "Check metadata",
                     photo.metadataValid ? textSecondary : danger,
@@ -282,9 +282,9 @@ final class PhotoDetailDialog {
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             infoParams.setMargins(0, dp(8), 0, 0);
             infoRow.addView(detailChip(
-                    photo.mergedRgb ? mergedSourceLabel(photo) : "Album " + String.format(Locale.US, "%02d", photo.displayIndex + 1),
+                    photo.isMerge() ? mergedSourceLabel(photo) : "Album " + String.format(Locale.US, "%02d", photo.displayIndex + 1),
                     textMuted, panel, borderSoft));
-            if (!photo.mergedRgb) infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
+            if (!photo.isMerge()) infoRow.addView(detailChip("Slot " + (photo.physicalSlot + 1), textMuted, panel, borderSoft));
             infoRow.addView(detailChip(photo.width + "×" + photo.height, textMuted, panel, borderSoft));
             infoRow.addView(detailChip("Border " + photo.border, textMuted, panel, borderSoft));
             inner.addView(infoRow, infoParams);
@@ -320,7 +320,7 @@ final class PhotoDetailDialog {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
 
         final ProgressBar[] progressRef = { null };
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             ProgressBar progress = new ProgressBar(activity);
             progress.setIndeterminate(true);
             progress.setVisibility(View.GONE);
@@ -332,12 +332,12 @@ final class PhotoDetailDialog {
         inner.addView(imageMat, matParams);
 
         // Order + algorithm selectors (merged photos only)
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             boolean isManual = photo.isManualMerge();
 
             // Channel-order dropdown — only for manual merges (auto-merged order is fixed by detection)
             if (isManual) {
-                String[] orders = MergeOrder.optionsFor(photo.mergedSourceCount);
+                String[] orders = MergeOrder.optionsFor(photo.mergedSourceCount());
                 FrameLayout orderField = new FrameLayout(activity);
                 orderField.setBackground(UiStyle.rounded(activity, panelRaised, borderSoft, 8, 1));
                 orderField.setClickable(true);
@@ -410,7 +410,7 @@ final class PhotoDetailDialog {
             arrowP.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
             algoField.addView(algoArrow, arrowP);
             algoField.setOnClickListener(v -> {
-                boolean hasClear = photo.mergedSourceCount == 4;
+                boolean hasClear = photo.mergedSourceCount() == 4;
                 String[] ids    = RgbMergeDetector.compatibleAlgorithmIds(hasClear);
                 String[] labels = RgbMergeDetector.compatibleAlgorithmLabels(hasClear);
                 UiStyle.dropdown(activity, algoField, labels, indexOf(ids, algoRef[0]), accent, which -> {
@@ -448,14 +448,14 @@ final class PhotoDetailDialog {
             Bitmap preview = null;
             try {
                 List<GalleryPhoto> monoPhotos = pipeline.monoSourcePhotos(gallery);
-                int startIdx = mergedPhoto.mergedSourceStartDisplayIndex;
-                int count = mergedPhoto.mergedSourceCount;
+                int startIdx = mergedPhoto.mergedSourceStartDisplayIndex();
+                int count = mergedPhoto.mergedSourceCount();
 
                 // Build a display-index → mono-photo map so we're immune to merged photos
                 // being interspersed in gallery.photos and to empty-deleted filtering offsets.
                 Map<Integer, GalleryPhoto> monoByIndex = new HashMap<>();
                 for (GalleryPhoto mp : monoPhotos) {
-                    if (!mp.mergedRgb) monoByIndex.put(mp.displayIndex, mp);
+                    if (!mp.isMerge()) monoByIndex.put(mp.displayIndex, mp);
                 }
 
                 GalleryPhoto[] sourceForPreview = new GalleryPhoto[count];
@@ -493,18 +493,18 @@ final class PhotoDetailDialog {
     }
 
     private String photoDetailTitle(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             return mergedPhotoTitle(photo);
         }
         return (photo.deleted ? "Deleted " : "Photo ") + String.format(Locale.US, "%02d", photo.displayIndex + 1);
     }
 
     private String photoDetailSubtitle(GalleryPhoto photo) {
-        if (photo.mergedRgb) {
+        if (photo.isMerge()) {
             return mergedVariantSubtitle(photo,
-                    photo.mergedKind != null && !photo.mergedKind.isEmpty() ? photo.mergedKind
-                            : MergeOrder.defaultFor(photo.mergedSourceCount),
-                    photo.mergedAlgorithm);
+                    photo.mergedKind() != null && !photo.mergedKind().isEmpty() ? photo.mergedKind()
+                            : MergeOrder.defaultFor(photo.mergedSourceCount()),
+                    photo.mergedAlgorithm());
         }
         String label = photo.deleted ? "Recoverable" : "Album";
         if (photo.physicalSlot >= 0) {
@@ -515,18 +515,18 @@ final class PhotoDetailDialog {
     }
 
     private String mergedPhotoTitle(GalleryPhoto photo) {
-        return "Merged " + (photo.mergedKind == null || photo.mergedKind.isEmpty() ? "RGB" : photo.mergedKind);
+        return "Merged " + (photo.mergedKind() == null || photo.mergedKind().isEmpty() ? "RGB" : photo.mergedKind());
     }
 
     private String mergedSourceLabel(GalleryPhoto photo) {
-        return photo.mergedSourceCount > 0
+        return photo.mergedSourceCount() > 0
                 ? "Sources " + mergedSourceRange(photo)
                 : "Sources";
     }
 
     private String mergedVariantSubtitle(GalleryPhoto photo, String order, String algorithm) {
         StringBuilder subtitle = new StringBuilder(photo.isManualMerge() ? "Manual merge" : "Auto merge");
-        if (photo.mergedSourceCount > 0) {
+        if (photo.mergedSourceCount() > 0) {
             subtitle.append(" · ").append(mergedSourceRange(photo));
         }
         if (algorithm != null && !algorithm.isEmpty()) {
@@ -536,8 +536,8 @@ final class PhotoDetailDialog {
     }
 
     private String mergedSourceRange(GalleryPhoto photo) {
-        int start = photo.mergedSourceStartDisplayIndex + 1;
-        int end = start + Math.max(0, photo.mergedSourceCount - 1);
+        int start = photo.mergedSourceStartDisplayIndex() + 1;
+        int end = start + Math.max(0, photo.mergedSourceCount() - 1);
         return String.format(Locale.US, "%02d-%02d", start, end);
     }
 
