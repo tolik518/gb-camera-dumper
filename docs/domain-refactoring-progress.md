@@ -38,7 +38,7 @@ palette-cache boundary follow-up from `android-refactoring.md` §7.2.
 
 ## Phase A1 — `MergeAlgorithm` enum
 
-**Commit:** `49f6229`
+**Commit:** `05b2c05`
 
 **Goal:** replace the parallel `ALGORITHM_IDS` / `ALGORITHM_LABELS` /
 `ALGORITHM_SHORT_LABELS` arrays and the scattered algorithm-string handling with a
@@ -66,7 +66,7 @@ single enum.
 
 ## Phase A2 — `MergeOrder` value object
 
-**Commit:** `4ad723e`
+**Commit:** `f396adb`
 
 **Goal:** centralize the channel-order permutation tables, per-size defaults, and
 validation.
@@ -127,7 +127,7 @@ constraint as the prior refactor's on-device tests:
 
 ## Phase B — `Palette` value object
 
-**Commit:** `59e1fe9`
+**Commit:** `a3db8ad`
 
 **Goal:** collapse the `(paletteIndex, paletteName)` pair into a value object.
 
@@ -152,7 +152,7 @@ constraint as the prior refactor's on-device tests:
 
 ## Phase C — `SlotSet`
 
-**Commit:** `e1b5f0f`
+**Commit:** `dfe2983`
 
 **Goal:** move the slot-CSV builders off `GalleryState` (the read model) — they
 encode operation parameters, not gallery state.
@@ -179,7 +179,7 @@ sentinel) — wide, and already abstracted by `isAlbumBacked()` /
 
 ## Phase D — `MergeInfo` + slim `GalleryPhoto`
 
-**Commit:** `5c418c0`
+**Commit:** `8dbd4e1`
 
 **Goal:** collapse `GalleryPhoto`'s 6 merge fields into one value object and kill
 the `mergedRgb` boolean discriminator.
@@ -222,7 +222,7 @@ detection once Rust output matches Java on real saves.
 
 ## Phase E — `Selection`
 
-**Commit:** `3e96cf4`
+**Commit:** `542d989`
 
 **Goal:** remove the last mutable field from `GalleryPhoto` by moving the
 working selection into its own value object.
@@ -250,7 +250,7 @@ working selection into its own value object.
 
 ## Slot value object
 
-**Commit:** `1442c74`
+**Commit:** `8cefb7a`
 
 **Goal:** finish the C/D-deferred slot typing by moving the `-1` sentinel out of
 normal gallery readers.
@@ -274,7 +274,7 @@ normal gallery readers.
 
 ## Phase F1 — RGB merge composition in core
 
-**Commit:** `c80953e`
+**Commit:** `a956030`
 
 **Goal:** start moving RGB merge into `gbcam-core` by extracting the pure channel
 composition algorithms first, without changing Android behavior yet.
@@ -298,7 +298,7 @@ composition algorithms first, without changing Android behavior yet.
 
 ## Phase F2 — save-based RGB merge FFI hook
 
-**Commit:** `e4cfe09`
+**Commit:** `8de611c`
 
 **Goal:** expose a narrow core-backed RGB merge operation to Android without
 changing runtime behavior yet.
@@ -323,7 +323,7 @@ changing runtime behavior yet.
 
 ## Phase F3 — manual merge through core FFI
 
-**Commit:** `04fdb40`
+**Commit:** `ffc8a55`
 
 **Goal:** switch manual merge creation/update to the core-backed save-based merge
 hook while keeping auto-merge detection/composition unchanged.
@@ -352,7 +352,7 @@ hook while keeping auto-merge detection/composition unchanged.
 
 ## Phase F4 — auto-merge composition through core FFI
 
-**Commit:** `61493de`
+**Commit:** `14d38e7`
 
 **Goal:** keep Java's auto-merge detection/order selection intact, but route the
 accepted auto-merge PNG writer through the same save-based core merge hook used by
