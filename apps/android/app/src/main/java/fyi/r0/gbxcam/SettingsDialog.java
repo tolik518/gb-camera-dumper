@@ -76,7 +76,7 @@ final class SettingsDialog {
         CheckBox showLogs = UiStyle.settingsCheckBox(
                 activity,
                 "Show logs by default",
-                "Keeps the operation log panel open after app startup.",
+                "Keeps the operation log panel open after app startup. ATTENTION: LOGS WILL MAKE THE APP SLOWER.",
                 settings.showLogs(),
                 accent);
         CheckBox showPhotoMetaCb = UiStyle.settingsCheckBox(

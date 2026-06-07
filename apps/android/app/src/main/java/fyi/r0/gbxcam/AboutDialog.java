@@ -49,6 +49,8 @@ final class AboutDialog {
 
         body.addView(aboutRow("Report a bug", "518@returnnull.de",
                 "mailto:518@returnnull.de", colors, accent));
+        body.addView(aboutRow("Join our Discord", "Report bugs, ask for help or feature requests!",
+                "https://discord.gg/ZvXKbCtHRN", colors, accent));
         body.addView(aboutRow("tolik518/GBxCAM-Viewer", 
                 "The app is fully open source! Contributions and feedback are welcome.",
                 "https://github.com/tolik518/GBxCAM-Viewer", colors, accent));
