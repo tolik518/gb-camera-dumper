@@ -13,11 +13,11 @@ Each phase is its own commit; every phase must compile
 | A3 | `MergeIdentity` | ↪ folded into Phase D (see plan) |
 | B | `Palette` value object | ✅ done |
 | C | `SlotSet` (`Slot` deferred to D) | ✅ done |
-| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`, `Slot`) | ⬜ not started |
+| D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`; `Slot` deferred) | ✅ done |
 | E | extract `Selection` (optional) | ⬜ not started |
 | F | FFI as a context boundary (merge → core) | ⬜ not started |
 
-Phases A–C landed; D–F not started.
+Phases A–D landed; E–F not started.
 
 ### Result so far
 - Two value objects introduced as the single source of truth for the RGB-merge
@@ -169,7 +169,44 @@ sentinel) — wide, and already abstracted by `isAlbumBacked()` /
 
 ---
 
+## Phase D — `MergeInfo` + slim `GalleryPhoto`
+
+**Commit:** `5c418c0`
+
+**Goal:** collapse `GalleryPhoto`'s 6 merge fields into one value object and kill
+the `mergedRgb` boolean discriminator.
+
+### Changes
+- New `MergeInfo { kind, sourceCount, sourceStartDisplayIndex, algorithm, manual }`
+  + `identity()`; owns the `"kind:start:count"` override key (moved off
+  `GalleryPhoto`, also removing the static `mergeIdentity`).
+- `GalleryPhoto`: a single `merge` field (null = ordinary photo); `isMerge()`
+  replaces `mergedRgb`; `isManualMerge`/`isMergeableSource`/`mergeIdentity`
+  delegate to it. The **Builder API is unchanged** — `build()` assembles
+  `MergeInfo` — so every construction site (`GalleryState.fromJson`,
+  `ManualMergeStore.load`, `RgbMergeDetector`) is untouched.
+- Null-safe read accessors (`mergedKind()`/`mergedSourceCount()`/…) return the
+  former field defaults, making every reader a mechanical field→method change the
+  compiler fully checks.
+- Readers updated across `PhotoDetailDialog`, `GalleryController`, `MainScreen`,
+  `GalleryState`, `ManualMergeStore`, `RgbMergeDetector`, `GalleryPipeline`,
+  `PhotoRenderer` (~140 sites, via a negative-lookahead pass to skip Builder
+  setters).
+
+**Deferred for behavior-safety:** typing `kind`→`MergeOrder` and
+`algorithm`→`MergeAlgorithm` inside `MergeInfo`, and the `Slot` value object.
+
+### Verification
+- `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
+- Persistence: `manual-merges.json` keys and the gallery JSON parse are
+  byte-identical (Builder/`save()` keys unchanged).
+- On-device — ⬜ pending, and **more important here than B/C**: auto-merge detection,
+  manual merge create, photo-detail order/algorithm change + persist, and a
+  manual-merges round-trip across an app restart.
+
+---
+
 ## Next (when resumed)
-Phase D — `MergeInfo` + slim `GalleryPhoto`: fold the 6 merge fields into a
-`MergeInfo` value object (null = ordinary photo), and introduce `MergeIdentity`
-and the deferred `Slot` here. Keep the `manual-merges.json` keys identical.
+Phase E (optional) — extract `Selection` off `GalleryPhoto` (the mutable
+`selected` flag; ~58 sites). Or Phase F — move RGB merge into `gbcam-core`
+(largest; spans Rust). Plus the deferred `Slot` typing from C/D.
