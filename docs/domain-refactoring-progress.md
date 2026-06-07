@@ -316,7 +316,7 @@ changing runtime behavior yet.
 
 ## Phase F3 — manual merge through core FFI
 
-**Commit:** pending
+**Commit:** `04fdb40`
 
 **Goal:** switch manual merge creation/update to the core-backed save-based merge
 hook while keeping auto-merge detection/composition unchanged.
