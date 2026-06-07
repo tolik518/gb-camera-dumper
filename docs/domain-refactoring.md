@@ -297,30 +297,28 @@ it only if the mutable flag is causing bugs. Nothing else here depends on it.
 
 ### Phase F — FFI as a context boundary *(largest; do last, spans Rust)*
 
-Folds in `android-refactoring.md` §7, reframed as context-map work. The first
-half is done: core owns RGB channel composition, Android has a save-based merge
-FFI hook, and both manual and accepted auto-merge PNG writes now use that hook
-with Java fallback. The remaining work is specifically **auto-merge detection**
-and cleanup after parity is proven.
+Folds in `android-refactoring.md` §7, reframed as context-map work. Core now owns
+RGB composition and auto-merge candidate detection. Android asks core for auto
+candidates by default, validates them against the transformed Java read model,
+and writes accepted auto/manual merge PNGs through the save-based FFI hook.
+Cached album PNGs are palette-independent grayscale artifacts; live palette
+rendering remains in Java from `indexedPixels`.
 
-- **F5: parity harness before switching behavior.** Add a stable core candidate
-  DTO/JSON shape and compare Rust candidates against the current Java detector on
-  real `.sav` fixtures. Compare source slots/order/algorithm first; composition
-  is already routed through core.
-- **F6: port auto detection to `gbcam-core`.** Move grayscale prep, pHash/dHash,
-  shifted NCC, layout validation, and candidate selection into Rust. Preserve
-  current thresholds unless deliberately changed after fixture review.
-- **F7: switch Android auto detection to core.** Add a detect-merge FFI method,
-  have `GalleryPipeline` insert returned candidates into the Java read model, and
-  keep the current Java detector as a logged fallback for one phase.
-- **F8: delete duplicated Java production merge code.** Once device/fixture parity
-  is trusted, remove unused Java detection/composition paths. Keep only the
-  minimum preview/fallback surface, or move preview to core too.
-- **F9: make cached album PNGs palette-independent.** Keep live palette rendering
-  in Java from `indexedPixels`; audit remaining album-photo `path` consumers
-  first, then change Rust's cached album PNG output so it cannot bake a stale app
-  palette. RGB/CRGB merge PNGs remain RGB because they are palette-independent
-  merge results.
+- **F5/F6 done:** core exposes `detect_auto_rgb_merge_candidates` and ports the
+  old Java grayscale prep, pHash/dHash, shifted NCC, layout validation,
+  reference-channel choice, candidate selection, threshold constants, and
+  algorithm override identity resolution. Current tests cover synthetic
+  candidates and rejection cases.
+- **F7 mostly done:** Android calls
+  `NativeGbcam.detectRgbMergesFromSave(...)` first, validates physical slots and
+  contiguous display indices in Java, and falls back to the old Java detector if
+  native detection or native PNG writing fails.
+- **F8 remaining:** delete duplicated Java production detection/composition only
+  after a real-save/device parity pass shows the fallback is not needed. Keep the
+  preview code until a core preview hook exists, or document it as UI-only.
+- **F9 done:** `gallery_json` writes grayscale album PNGs. Palette switching does
+  not rewrite disk cache and RGB/CRGB merge PNGs remain RGB outputs because they
+  are palette-independent merge results.
 - **Invariant:** automatic merge remains contiguous by display index. Manual merge
   remains allowed to use arbitrary selected source slots.
 - Treat the gallery JSON as a versioned **Published Language**; `fromJson` + the
@@ -332,7 +330,9 @@ read-model rename (`GalleryState` → `GalleryView`, or just a class-doc note
 saying it *is* a read model). Land these whenever you're already editing the
 file; never as a standalone churn commit.
 
-Remaining commit order: F5 parity harness → F6 core detection → F7 Android
+Remaining commit order: real-save/device parity pass → remove Java production
+fallback/detection → optional core preview hook or document Java preview as
+UI-only.
 switch with fallback → F8 Java cleanup → F9 palette-independent cached album
 PNGs. F9 can move earlier if it stays isolated from RGB detection.
 

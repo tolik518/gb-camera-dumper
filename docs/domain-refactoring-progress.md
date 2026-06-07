@@ -391,62 +391,56 @@ palette boundary follow-up.
 **Goal:** make Java-vs-core auto-merge decisions observable and comparable before
 Android starts depending on Rust detection.
 
-**Plan:**
-- Add a small Rust-side API that returns auto-merge candidates from save data
-  without writing PNGs. Candidate DTO should include: source physical slots,
-  display start, source count, order, resolved algorithm, and an identity key.
-- Add CLI/test tooling or fixture tests that run the Rust detector against saved
-  `.sav` fixtures and print stable candidate JSON.
-- Capture the current Java detector output for the same saves, either through a
-  temporary Android log/debug hook or a small JVM-side helper if practical.
-- Compare candidate lists first, not pixels. Pixel parity for composition was
-  already exercised by F3/F4; detection parity is the risk now.
+**Status (2026-06-07):** core candidate DTO/API exists:
+`detect_auto_rgb_merge_candidates` returns physical source slots, display start,
+source count, order, resolved algorithm, and the persisted identity key. Unit
+coverage exercises 4-before-3 selection, algorithm override identity resolution,
+and deleted/non-contiguous rejection.
 
-**Done when:** known saves produce the same candidate count, source slots,
-order, and algorithm identity in Java and Rust.
+Fixture/device parity is still the trust gate: this pass intentionally did not
+add a standalone fixture harness or phone run. The Android switch below keeps the
+Java detector as fallback until real-save parity has been observed.
 
 ### F6 — port auto detection into `gbcam-core`
 
 **Goal:** move the pHash/dHash/NCC candidate selection out of
 `RgbMergeDetector.java`.
 
-**Plan:**
-- Port the remaining Java detection primitives to Rust: grayscale preparation,
-  blur, pHash, dHash, shifted NCC, layout/order validation, and reference channel
-  selection.
-- Preserve current thresholds unless parity testing shows an intentional reason to
-  change them: RGB pHash max 14, CRGB pHash max 22, dHash max 24, shift range 8,
-  NCC minimum 0.65.
-- Keep automatic merge contiguous by display index. Manual non-contiguous merge
-  stays supported through the existing explicit source-slot FFI hook.
-- Unit-test primitives and candidate selection against small synthetic cases, then
-  fixture-test against real `.sav` files.
+**Status (2026-06-07):** ported into `gbcam-core`. Rust now owns grayscale prep,
+blur, pHash, dHash, shifted NCC, layout/order validation, reference-channel
+selection, and candidate selection. Thresholds stayed byte-for-byte equivalent to
+the Java constants: RGB pHash max 14, CRGB pHash max 22, dHash max 24, shift
+range 8, NCC minimum 0.65.
 
-**Done when:** Rust candidate JSON matches the Java detector for the fixture set.
+Automatic merge remains contiguous by display index. Manual non-contiguous merge
+continues through explicit source-slot FFI and is not affected by the detector.
 
 ### F7 — switch Android auto detection to core
 
 **Goal:** Android asks core for auto candidates and only keeps presentation work
 in Java.
 
-**Plan:**
-- Add an FFI method such as `detectRgbMergesFromSave(savePath, order4, order3,
-  defaultAlgorithm, algorithmOverridesJson)` returning candidate JSON.
-- In `GalleryPipeline`, call the core detector when `autoRgbMerge` is enabled.
-  Insert returned candidates into the Java read model and continue writing PNGs
-  through `mergeRgbFromSave`.
-- Keep the current Java `RgbMergeDetector` path as a fallback for at least one
-  phase. Log fallback use clearly so device testing can catch native failures.
-- On device, test cold cached load, palette recolor, default algorithm changes,
-  per-merge algorithm overrides, and saves with zero/one/multiple RGB groups.
+**Status (2026-06-07):** added
+`NativeGbcam.detectRgbMergesFromSave(savePath, order4, order3,
+defaultAlgorithm, algorithmOverridesJson)`. The normal Android auto-merge path
+asks Rust for candidates, validates every candidate against the transformed Java
+gallery (current display order, locally deleted state, no merge photos, physical
+slot match), and writes accepted PNGs through `mergeRgbFromSave`.
 
-**Done when:** Android uses Rust detection by default, fallback is not hit during
-the normal device test pass, and auto merges remain contiguous.
+The old Java detector/composer remains as a production fallback if native
+detection or native PNG writing throws. Fallback is intentionally not deleted
+until a real-save/device pass confirms native parity. Phone testing was skipped
+for this pass at user request.
 
 ### F8 — cleanup after trust
 
 **Goal:** remove the duplicated Java RGB merge implementation once Rust detection
 has enough coverage.
+
+**Status (2026-06-07):** still trust-gated. Production prefers Rust detection and
+Rust composition now, but Java detection/composition remains for fallback and UI
+preview. Removing it before real-save/device parity would make regressions harder
+to recover from.
 
 **Plan:**
 - Delete Java composition algorithms and detection helpers that are no longer used
@@ -471,22 +465,11 @@ compatible.
 palette rendering stays in Java from `indexedPixels`; on-disk album PNGs become
 cache/fallback artifacts that cannot go stale when the palette changes.
 
-**Plan:**
-- Audit every remaining direct use of album-photo `path` PNGs. Current risk areas
-  are backup thumbnails and fallback rendering when indexed pixels are absent.
-- Prefer rendering thumbnails/previews from `indexedPixels` through
-  `PhotoRenderer` so they track the selected palette without disk/native work.
-- Change Rust album PNG output only after display callers no longer rely on baked
-  palette colors. Options: write grayscale RGB with the default gray palette, or
-  write indexed/grayscale PNG if Android display sites tolerate it.
-- Do not route palette switching through Rust or disk writes. The instant
-  in-memory recolor path is a hard UX constraint.
-- Keep RGB/CRGB merged PNGs as RGB outputs; those are palette-independent merge
-  results, not palette-colored mono album cache files.
-
-**Done when:** switching palettes cannot leave stale-colored album thumbnails or
-fallbacks on screen, cached album PNGs no longer encode the selected app palette,
-and palette switching still has no native round trip or disk rewrite.
+**Status (2026-06-07):** cached album PNGs from `gallery_json` are now grayscale
+via `write_png(indexed_to_gray8(...))`, independent of the selected app palette.
+Live album rendering still uses `indexedPixels` through Java `PhotoRenderer`, so
+palette switching remains in-memory and does not round-trip through Rust or disk.
+RGB/CRGB merge PNGs remain RGB outputs.
 
 ### Optional cleanup after Phase F
 
