@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::Path;
 
+pub mod rgb_merge;
+pub use rgb_merge::{merge_rgb_gray8, RgbMergeAlgorithm, RgbMergeError, RgbMergeOrder};
+
 pub const MAPPER_MAC_GBD: u8 = 0xFC;
 pub const SRAM_BANKS: usize = 16;
 pub const BANK_SIZE: usize = 0x2000;

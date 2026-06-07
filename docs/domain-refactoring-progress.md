@@ -16,7 +16,7 @@ Each phase is its own commit; every phase must compile
 | D | `MergeInfo` + slim `GalleryPhoto` (incl. `MergeIdentity`) | ✅ done |
 | E | extract `Selection` off `GalleryPhoto` | ✅ done |
 | Slot | `Slot` value object | ✅ done |
-| F | FFI as a context boundary (merge → core) | ⬜ not started |
+| F | FFI as a context boundary (merge → core) | 🔄 started |
 
 Phases A–E landed; F not started.
 
@@ -208,7 +208,8 @@ the `mergedRgb` boolean discriminator.
 ---
 
 ## Next (when resumed)
-Phase F — move RGB merge into `gbcam-core` (largest; spans Rust).
+Continue Phase F — add FFI/manual-merge parity hooks, then move auto-merge
+detection once Rust output matches Java on real saves.
 
 ---
 
@@ -261,3 +262,27 @@ normal gallery readers.
 - `:app:compileDebugJavaWithJavac` — ✅ BUILD SUCCESSFUL.
 - On-device — ⬜ pending: same slot-sensitive pass as Phase C/E (delete, recover,
   move selected first, manual merge filenames/source labels, detail slot labels).
+
+---
+
+## Phase F1 — RGB merge composition in core
+
+**Commit:** pending
+
+**Goal:** start moving RGB merge into `gbcam-core` by extracting the pure channel
+composition algorithms first, without changing Android behavior yet.
+
+### Changes
+- New `gbxcam_core::rgb_merge` module with `RgbMergeOrder`,
+  `RgbMergeAlgorithm`, `RgbMergeError`, and `merge_rgb_gray8`.
+- Ported the Java merge composition algorithms (`basic`, clear luminance,
+  normalization, gray-world, Brovey/IHS/detail clear, adaptive, saturation boost)
+  to pure Rust over grayscale channel buffers.
+- `gbcam-core` exports the new API for future FFI use.
+- Java `RgbMergeDetector` remains in place; detection, preview, manual merge, and
+  PNG writing are unchanged until parity is proven.
+
+### Verification
+- `cargo test -p gbxcam-core` — ✅ 36 tests passing, including new RGB merge tests.
+- Android compile/on-device — ⬜ not applicable for this slice; no Java behavior
+  changed.
