@@ -531,9 +531,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     }
 
     @Override
-    public void onBusyChanged(boolean busy, String message) {
+    public void onBusyChanged(boolean busy, String message, BusyDialog.Direction direction) {
         if (destroyed) return;
-        screen.setBusy(busy, message, BusyDialog.Direction.TO_GBCAM);
+        screen.setBusy(busy, message, direction);
     }
 
     @Override
