@@ -257,7 +257,6 @@ final class MainScreen implements PaletteMenu.Host {
         addActionButton(actions, deselectAllButton);
         addActionButton(actions, saveButton);
         addActionButton(actions, shareButton);
-        addActionButton(actions, deleteButton);
         root.addView(wrapHorizontal(actions), matchWidthWrapContent());
 
         LinearLayout albumActions = toolbarRow("Album tools");
@@ -273,6 +272,7 @@ final class MainScreen implements PaletteMenu.Host {
         mergeButton.setTextColor(accent);
         mergeButton.setBackground(buttonBackground(colors.surfaceRaised, accentSurface, colors.disabledBackground, accent));
         addActionButton(albumActions, moveFirstButton);
+        addActionButton(albumActions, deleteButton);
         addActionButton(albumActions, recoverButton);
         addActionButton(albumActions, mergeButton);
         addActionButton(albumActions, compactButton);
