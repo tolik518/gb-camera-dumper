@@ -66,7 +66,7 @@ final class BusyDialog {
         if (direction == Direction.TO_ANDROID) {
             gif = new GifView(context, R.raw.gbcam_logo);
         } else {
-            gif = new GifView(context, R.raw.gbcam_logo_reverse);
+            gif = new GifView(context, R.raw.gbcam_logo_reversed);
         }
 
         content.addView(gif, new LinearLayout.LayoutParams(dp(128), dp(64)));
