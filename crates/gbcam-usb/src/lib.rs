@@ -53,14 +53,23 @@ pub struct GbxCartInfo {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct GbFlashInfo {
+    pub pcb_ver: u8,
+    pub cfw_ver: u16,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartridgeReaderKind {
+    GbFlash,
     GbxCartRw13,
     GbxCartRw14,
 }
 
 #[derive(Debug, Clone)]
 pub enum CartridgeReaderInfo {
+    GbFlash(GbFlashInfo),
     GbxCartRw13(GbxCartInfo),
     GbxCartRw14(GbxCartInfo),
 }
@@ -68,6 +77,7 @@ pub enum CartridgeReaderInfo {
 impl CartridgeReaderInfo {
     pub fn kind(&self) -> CartridgeReaderKind {
         match self {
+            CartridgeReaderInfo::GbFlash(_) => CartridgeReaderKind::GbFlash,
             CartridgeReaderInfo::GbxCartRw13(_) => CartridgeReaderKind::GbxCartRw13,
             CartridgeReaderInfo::GbxCartRw14(_) => CartridgeReaderKind::GbxCartRw14,
         }
@@ -75,6 +85,7 @@ impl CartridgeReaderInfo {
 
     pub fn gbxcart_info(&self) -> Option<&GbxCartInfo> {
         match self {
+            CartridgeReaderInfo::GbFlash(_) => None,
             CartridgeReaderInfo::GbxCartRw13(info) => Some(info),
             CartridgeReaderInfo::GbxCartRw14(info) => Some(info),
         }
@@ -163,7 +174,24 @@ pub enum CartridgeReader {
 impl CartridgeReader {
     pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, CartridgeReaderInfo)> {
         progress.message("Connecting to cartridge reader...");
-        let (dev, info) = UsbDev::connect(fd, progress)?;
+        let mut dev = UsbDev::open_ch340(fd, progress)?;
+        match dev.query_gbxcart_info(progress) {
+            Ok(info) => Self::from_gbxcart_info(dev, info),
+            Err(gbxcart_error) => {
+                dev.clear_local_rx();
+                let _ = dev.drain_input(20, 16);
+                match dev.query_gbflash_info(progress) {
+                    Ok(info) => Err(GbcamUsbError::Protocol(format!(
+                        "GBFlash detected (PCB v{}, CFW L{}), but GBFlash is not supported yet.",
+                        info.pcb_ver, info.cfw_ver
+                    ))),
+                    Err(_) => Err(gbxcart_error),
+                }
+            }
+        }
+    }
+
+    fn from_gbxcart_info(dev: UsbDev, info: GbxCartInfo) -> Result<(Self, CartridgeReaderInfo)> {
         match info.pcb_ver {
             4 => Ok((
                 CartridgeReader::GbxCartRw13(dev),
@@ -282,8 +310,14 @@ impl UsbDev {
     }
 
     pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, GbxCartInfo)> {
+        let mut dev = Self::open_ch340(fd, progress)?;
+        let info = dev.query_gbxcart_info(progress)?;
+        Ok((dev, info))
+    }
+
+    fn open_ch340(fd: RawFd, progress: &mut impl Progress) -> Result<Self> {
         progress.message("Initializing CH340 and setting 1 Mbaud...");
-        let mut dev = UsbDev::new(fd);
+        let dev = UsbDev::new(fd);
         dev.claim_interface()?;
         dev.flush_endpoints();
         ch340_initialize(&dev)?;
@@ -292,9 +326,12 @@ impl UsbDev {
         dev.flush_endpoints();
         dev.drain_input(20, 16)?;
         std::thread::sleep(Duration::from_millis(60));
+        Ok(dev)
+    }
 
-        let pcb_ver = dev.query_u8_command(CMD_OFW_PCB_VER, "OFW_PCB_VER")?;
-        let ofw_ver = dev.query_u8_command(CMD_OFW_FW_VER, "OFW_FW_VER")?;
+    fn query_gbxcart_info(&mut self, progress: &mut impl Progress) -> Result<GbxCartInfo> {
+        let pcb_ver = self.query_u8_command(CMD_OFW_PCB_VER, "OFW_PCB_VER")?;
+        let ofw_ver = self.query_u8_command(CMD_OFW_FW_VER, "OFW_FW_VER")?;
 
         if pcb_ver == 0 {
             return Err(GbcamUsbError::Protocol(
@@ -304,41 +341,88 @@ impl UsbDev {
 
         let mut name = None;
         if pcb_ver >= 5 && ofw_ver > 0 {
-            let size = dev.query_u8_command(CMD_QUERY_FW_INFO, "QUERY_FW_INFO length")? as usize;
+            let size = self.query_u8_command(CMD_QUERY_FW_INFO, "QUERY_FW_INFO length")? as usize;
             let mut info = vec![0u8; size];
-            dev.bulk_read(&mut info)?;
+            self.bulk_read(&mut info)?;
             if size >= 3 {
-                dev.fw_ver = u16::from_be_bytes([info[1], info[2]]);
+                self.fw_ver = u16::from_be_bytes([info[1], info[2]]);
             }
-            if dev.fw_ver >= 12 {
-                let nlen = dev.read_u8()? as usize;
+            if self.fw_ver >= 12 {
+                let nlen = self.read_u8()? as usize;
                 let mut nbuf = vec![0u8; nlen];
-                dev.bulk_read(&mut nbuf)?;
+                self.bulk_read(&mut nbuf)?;
                 name = Some(
                     String::from_utf8_lossy(&nbuf)
                         .trim_matches('\0')
                         .to_string(),
                 );
-                dev.has_cart_power = dev.read_u8()? == 1;
-                let _boot = dev.read_u8()?;
+                self.has_cart_power = self.read_u8()? == 1;
+                let _boot = self.read_u8()?;
             }
         }
 
         progress.message(&format!(
             "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} cart_power_query_supported={}",
-            dev.fw_ver, dev.has_cart_power
+            self.fw_ver, self.has_cart_power
         ));
-        dev.debug_cart_power(progress, "connect: after firmware query, before LED reset");
-        dev.reset_status_leds(progress, "connect: reset status/mode LEDs");
-        dev.debug_cart_power(progress, "connect: after LED reset");
+        self.debug_cart_power(progress, "connect: after firmware query, before LED reset");
+        self.reset_status_leds(progress, "connect: reset status/mode LEDs");
+        self.debug_cart_power(progress, "connect: after LED reset");
 
         let info = GbxCartInfo {
             pcb_ver,
             ofw_ver,
-            cfw_ver: dev.fw_ver,
+            cfw_ver: self.fw_ver,
             name,
         };
-        Ok((dev, info))
+        Ok(info)
+    }
+
+    fn query_gbflash_info(&mut self, progress: &mut impl Progress) -> Result<GbFlashInfo> {
+        progress.message("[debug][gbflash] probing FlashGBX GBFlash firmware info");
+        self.clear_local_rx();
+        self.bulk_write(&[CMD_QUERY_FW_INFO])?;
+        let size = self.read_u8()? as usize;
+        if size != 8 {
+            return Err(GbcamUsbError::Protocol(format!(
+                "GBFlash QUERY_FW_INFO length was {size}, expected 8"
+            )));
+        }
+        let mut info = [0u8; 8];
+        self.bulk_read(&mut info)?;
+        if info[0] != b'L' {
+            return Err(GbcamUsbError::Protocol(format!(
+                "GBFlash firmware id was 0x{:02X}, expected 'L'",
+                info[0]
+            )));
+        }
+        let cfw_ver = u16::from_be_bytes([info[1], info[2]]);
+        let pcb_ver = info[3];
+        if !matches!(pcb_ver, 5 | 10 | 11 | 12 | 13) {
+            return Err(GbcamUsbError::Protocol(format!(
+                "GBFlash PCB version 0x{pcb_ver:02X} is not recognized"
+            )));
+        }
+
+        let mut name = None;
+        if cfw_ver >= 12 {
+            let nlen = self.read_u8()? as usize;
+            let mut nbuf = vec![0u8; nlen];
+            self.bulk_read(&mut nbuf)?;
+            name = Some(
+                String::from_utf8_lossy(&nbuf)
+                    .trim_matches('\0')
+                    .to_string(),
+            );
+            let _cart_power = self.read_u8()?;
+            let _boot = self.read_u8()?;
+        }
+
+        Ok(GbFlashInfo {
+            pcb_ver,
+            cfw_ver,
+            name,
+        })
     }
 
     fn claim_interface(&self) -> Result<()> {
