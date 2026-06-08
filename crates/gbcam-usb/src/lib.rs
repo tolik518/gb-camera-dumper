@@ -103,6 +103,25 @@ pub struct NoProgress;
 
 impl Progress for NoProgress {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UsbTransport {
+    pub interface: u32,
+    pub ep_out: u32,
+    pub ep_in: u32,
+    pub initialize_ch340: bool,
+}
+
+impl UsbTransport {
+    pub fn ch340() -> Self {
+        Self {
+            interface: CH340_INTERFACE,
+            ep_out: CH340_EP_OUT,
+            ep_in: CH340_EP_IN,
+            initialize_ch340: true,
+        }
+    }
+}
+
 fn iowr(type_char: u8, nr: u8, size: usize) -> libc::Ioctl {
     ((3u32 << 30) | ((size as u32) << 16) | ((type_char as u32) << 8) | (nr as u32)) as libc::Ioctl
 }
@@ -130,8 +149,9 @@ fn usbdevfs_resetep() -> libc::Ioctl {
 const USB_TYPE_VENDOR: u8 = 0x40;
 const USB_DIR_IN: u8 = 0x80;
 
-const EP_OUT: u32 = 0x02;
-const EP_IN: u32 = 0x82;
+const CH340_INTERFACE: u32 = 0;
+const CH340_EP_OUT: u32 = 0x02;
+const CH340_EP_IN: u32 = 0x82;
 
 const BULK_TIMEOUT: u32 = 3000;
 const CTRL_TIMEOUT: u32 = 1000;
@@ -239,8 +259,16 @@ pub enum CartridgeReader {
 
 impl CartridgeReader {
     pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, CartridgeReaderInfo)> {
+        Self::connect_with_transport(fd, UsbTransport::ch340(), progress)
+    }
+
+    pub fn connect_with_transport(
+        fd: RawFd,
+        transport: UsbTransport,
+        progress: &mut impl Progress,
+    ) -> Result<(Self, CartridgeReaderInfo)> {
         progress.message("Connecting to cartridge reader...");
-        let mut dev = UsbDev::open_ch340(fd, progress)?;
+        let mut dev = UsbDev::open_transport(fd, transport, progress)?;
         match dev.query_gbxcart_info(progress) {
             Ok(info) => Self::from_gbxcart_info(dev, info),
             Err(gbxcart_error) => {
@@ -365,6 +393,7 @@ impl CartridgeReader {
 
 pub struct UsbDev {
     fd: RawFd,
+    transport: UsbTransport,
     fw_ver: u16,
     has_cart_power: bool,
     profile: ReaderProfile,
@@ -373,8 +402,13 @@ pub struct UsbDev {
 
 impl UsbDev {
     pub fn new(fd: RawFd) -> Self {
+        Self::new_with_transport(fd, UsbTransport::ch340())
+    }
+
+    pub fn new_with_transport(fd: RawFd, transport: UsbTransport) -> Self {
         UsbDev {
             fd,
+            transport,
             fw_ver: 0,
             has_cart_power: false,
             profile: ReaderProfile::unknown_ch340(),
@@ -391,22 +425,32 @@ impl UsbDev {
     }
 
     pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, GbxCartInfo)> {
-        let mut dev = Self::open_ch340(fd, progress)?;
+        let mut dev = Self::open_transport(fd, UsbTransport::ch340(), progress)?;
         let info = dev.query_gbxcart_info(progress)?;
         Ok((dev, info))
     }
 
-    fn open_ch340(fd: RawFd, progress: &mut impl Progress) -> Result<Self> {
-        progress.message("Initializing CH340 and setting 1 Mbaud...");
-        let dev = UsbDev::new(fd);
+    fn open_transport(
+        fd: RawFd,
+        transport: UsbTransport,
+        progress: &mut impl Progress,
+    ) -> Result<Self> {
+        if transport.initialize_ch340 {
+            progress.message("Initializing CH340 and setting 1 Mbaud...");
+        } else {
+            progress.message("Opening USB serial transport...");
+        }
+        let dev = UsbDev::new_with_transport(fd, transport);
         dev.claim_interface()?;
         dev.flush_endpoints();
-        ch340_initialize(&dev)?;
-        ch340_set_baud_rate(&dev, 1_000_000)?;
-        std::thread::sleep(Duration::from_millis(200));
-        dev.flush_endpoints();
-        dev.drain_input(20, 16)?;
-        std::thread::sleep(Duration::from_millis(60));
+        if dev.transport.initialize_ch340 {
+            ch340_initialize(&dev)?;
+            ch340_set_baud_rate(&dev, 1_000_000)?;
+            std::thread::sleep(Duration::from_millis(200));
+            dev.flush_endpoints();
+            dev.drain_input(20, 16)?;
+            std::thread::sleep(Duration::from_millis(60));
+        }
         Ok(dev)
     }
 
@@ -516,7 +560,7 @@ impl UsbDev {
     }
 
     fn claim_interface(&self) -> Result<()> {
-        let iface: u32 = 0;
+        let iface = self.transport.interface;
         let ret = unsafe { libc::ioctl(self.fd, usbdevfs_claiminterface(), &iface as *const u32) };
         if ret < 0 {
             return Err(last_usb_error("claim USB interface"));
@@ -525,8 +569,8 @@ impl UsbDev {
     }
 
     fn flush_endpoints(&self) {
-        let mut ep_in: u32 = EP_IN;
-        let mut ep_out: u32 = EP_OUT;
+        let mut ep_in = self.transport.ep_in;
+        let mut ep_out = self.transport.ep_out;
         unsafe {
             libc::ioctl(self.fd, usbdevfs_resetep(), &mut ep_in as *mut u32);
             libc::ioctl(self.fd, usbdevfs_resetep(), &mut ep_out as *mut u32);
@@ -582,7 +626,7 @@ impl UsbDev {
         while sent < data.len() {
             let slice = &data[sent..];
             let mut x = BulkTransfer {
-                ep: EP_OUT,
+                ep: self.transport.ep_out,
                 len: slice.len() as u32,
                 timeout: BULK_TIMEOUT,
                 data: slice.as_ptr() as usize,
@@ -606,7 +650,7 @@ impl UsbDev {
     fn raw_bulk_read_once(&self, timeout: u32) -> Result<Vec<u8>> {
         let mut raw = vec![0u8; CH340_PACKET];
         let mut x = BulkTransfer {
-            ep: EP_IN,
+            ep: self.transport.ep_in,
             len: CH340_PACKET as u32,
             timeout,
             data: raw.as_mut_ptr() as usize,
@@ -1810,6 +1854,15 @@ mod tests {
         assert_eq!(CMD_OFW_CART_MODE, 0x43);
         assert_eq!(CMD_CART_PWR_ON, 0xF2);
         assert_eq!(CMD_CART_PWR_OFF, 0xF3);
+    }
+
+    #[test]
+    fn default_transport_matches_ch340_layout() {
+        let transport = UsbTransport::ch340();
+        assert_eq!(transport.interface, 0);
+        assert_eq!(transport.ep_out, 0x02);
+        assert_eq!(transport.ep_in, 0x82);
+        assert!(transport.initialize_ch340);
     }
 
     #[test]
