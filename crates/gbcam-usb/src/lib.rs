@@ -139,6 +139,9 @@ const CTRL_TIMEOUT: u32 = 1000;
 const CMD_NULL: u8 = 0x30;
 const CMD_OFW_DONE_LED_ON: u8 = 0x3D;
 const CMD_OFW_ERROR_LED_ON: u8 = 0x3F;
+const CMD_OFW_CART_PWR_ON: u8 = 0x2F;
+const CMD_OFW_CART_PWR_OFF: u8 = 0x2E;
+const CMD_OFW_QUERY_CART_PWR: u8 = 0x5D;
 const CMD_OFW_CART_MODE: u8 = 0x43;
 const CMD_OFW_PCB_VER: u8 = 0x68;
 const CMD_OFW_FW_VER: u8 = 0x56;
@@ -165,6 +168,56 @@ const VAR_DMG_READ_METHOD: (u8, u8) = (8, 0x0B);
 const CH340_PACKET: usize = 64;
 const SRAM_VERIFY_WINDOW: usize = 0x200;
 const SRAM_VERIFY_RETRIES: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CartPowerControl {
+    None,
+    LegacyOriginalFirmware,
+    CustomFirmware,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ReaderProfile {
+    kind: CartridgeReaderKind,
+    power_control: CartPowerControl,
+    max_buffer_write: usize,
+}
+
+impl ReaderProfile {
+    fn unknown_ch340() -> Self {
+        Self {
+            kind: CartridgeReaderKind::GbFlash,
+            power_control: CartPowerControl::None,
+            max_buffer_write: WRITE_CHUNK,
+        }
+    }
+
+    fn gbxcart(info: &GbxCartInfo, custom_firmware_power_control: bool) -> Self {
+        // FlashGBX limits non-1.4/high-speed GBxCart paths to 0x100-byte writes.
+        // This preserves the known-good 1.4 behavior here because this app uses
+        // 1 Mbaud today, while keeping the legacy 1.3 limit explicit.
+        let kind = match info.pcb_ver {
+            4 => CartridgeReaderKind::GbxCartRw13,
+            _ => CartridgeReaderKind::GbxCartRw14,
+        };
+        let power_control = if info.cfw_ver >= 12 {
+            if custom_firmware_power_control {
+                CartPowerControl::CustomFirmware
+            } else {
+                CartPowerControl::None
+            }
+        } else if matches!(info.pcb_ver, 5 | 6) {
+            CartPowerControl::LegacyOriginalFirmware
+        } else {
+            CartPowerControl::None
+        };
+        Self {
+            kind,
+            power_control,
+            max_buffer_write: WRITE_CHUNK,
+        }
+    }
+}
 
 pub enum CartridgeReader {
     GbxCartRw13(UsbDev),
@@ -288,6 +341,7 @@ pub struct UsbDev {
     fd: RawFd,
     fw_ver: u16,
     has_cart_power: bool,
+    profile: ReaderProfile,
     rxbuf: RefCell<(Vec<u8>, usize)>,
 }
 
@@ -297,6 +351,7 @@ impl UsbDev {
             fd,
             fw_ver: 0,
             has_cart_power: false,
+            profile: ReaderProfile::unknown_ch340(),
             rxbuf: RefCell::new((Vec::new(), 0)),
         }
     }
@@ -335,7 +390,7 @@ impl UsbDev {
 
         if pcb_ver == 0 {
             return Err(GbcamUsbError::Protocol(
-                "No response from GBxCart RW 1.4. Check connections.".to_string(),
+                "No response from GBxCart RW. Check connections.".to_string(),
             ));
         }
 
@@ -362,7 +417,7 @@ impl UsbDev {
         }
 
         progress.message(&format!(
-            "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} cart_power_query_supported={}",
+            "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} custom_cart_power_control={}",
             self.fw_ver, self.has_cart_power
         ));
         self.debug_cart_power(progress, "connect: after firmware query, before LED reset");
@@ -375,6 +430,7 @@ impl UsbDev {
             cfw_ver: self.fw_ver,
             name,
         };
+        self.profile = ReaderProfile::gbxcart(&info, self.has_cart_power);
         Ok(info)
     }
 
@@ -668,11 +724,7 @@ impl UsbDev {
         }
     }
 
-    fn required_step(
-        progress: &mut impl Progress,
-        label: &str,
-        result: Result<()>,
-    ) -> Result<()> {
+    fn required_step(progress: &mut impl Progress, label: &str, result: Result<()>) -> Result<()> {
         match result {
             Ok(()) => {
                 progress.message(&format!("[debug][gbxcart] OK: {label}"));
@@ -686,15 +738,19 @@ impl UsbDev {
     }
 
     fn debug_cart_power(&self, progress: &mut impl Progress, label: &str) {
-        if !self.has_cart_power {
-            progress.message(&format!(
-                "[debug][power] {label}: CART_PWR query unsupported by this firmware path"
-            ));
-            return;
-        }
+        let query_cmd = match self.profile.power_control {
+            CartPowerControl::CustomFirmware => CMD_QUERY_CART_PWR,
+            CartPowerControl::LegacyOriginalFirmware => CMD_OFW_QUERY_CART_PWR,
+            CartPowerControl::None => {
+                progress.message(&format!(
+                    "[debug][power] {label}: CART_PWR query unsupported by this firmware path"
+                ));
+                return;
+            }
+        };
 
         self.clear_local_rx();
-        match self.bulk_write(&[CMD_QUERY_CART_PWR]) {
+        match self.bulk_write(&[query_cmd]) {
             Ok(()) => match self.raw_bulk_read_once(400) {
                 Ok(raw) if raw.is_empty() => {
                     progress.message(&format!(
@@ -773,26 +829,38 @@ impl UsbDev {
     }
 
     fn power_off_cart(&self, progress: &mut impl Progress, label: &str) {
-        if self.has_cart_power {
-            progress.message(&format!(
-                "[debug][power] SEND 0x{CMD_CART_PWR_OFF:02X}: {label}; expected LED effect: Power LED off"
-            ));
-            if self.fw_ver >= 10 {
+        match self.profile.power_control {
+            CartPowerControl::CustomFirmware => {
+                progress.message(&format!(
+                    "[debug][power] SEND 0x{CMD_CART_PWR_OFF:02X}: {label}; expected LED effect: Power LED off"
+                ));
                 let result = self.write_wait_retry(&[CMD_CART_PWR_OFF], label, 3);
                 Self::debug_result(progress, &format!("{label} acknowledged"), result);
-            } else {
-                Self::debug_result(progress, label, self.bulk_write(&[CMD_CART_PWR_OFF]));
+                Self::debug_result(
+                    progress,
+                    "power-off cleanup: drain input after CART_PWR_OFF",
+                    self.drain_input(20, 8),
+                );
+                self.debug_cart_power(progress, "after CART_PWR_OFF");
             }
-            Self::debug_result(
-                progress,
-                "power-off cleanup: drain input after CART_PWR_OFF",
-                self.drain_input(20, 8),
-            );
-            self.debug_cart_power(progress, "after CART_PWR_OFF");
-        } else {
-            progress.message(&format!(
-                "[debug][power] SKIP {label}: cart power control unsupported"
-            ));
+            CartPowerControl::LegacyOriginalFirmware => {
+                progress.message(&format!(
+                    "[debug][power] SEND 0x{CMD_OFW_CART_PWR_OFF:02X}: {label}; expected LED effect: Power LED off"
+                ));
+                Self::debug_result(progress, label, self.bulk_write(&[CMD_OFW_CART_PWR_OFF]));
+                std::thread::sleep(Duration::from_millis(100));
+                Self::debug_result(
+                    progress,
+                    "power-off cleanup: drain input after OFW_CART_PWR_OFF",
+                    self.drain_input(20, 8),
+                );
+                self.debug_cart_power(progress, "after OFW_CART_PWR_OFF");
+            }
+            CartPowerControl::None => {
+                progress.message(&format!(
+                    "[debug][power] SKIP {label}: cart power control unsupported"
+                ));
+            }
         }
     }
 
@@ -947,10 +1015,13 @@ impl UsbDev {
         if data.is_empty() {
             return Ok(());
         }
-        if data.len() > WRITE_CHUNK {
+        let max_buffer_write = self.profile.max_buffer_write;
+        if data.len() > max_buffer_write {
             return Err(GbcamUsbError::Protocol(format!(
-                "internal error: SRAM write chunk too large: {} bytes",
-                data.len()
+                "internal error: SRAM write chunk too large for {:?}: {} bytes > {} bytes",
+                self.profile.kind,
+                data.len(),
+                max_buffer_write
             )));
         }
 
@@ -1166,9 +1237,10 @@ impl UsbDev {
             self.cart_write(0x4000, bank as u8)?;
             std::thread::sleep(Duration::from_millis(2));
 
-            for bank_off in (0..BANK_SIZE).step_by(WRITE_CHUNK) {
+            let write_chunk = self.profile.max_buffer_write;
+            for bank_off in (0..BANK_SIZE).step_by(write_chunk) {
                 let abs_off = bank * BANK_SIZE + bank_off;
-                let chunk_len = WRITE_CHUNK.min(BANK_SIZE - bank_off);
+                let chunk_len = write_chunk.min(BANK_SIZE - bank_off);
                 let chunk = make_erase_chunk(save_backup, abs_off, chunk_len)?;
                 self.sram_write_chunk(0xA000 + bank_off as u32, &chunk)?;
             }
@@ -1475,52 +1547,99 @@ impl UsbDev {
             self.set_var(VAR_ADDRESS, 0),
         )?;
 
-        if self.has_cart_power {
-            self.debug_cart_power(progress, "prepare: before mandatory power cycle");
-            self.bulk_write(&[CMD_QUERY_CART_PWR])?;
-            let powered = self.read_u8()?;
-            progress.message(&format!(
-                "[debug][power] prepare: CART_PWR raw before power cycle = 0x{powered:02X}"
-            ));
-            if powered != 0 {
-                self.power_off_cart(
-                    progress,
-                    "prepare: power cycle existing cartridge power off",
-                );
-                std::thread::sleep(Duration::from_millis(150));
-            }
+        match self.profile.power_control {
+            CartPowerControl::CustomFirmware => {
+                self.debug_cart_power(progress, "prepare: before mandatory power cycle");
+                self.bulk_write(&[CMD_QUERY_CART_PWR])?;
+                let powered = self.read_u8()?;
+                progress.message(&format!(
+                    "[debug][power] prepare: CART_PWR raw before power cycle = 0x{powered:02X}"
+                ));
+                if powered != 0 {
+                    self.power_off_cart(
+                        progress,
+                        "prepare: power cycle existing cartridge power off",
+                    );
+                    std::thread::sleep(Duration::from_millis(150));
+                }
 
-            Self::required_step(
-                progress,
-                "prepare: SET_MODE_DMG before CART_PWR_ON",
-                self.cmd_ack(CMD_SET_MODE_DMG),
-            )?;
-            progress.message(&format!(
-                "[debug][power] SEND 0x{CMD_CART_PWR_ON:02X}: prepare: power on cartridge slot; expected LED effect: Power LED red"
-            ));
-            self.bulk_write(&[CMD_CART_PWR_ON])?;
-            std::thread::sleep(Duration::from_millis(200));
-            Self::required_step(
-                progress,
-                "prepare: CART_PWR_ON ack",
-                self.expect_ack("CART_PWR_ON"),
-            )?;
-            self.bulk_write(&[CMD_QUERY_CART_PWR])?;
-            let powered_after = self.read_u8()?;
-            progress.message(&format!(
-                "[debug][power] prepare: CART_PWR raw after power on = 0x{powered_after:02X}"
-            ));
-            Self::required_step(
-                progress,
-                "prepare: DMG_MBC_RESET after cart power on",
-                self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET after cart power on"),
-            )?;
-        } else {
-            Self::required_step(
-                progress,
-                "prepare: DMG_MBC_RESET",
-                self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET"),
-            )?;
+                Self::required_step(
+                    progress,
+                    "prepare: SET_MODE_DMG before CART_PWR_ON",
+                    self.cmd_ack(CMD_SET_MODE_DMG),
+                )?;
+                progress.message(&format!(
+                    "[debug][power] SEND 0x{CMD_CART_PWR_ON:02X}: prepare: power on cartridge slot; expected LED effect: Power LED red"
+                ));
+                self.bulk_write(&[CMD_CART_PWR_ON])?;
+                std::thread::sleep(Duration::from_millis(200));
+                Self::required_step(
+                    progress,
+                    "prepare: CART_PWR_ON ack",
+                    self.expect_ack("CART_PWR_ON"),
+                )?;
+                self.bulk_write(&[CMD_QUERY_CART_PWR])?;
+                let powered_after = self.read_u8()?;
+                progress.message(&format!(
+                    "[debug][power] prepare: CART_PWR raw after power on = 0x{powered_after:02X}"
+                ));
+                Self::required_step(
+                    progress,
+                    "prepare: DMG_MBC_RESET after cart power on",
+                    self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET after cart power on"),
+                )?;
+            }
+            CartPowerControl::LegacyOriginalFirmware => {
+                self.debug_cart_power(progress, "prepare: before legacy power cycle");
+                self.bulk_write(&[CMD_OFW_QUERY_CART_PWR])?;
+                let powered = self.read_u8()?;
+                progress.message(&format!(
+                    "[debug][power] prepare: OFW_CART_PWR raw before power cycle = 0x{powered:02X}"
+                ));
+                if powered != 0 {
+                    self.power_off_cart(
+                        progress,
+                        "prepare: legacy power cycle existing cartridge power off",
+                    );
+                    std::thread::sleep(Duration::from_millis(150));
+                }
+
+                Self::required_step(
+                    progress,
+                    "prepare: SET_MODE_DMG before OFW_CART_PWR_ON",
+                    self.cmd_ack(CMD_SET_MODE_DMG),
+                )?;
+                progress.message(&format!(
+                    "[debug][power] SEND 0x{CMD_OFW_CART_PWR_ON:02X}: prepare: legacy power on cartridge slot; expected LED effect: Power LED red"
+                ));
+                self.bulk_write(&[CMD_OFW_CART_PWR_ON])?;
+                std::thread::sleep(Duration::from_millis(200));
+                Self::debug_result(
+                    progress,
+                    "prepare: drain input after OFW_CART_PWR_ON",
+                    self.drain_input(20, 8),
+                );
+                self.bulk_write(&[CMD_OFW_QUERY_CART_PWR])?;
+                let powered_after = self.read_u8()?;
+                progress.message(&format!(
+                    "[debug][power] prepare: OFW_CART_PWR raw after power on = 0x{powered_after:02X}"
+                ));
+                Self::required_step(
+                    progress,
+                    "prepare: DMG_MBC_RESET after legacy cart power on",
+                    self.cmd_ack_named(
+                        CMD_DMG_MBC_RESET,
+                        "DMG_MBC_RESET after legacy cart power on",
+                    ),
+                )?;
+            }
+            CartPowerControl::None => {
+                Self::required_step(
+                    progress,
+                    "prepare: DMG_MBC_RESET",
+                    self.cmd_ack_named(CMD_DMG_MBC_RESET, "DMG_MBC_RESET"),
+                )?;
+            }
         }
         std::thread::sleep(Duration::from_millis(100));
         self.debug_cart_power(progress, "prepare: complete");
@@ -1651,9 +1770,51 @@ mod tests {
     fn lifecycle_command_constants_match_flashgbx_docs() {
         assert_eq!(CMD_OFW_DONE_LED_ON, 0x3D);
         assert_eq!(CMD_OFW_ERROR_LED_ON, 0x3F);
+        assert_eq!(CMD_OFW_CART_PWR_ON, 0x2F);
+        assert_eq!(CMD_OFW_CART_PWR_OFF, 0x2E);
+        assert_eq!(CMD_OFW_QUERY_CART_PWR, 0x5D);
         assert_eq!(CMD_OFW_CART_MODE, 0x43);
         assert_eq!(CMD_CART_PWR_ON, 0xF2);
         assert_eq!(CMD_CART_PWR_OFF, 0xF3);
+    }
+
+    #[test]
+    fn gbxcart_profile_matches_flashgbx_power_and_buffer_rules() {
+        let rw13 = GbxCartInfo {
+            pcb_ver: 4,
+            ofw_ver: 4,
+            cfw_ver: 0,
+            name: None,
+        };
+        let profile = ReaderProfile::gbxcart(&rw13, false);
+        assert_eq!(profile.kind, CartridgeReaderKind::GbxCartRw13);
+        assert_eq!(profile.power_control, CartPowerControl::None);
+        assert_eq!(profile.max_buffer_write, WRITE_CHUNK);
+
+        let legacy_rw14 = GbxCartInfo {
+            pcb_ver: 5,
+            ofw_ver: 4,
+            cfw_ver: 11,
+            name: None,
+        };
+        let profile = ReaderProfile::gbxcart(&legacy_rw14, false);
+        assert_eq!(profile.kind, CartridgeReaderKind::GbxCartRw14);
+        assert_eq!(
+            profile.power_control,
+            CartPowerControl::LegacyOriginalFirmware
+        );
+        assert_eq!(profile.max_buffer_write, WRITE_CHUNK);
+
+        let modern_rw14 = GbxCartInfo {
+            pcb_ver: 5,
+            ofw_ver: 4,
+            cfw_ver: 12,
+            name: None,
+        };
+        let profile = ReaderProfile::gbxcart(&modern_rw14, true);
+        assert_eq!(profile.kind, CartridgeReaderKind::GbxCartRw14);
+        assert_eq!(profile.power_control, CartPowerControl::CustomFirmware);
+        assert_eq!(profile.max_buffer_write, WRITE_CHUNK);
     }
 
     #[test]
@@ -1668,7 +1829,12 @@ mod tests {
         // Firmware version 258 (0x0102) must survive roundtrip without truncation.
         // Before fix, cfw_ver was u8: 258_u16 as u8 == 2, so the >= 12 check
         // below would silently fail even though the device reports a recent firmware.
-        let info = GbxCartInfo { pcb_ver: 5, ofw_ver: 4, cfw_ver: 258, name: None };
+        let info = GbxCartInfo {
+            pcb_ver: 5,
+            ofw_ver: 4,
+            cfw_ver: 258,
+            name: None,
+        };
         assert_eq!(info.cfw_ver, 258);
         assert!(info.cfw_ver >= 12);
     }
