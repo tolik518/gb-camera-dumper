@@ -171,6 +171,7 @@ const CMD_QUERY_FW_INFO: u8 = 0xA1;
 const CMD_SET_MODE_DMG: u8 = 0xA3;
 const CMD_SET_VOLTAGE_5V: u8 = 0xA5;
 const CMD_SET_VARIABLE: u8 = 0xA6;
+const CMD_DISABLE_PULLUPS: u8 = 0xAC;
 const CMD_DMG_CART_READ: u8 = 0xB1;
 const CMD_DMG_CART_WRITE: u8 = 0xB2;
 const CMD_DMG_CART_WRITE_SRAM: u8 = 0xB3;
@@ -188,6 +189,8 @@ const VAR_DMG_WRITE_CS_PULSE: (u8, u8) = (8, 0x09);
 const VAR_DMG_READ_METHOD: (u8, u8) = (8, 0x0B);
 
 const CH340_PACKET: usize = 64;
+const GBXCART_PROBE_BAUD: u32 = 1_000_000;
+const GBFLASH_BAUD: u32 = 2_000_000;
 const SRAM_VERIFY_WINDOW: usize = 0x200;
 const SRAM_VERIFY_RETRIES: usize = 3;
 
@@ -276,6 +279,7 @@ impl CartridgeReader {
             Err(gbxcart_error) => {
                 dev.clear_local_rx();
                 let _ = dev.drain_input(20, 16);
+                dev.apply_ch340_line_rate(GBFLASH_BAUD, progress)?;
                 match dev.query_gbflash_info(progress) {
                     Ok(info) => Ok((
                         CartridgeReader::GbFlash(dev),
@@ -447,25 +451,32 @@ impl UsbDev {
         dev.flush_endpoints();
         if dev.transport.initialize_ch340 {
             ch340_initialize(&dev)?;
-            ch340_set_baud_rate(&dev, 1_000_000)?;
-            ch340_set_handshake(&dev, CH340_BIT_RTS | CH340_BIT_DTR)?;
-            std::thread::sleep(Duration::from_millis(200));
-            dev.flush_endpoints();
-            dev.drain_input(20, 16)?;
-            std::thread::sleep(Duration::from_millis(60));
+            dev.apply_ch340_line_rate(GBXCART_PROBE_BAUD, progress)?;
         }
         Ok(dev)
+    }
+
+    fn apply_ch340_line_rate(&self, baud_rate: u32, progress: &mut impl Progress) -> Result<()> {
+        if !self.transport.initialize_ch340 {
+            return Ok(());
+        }
+        progress.message(&format!(
+            "Setting CH340 line rate to {} baud...",
+            baud_rate
+        ));
+        ch340_set_baud_rate(self, baud_rate)?;
+        ch340_set_handshake(self, CH340_BIT_RTS | CH340_BIT_DTR)?;
+        std::thread::sleep(Duration::from_millis(200));
+        self.flush_endpoints();
+        self.drain_input(20, 16)?;
+        std::thread::sleep(Duration::from_millis(60));
+        Ok(())
     }
 
     fn query_gbxcart_info(&mut self, progress: &mut impl Progress) -> Result<GbxCartInfo> {
         let pcb_ver = self.query_u8_command(CMD_OFW_PCB_VER, "OFW_PCB_VER")?;
         let ofw_ver = self.query_u8_command(CMD_OFW_FW_VER, "OFW_FW_VER")?;
-
-        if pcb_ver == 0 {
-            return Err(GbcamUsbError::Protocol(
-                "No response from GBxCart RW. Check connections.".to_string(),
-            ));
-        }
+        validate_gbxcart_probe(pcb_ver, ofw_ver)?;
 
         let mut name = None;
         if pcb_ver >= 5 && ofw_ver > 0 {
@@ -489,14 +500,6 @@ impl UsbDev {
             }
         }
 
-        progress.message(&format!(
-            "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} custom_cart_power_control={}",
-            self.fw_ver, self.has_cart_power
-        ));
-        self.debug_cart_power(progress, "connect: after firmware query, before LED reset");
-        self.reset_status_leds(progress, "connect: reset status/mode LEDs");
-        self.debug_cart_power(progress, "connect: after LED reset");
-
         let info = GbxCartInfo {
             pcb_ver,
             ofw_ver,
@@ -504,6 +507,13 @@ impl UsbDev {
             name,
         };
         self.profile = ReaderProfile::gbxcart(&info, self.has_cart_power);
+        progress.message(&format!(
+            "[debug][gbxcart] firmware: pcb=0x{pcb_ver:02X} ofw=R{ofw_ver} cfw=L{} custom_cart_power_control={}",
+            self.fw_ver, self.has_cart_power
+        ));
+        self.debug_cart_power(progress, "connect: after firmware query, before LED reset");
+        self.reset_status_leds(progress, "connect: reset status/mode LEDs");
+        self.debug_cart_power(progress, "connect: after LED reset");
         Ok(info)
     }
 
@@ -527,6 +537,11 @@ impl UsbDev {
         }
         let cfw_ver = u16::from_be_bytes([info[1], info[2]]);
         let pcb_ver = info[3];
+        if cfw_ver < 1 {
+            return Err(GbcamUsbError::Protocol(format!(
+                "GBFlash firmware version L{cfw_ver} is below the minimum supported revision"
+            )));
+        }
         if !matches!(pcb_ver, 5 | 10 | 11 | 12 | 13) {
             return Err(GbcamUsbError::Protocol(format!(
                 "GBFlash PCB version 0x{pcb_ver:02X} is not recognized"
@@ -1042,7 +1057,7 @@ impl UsbDev {
     }
 
     fn cmd_ack_named(&self, byte: u8, name: &'static str) -> Result<()> {
-        if self.fw_ver >= 10 {
+        if self.fw_ver >= 12 {
             self.write_wait_retry(&[byte], name, 5)
         } else {
             self.bulk_write(&[byte])
@@ -1602,6 +1617,15 @@ impl UsbDev {
     fn prepare_dmg_cart(&self, progress: &mut impl Progress) -> Result<()> {
         progress.message("[debug][prepare] begin DMG cartridge preparation");
         self.debug_cart_power(progress, "prepare: entry");
+        if self.fw_ver >= 8 {
+            let disable_pullups = if self.fw_ver >= 12 {
+                self.write_wait_retry(&[CMD_DISABLE_PULLUPS], "DISABLE_PULLUPS", 5)
+            } else {
+                self.bulk_write(&[CMD_DISABLE_PULLUPS])
+                    .and_then(|()| self.expect_ack("DISABLE_PULLUPS"))
+            };
+            Self::required_step(progress, "prepare: DISABLE_PULLUPS 0xAC", disable_pullups)?;
+        }
         Self::required_step(
             progress,
             "prepare: SET_MODE_DMG 0xA3",
@@ -1758,6 +1782,25 @@ impl UsbDev {
     }
 }
 
+fn validate_gbxcart_probe(pcb_ver: u8, ofw_ver: u8) -> Result<()> {
+    if pcb_ver == 0 {
+        return Err(GbcamUsbError::Protocol(
+            "No response from GBxCart RW. Check connections.".to_string(),
+        ));
+    }
+    if pcb_ver == 2 && ofw_ver == 2 {
+        return Err(GbcamUsbError::Protocol(
+            "Not a GBxCart RW device.".to_string(),
+        ));
+    }
+    if pcb_ver >= 5 && ofw_ver == 0 {
+        return Err(GbcamUsbError::Protocol(
+            "Not a GBxCart RW device.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn ch340_initialize(dev: &UsbDev) -> Result<()> {
     // Matches the CH34x initialization sequence used by usb-serial-for-android.
     // State reads are kept as synchronization points; chip revisions vary in
@@ -1859,8 +1902,20 @@ mod tests {
         assert_eq!(CMD_OFW_CART_PWR_OFF, 0x2E);
         assert_eq!(CMD_OFW_QUERY_CART_PWR, 0x5D);
         assert_eq!(CMD_OFW_CART_MODE, 0x43);
+        assert_eq!(CMD_DISABLE_PULLUPS, 0xAC);
         assert_eq!(CMD_CART_PWR_ON, 0xF2);
         assert_eq!(CMD_CART_PWR_OFF, 0xF3);
+    }
+
+    #[test]
+    fn gbxcart_probe_validation_matches_flashgbx() {
+        assert!(validate_gbxcart_probe(4, 4).is_ok());
+        assert!(validate_gbxcart_probe(5, 4).is_ok());
+
+        assert!(validate_gbxcart_probe(0, 4).is_err());
+        assert!(validate_gbxcart_probe(2, 2).is_err());
+        assert!(validate_gbxcart_probe(5, 0).is_err());
+        assert!(validate_gbxcart_probe(6, 0).is_err());
     }
 
     #[test]
@@ -1932,6 +1987,7 @@ mod tests {
         assert_eq!(ch340_baud_params(9_600).unwrap(), (0xB282, 0x000C));
         assert_eq!(ch340_baud_params(1_000_000).unwrap(), (0xFA83, 0x0004));
         assert_eq!(ch340_baud_params(1_500_000).unwrap(), (0xFC83, 0x0003));
+        assert_eq!(ch340_baud_params(2_000_000).unwrap(), (0xFD83, 0x0002));
     }
 
     #[test]
