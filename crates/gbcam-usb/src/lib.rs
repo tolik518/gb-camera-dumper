@@ -53,6 +53,30 @@ pub struct GbxCartInfo {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CartridgeReaderKind {
+    GbxCartRw14,
+}
+
+#[derive(Debug, Clone)]
+pub enum CartridgeReaderInfo {
+    GbxCartRw14(GbxCartInfo),
+}
+
+impl CartridgeReaderInfo {
+    pub fn kind(&self) -> CartridgeReaderKind {
+        match self {
+            CartridgeReaderInfo::GbxCartRw14(_) => CartridgeReaderKind::GbxCartRw14,
+        }
+    }
+
+    pub fn gbxcart_info(&self) -> Option<&GbxCartInfo> {
+        match self {
+            CartridgeReaderInfo::GbxCartRw14(info) => Some(info),
+        }
+    }
+}
+
 pub trait Progress {
     fn message(&mut self, _message: &str) {}
     fn cartridge_header(&mut self, _report: &CartridgeReport) {}
@@ -126,6 +150,84 @@ const VAR_DMG_READ_METHOD: (u8, u8) = (8, 0x0B);
 const CH340_PACKET: usize = 64;
 const SRAM_VERIFY_WINDOW: usize = 0x200;
 const SRAM_VERIFY_RETRIES: usize = 3;
+
+pub enum CartridgeReader {
+    GbxCartRw14(UsbDev),
+}
+
+impl CartridgeReader {
+    pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, CartridgeReaderInfo)> {
+        progress.message("Connecting to GBxCart RW 1.4...");
+        let (dev, info) = UsbDev::connect(fd, progress)?;
+        Ok((
+            CartridgeReader::GbxCartRw14(dev),
+            CartridgeReaderInfo::GbxCartRw14(info),
+        ))
+    }
+
+    pub fn finish_operation(&self, success: bool, progress: &mut impl Progress) {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => dev.finish_operation(success, progress),
+        }
+    }
+
+    pub fn read_cartridge_report(&self) -> Result<CartridgeReport> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => dev.read_cartridge_report(),
+        }
+    }
+
+    pub fn dump_save(&self, progress: &mut impl Progress) -> Result<Vec<u8>> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => dev.dump_save(progress),
+        }
+    }
+
+    pub fn erase_save(&self, save_backup: &[u8], progress: &mut impl Progress) -> Result<()> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => dev.erase_save(save_backup, progress),
+        }
+    }
+
+    pub fn delete_album_photos(
+        &self,
+        save_backup: &[u8],
+        physical_slots: &[usize],
+        progress: &mut impl Progress,
+    ) -> Result<[u8; ORDER_COUNT]> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => {
+                dev.delete_album_photos(save_backup, physical_slots, progress)
+            }
+        }
+    }
+
+    pub fn recover_album_photos(
+        &self,
+        save_backup: &[u8],
+        physical_slots: &[usize],
+        progress: &mut impl Progress,
+    ) -> Result<[u8; ORDER_COUNT]> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => {
+                dev.recover_album_photos(save_backup, physical_slots, progress)
+            }
+        }
+    }
+
+    pub fn reorder_album_photos(
+        &self,
+        save_backup: &[u8],
+        physical_slots_in_display_order: &[usize],
+        progress: &mut impl Progress,
+    ) -> Result<[u8; ORDER_COUNT]> {
+        match self {
+            CartridgeReader::GbxCartRw14(dev) => {
+                dev.reorder_album_photos(save_backup, physical_slots_in_display_order, progress)
+            }
+        }
+    }
+}
 
 pub struct UsbDev {
     fd: RawFd,

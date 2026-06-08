@@ -4,7 +4,7 @@ use gbxcam_core::{
     write_rgb_png, AutoRgbMergeOptions, GbcamSave, PaletteId, PhotoKind, RgbMergeAlgorithm,
     RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
-use gbxcam_usb::{GbxCartInfo, Progress, UsbDev};
+use gbxcam_usb::{CartridgeReader, CartridgeReaderInfo, GbxCartInfo, Progress};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jboolean, jint, jstring};
@@ -15,6 +15,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+enum GallerySourceInfo {
+    Reader(CartridgeReaderInfo),
+    CachedSave,
+}
 
 #[no_mangle]
 pub extern "C" fn gbcam_version() -> *mut c_char {
@@ -444,10 +449,10 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_isGameBoyCameraInserted(
     _class: JClass,
     fd: jint,
 ) -> jboolean {
-    let ok = UsbDev::connect(fd as std::os::unix::io::RawFd, &mut NoJniProgress)
-        .and_then(|(dev, _info)| {
-            let report = dev.read_cartridge_report();
-            dev.finish_operation(report.is_ok(), &mut NoJniProgress);
+    let ok = CartridgeReader::connect(fd as std::os::unix::io::RawFd, &mut NoJniProgress)
+        .and_then(|(reader, _info)| {
+            let report = reader.read_cartridge_report();
+            reader.finish_operation(report.is_ok(), &mut NoJniProgress);
             report
         })
         .map(|r| r.mapper == 0xFC) // 0xFC = MAPPER_MAC_GBD
@@ -467,15 +472,21 @@ fn load_gallery_from_fd(
 ) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
 
-    let (info, save) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
+    let (info, save) = with_reader_session(fd, progress, |reader, _info, progress| {
         progress.message("Connected. Dumping camera save...");
-        Ok(dev.dump_save(progress)?)
+        Ok(reader.dump_save(progress)?)
     })?;
 
     let save_path = output_dir.join("GAMEBOYCAMERA.sav");
     std::fs::write(&save_path, &save)?;
     progress.message("Decoding photos...");
-    gallery_json(&save, &output_dir, &save_path, &info, palette)
+    gallery_json(
+        &save,
+        &output_dir,
+        &save_path,
+        &GallerySourceInfo::Reader(info),
+        palette,
+    )
 }
 
 fn delete_photos_from_fd(
@@ -500,14 +511,20 @@ fn delete_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
-        Ok(dev.delete_album_photos(&save, &slots, progress)?)
+    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
+        Ok(reader.delete_album_photos(&save, &slots, progress)?)
     })?;
 
     let updated = apply_album_delete(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
     progress.message("Gallery updated after delete.");
-    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+    gallery_json(
+        &updated,
+        &output_dir,
+        &save_path,
+        &GallerySourceInfo::Reader(info),
+        palette,
+    )
 }
 
 fn recover_photos_from_fd(
@@ -532,14 +549,20 @@ fn recover_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
-        Ok(dev.recover_album_photos(&save, &slots, progress)?)
+    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
+        Ok(reader.recover_album_photos(&save, &slots, progress)?)
     })?;
 
     let updated = apply_album_recover(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
     progress.message("Gallery updated after recover.");
-    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+    gallery_json(
+        &updated,
+        &output_dir,
+        &save_path,
+        &GallerySourceInfo::Reader(info),
+        palette,
+    )
 }
 
 fn recover_photos_from_save(
@@ -567,12 +590,7 @@ fn recover_photos_from_save(
     std::fs::write(&save_path, &updated)?;
     progress.message("Cached gallery updated after recover.");
 
-    let info = GbxCartInfo {
-        pcb_ver: 0,
-        ofw_ver: 0,
-        cfw_ver: 0,
-        name: Some("Cached save".to_string()),
-    };
+    let info = GallerySourceInfo::CachedSave;
     gallery_json(&updated, &output_dir, &save_path, &info, palette)
 }
 
@@ -595,14 +613,20 @@ fn reorder_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_gbxcart_session(fd, progress, |dev, _info, progress| {
-        Ok(dev.reorder_album_photos(&save, &slots, progress)?)
+    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
+        Ok(reader.reorder_album_photos(&save, &slots, progress)?)
     })?;
 
     let updated = apply_album_reorder(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
     progress.message("Gallery updated after reorder.");
-    gallery_json(&updated, &output_dir, &save_path, &info, palette)
+    gallery_json(
+        &updated,
+        &output_dir,
+        &save_path,
+        &GallerySourceInfo::Reader(info),
+        palette,
+    )
 }
 
 fn load_gallery_from_save(
@@ -612,12 +636,7 @@ fn load_gallery_from_save(
 ) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
     let save = std::fs::read(&save_path)?;
-    let info = GbxCartInfo {
-        pcb_ver: 0,
-        ofw_ver: 0,
-        cfw_ver: 0,
-        name: Some("Cached save".to_string()),
-    };
+    let info = GallerySourceInfo::CachedSave;
     gallery_json(&save, &output_dir, &save_path, &info, palette)
 }
 
@@ -711,19 +730,18 @@ fn parse_algorithm_overrides(json: &str) -> AppResult<Vec<(String, String)>> {
         .collect())
 }
 
-fn with_gbxcart_session<T, P, F>(
+fn with_reader_session<T, P, F>(
     fd: jint,
     progress: &mut P,
     operation: F,
-) -> AppResult<(GbxCartInfo, T)>
+) -> AppResult<(CartridgeReaderInfo, T)>
 where
     P: Progress,
-    F: FnOnce(&UsbDev, &GbxCartInfo, &mut P) -> AppResult<T>,
+    F: FnOnce(&CartridgeReader, &CartridgeReaderInfo, &mut P) -> AppResult<T>,
 {
-    progress.message("Connecting to GBxCart RW 1.4...");
-    let (dev, info) = UsbDev::connect(fd, progress)?;
-    let result = operation(&dev, &info, progress);
-    dev.finish_operation(result.is_ok(), progress);
+    let (reader, info) = CartridgeReader::connect(fd, progress)?;
+    let result = operation(&reader, &info, progress);
+    reader.finish_operation(result.is_ok(), progress);
     result.map(|value| (info, value))
 }
 
@@ -731,7 +749,7 @@ fn gallery_json(
     save: &[u8],
     output_dir: &Path,
     save_path: &Path,
-    info: &GbxCartInfo,
+    info: &GallerySourceInfo,
     palette: PaletteId,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let photos = extract_photos(save)?;
@@ -835,7 +853,14 @@ fn palette_from_jint(index: jint) -> PaletteId {
     PaletteId::from_index(index.max(0) as usize)
 }
 
-fn connected_label(info: &GbxCartInfo) -> String {
+fn connected_label(info: &GallerySourceInfo) -> String {
+    match info {
+        GallerySourceInfo::Reader(CartridgeReaderInfo::GbxCartRw14(info)) => gbxcart_label(info),
+        GallerySourceInfo::CachedSave => "Cached save".to_string(),
+    }
+}
+
+fn gbxcart_label(info: &GbxCartInfo) -> String {
     match (&info.name, info.cfw_ver) {
         (Some(name), cfw) if cfw >= 12 => format!(
             "{} (PCB v{}, OFW R{}, CFW L{})",
@@ -924,7 +949,7 @@ mod tests {
             cfw_ver: 258,
             name: Some("GBxCart RW".to_string()),
         };
-        let label = connected_label(&info);
+        let label = gbxcart_label(&info);
         assert_eq!(label, "GBxCart RW (PCB v5, OFW R4, CFW L258)");
     }
 
