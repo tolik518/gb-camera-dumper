@@ -37,8 +37,13 @@ final class GbcamOperationRunner {
             Callback callback) {
         runUsbOperation(usbManager, device, "Loading photos from camera...",
                 BusyDialog.Direction.TO_ANDROID, callback, connection -> {
+            GbxCartDevices.NativeTransport transport = nativeTransportOrThrow(device);
             String json = NativeGbcam.loadGalleryFromFd(
                     connection.getFileDescriptor(),
+                    transport.interfaceNumber,
+                    transport.epOut,
+                    transport.epIn,
+                    transport.initializeCh340,
                     outputDir.getAbsolutePath(),
                     paletteIndex,
                     makeProgress(callback));
@@ -56,8 +61,13 @@ final class GbcamOperationRunner {
         String slots = SlotSet.selected(gallery, false).toCsv();
         runUsbOperation(usbManager, device, "Deleting selected photos...",
                 BusyDialog.Direction.TO_GBCAM, callback, connection -> {
+            GbxCartDevices.NativeTransport transport = nativeTransportOrThrow(device);
             String json = NativeGbcam.deletePhotosFromFd(
                     connection.getFileDescriptor(),
+                    transport.interfaceNumber,
+                    transport.epOut,
+                    transport.epIn,
+                    transport.initializeCh340,
                     gallery.savePath,
                     outputDir.getAbsolutePath(),
                     slots,
@@ -77,8 +87,13 @@ final class GbcamOperationRunner {
         String slots = SlotSet.selected(gallery, true).toCsv();
         runUsbOperation(usbManager, device, "Recovering selected deleted photos...",
                 BusyDialog.Direction.TO_GBCAM, callback, connection -> {
+            GbxCartDevices.NativeTransport transport = nativeTransportOrThrow(device);
             String json = NativeGbcam.recoverPhotosFromFd(
                     connection.getFileDescriptor(),
+                    transport.interfaceNumber,
+                    transport.epOut,
+                    transport.epIn,
+                    transport.initializeCh340,
                     gallery.savePath,
                     outputDir.getAbsolutePath(),
                     slots,
@@ -99,8 +114,13 @@ final class GbcamOperationRunner {
             Callback callback) {
         runUsbOperation(usbManager, device, busyMessage,
                 BusyDialog.Direction.TO_GBCAM, callback, connection -> {
+            GbxCartDevices.NativeTransport transport = nativeTransportOrThrow(device);
             String json = NativeGbcam.reorderPhotosFromFd(
                     connection.getFileDescriptor(),
+                    transport.interfaceNumber,
+                    transport.epOut,
+                    transport.epIn,
+                    transport.initializeCh340,
                     gallery.savePath,
                     outputDir.getAbsolutePath(),
                     physicalSlotsCsv,
@@ -153,6 +173,14 @@ final class GbcamOperationRunner {
             callback.onLog(message);
             callback.onProgress(message);
         });
+    }
+
+    private static GbxCartDevices.NativeTransport nativeTransportOrThrow(UsbDevice device) {
+        GbxCartDevices.NativeTransport transport = GbxCartDevices.nativeTransport(device);
+        if (transport == null) {
+            throw new IllegalStateException("Native USB transport is not available for this reader.");
+        }
+        return transport;
     }
 
     private interface UsbWork {

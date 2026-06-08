@@ -53,6 +53,24 @@ final class GbxCartDevices {
         String supportNote() {
             return family.supportNote;
         }
+
+        NativeTransport nativeTransport() {
+            return nativeTransportFor(device, family);
+        }
+    }
+
+    static final class NativeTransport {
+        final int interfaceNumber;
+        final int epOut;
+        final int epIn;
+        final boolean initializeCh340;
+
+        NativeTransport(int interfaceNumber, int epOut, int epIn, boolean initializeCh340) {
+            this.interfaceNumber = interfaceNumber;
+            this.epOut = epOut;
+            this.epIn = epIn;
+            this.initializeCh340 = initializeCh340;
+        }
     }
 
     private GbxCartDevices() {
@@ -87,6 +105,21 @@ final class GbxCartDevices {
         }
         if (vid == VID_STM && pid == PID_STM_VCP) {
             return new Candidate(device, ReaderFamily.JOEY_JR);
+        }
+        return null;
+    }
+
+    static NativeTransport nativeTransport(UsbDevice device) {
+        Candidate candidate = candidateFor(device);
+        if (candidate == null || !candidate.canAttemptNativeSession()) {
+            return null;
+        }
+        return candidate.nativeTransport();
+    }
+
+    private static NativeTransport nativeTransportFor(UsbDevice device, ReaderFamily family) {
+        if (family == ReaderFamily.CH340_GB_READER) {
+            return new NativeTransport(0, 0x02, 0x82, true);
         }
         return null;
     }

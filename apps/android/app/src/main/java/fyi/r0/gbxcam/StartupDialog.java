@@ -182,7 +182,15 @@ final class StartupDialog {
             try {
                 conn = usb.manager().openDevice(device);
                 if (conn != null) {
-                    isCamera = NativeGbcam.isGameBoyCameraInserted(conn.getFileDescriptor());
+                    GbxCartDevices.NativeTransport transport = GbxCartDevices.nativeTransport(device);
+                    if (transport != null) {
+                        isCamera = NativeGbcam.isGameBoyCameraInserted(
+                                conn.getFileDescriptor(),
+                                transport.interfaceNumber,
+                                transport.epOut,
+                                transport.epIn,
+                                transport.initializeCh340);
+                    }
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "Startup cartridge check failed", t);

@@ -4,7 +4,7 @@ use gbxcam_core::{
     write_rgb_png, AutoRgbMergeOptions, GbcamSave, PaletteId, PhotoKind, RgbMergeAlgorithm,
     RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
-use gbxcam_usb::{CartridgeReader, CartridgeReaderInfo, GbxCartInfo, Progress};
+use gbxcam_usb::{CartridgeReader, CartridgeReaderInfo, GbxCartInfo, Progress, UsbTransport};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jboolean, jint, jstring};
@@ -92,6 +92,10 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromFd<'local>(
     env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
     output_dir: JString<'local>,
     palette_index: jint,
     progress: JObject<'local>,
@@ -105,6 +109,7 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_loadGalleryFromFd<'local>(
             let mut progress = JniProgress::new(env, progress);
             load_gallery_from_fd(
                 fd,
+                usb_transport(interface, ep_out, ep_in, initialize_ch340),
                 output_dir,
                 palette_from_jint(palette_index),
                 &mut progress,
@@ -119,6 +124,10 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>
     env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
     save_path: JString<'local>,
     output_dir: JString<'local>,
     physical_slots_csv: JString<'local>,
@@ -142,6 +151,7 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_deletePhotosFromFd<'local>
             let mut progress = JniProgress::new(env, progress);
             delete_photos_from_fd(
                 fd,
+                usb_transport(interface, ep_out, ep_in, initialize_ch340),
                 save_path,
                 output_dir,
                 &physical_slots_csv,
@@ -158,6 +168,10 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local
     env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
     save_path: JString<'local>,
     output_dir: JString<'local>,
     physical_slots_csv: JString<'local>,
@@ -181,6 +195,7 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_recoverPhotosFromFd<'local
             let mut progress = JniProgress::new(env, progress);
             recover_photos_from_fd(
                 fd,
+                usb_transport(interface, ep_out, ep_in, initialize_ch340),
                 save_path,
                 output_dir,
                 &physical_slots_csv,
@@ -234,6 +249,10 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local
     env: jni::EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
     save_path: JString<'local>,
     output_dir: JString<'local>,
     physical_slots_csv: JString<'local>,
@@ -257,6 +276,7 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_reorderPhotosFromFd<'local
             let mut progress = JniProgress::new(env, progress);
             reorder_photos_from_fd(
                 fd,
+                usb_transport(interface, ep_out, ep_in, initialize_ch340),
                 save_path,
                 output_dir,
                 &physical_slots_csv,
@@ -448,15 +468,23 @@ pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_isGameBoyCameraInserted(
     _env: jni::EnvUnowned,
     _class: JClass,
     fd: jint,
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
 ) -> jboolean {
-    let ok = CartridgeReader::connect(fd as std::os::unix::io::RawFd, &mut NoJniProgress)
-        .and_then(|(reader, _info)| {
-            let report = reader.read_cartridge_report();
-            reader.finish_operation(report.is_ok(), &mut NoJniProgress);
-            report
-        })
-        .map(|r| r.mapper == 0xFC) // 0xFC = MAPPER_MAC_GBD
-        .unwrap_or(false);
+    let ok = CartridgeReader::connect_with_transport(
+        fd as std::os::unix::io::RawFd,
+        usb_transport(interface, ep_out, ep_in, initialize_ch340),
+        &mut NoJniProgress,
+    )
+    .and_then(|(reader, _info)| {
+        let report = reader.read_cartridge_report();
+        reader.finish_operation(report.is_ok(), &mut NoJniProgress);
+        report
+    })
+    .map(|r| r.mapper == 0xFC) // 0xFC = MAPPER_MAC_GBD
+    .unwrap_or(false);
     ok as jboolean
 }
 
@@ -464,15 +492,30 @@ struct NoJniProgress;
 
 impl Progress for NoJniProgress {}
 
+fn usb_transport(
+    interface: jint,
+    ep_out: jint,
+    ep_in: jint,
+    initialize_ch340: jboolean,
+) -> UsbTransport {
+    UsbTransport {
+        interface: interface as u32,
+        ep_out: ep_out as u32,
+        ep_in: ep_in as u32,
+        initialize_ch340,
+    }
+}
+
 fn load_gallery_from_fd(
     fd: jint,
+    transport: UsbTransport,
     output_dir: PathBuf,
     palette: PaletteId,
     progress: &mut impl Progress,
 ) -> AppResult<String> {
     std::fs::create_dir_all(&output_dir)?;
 
-    let (info, save) = with_reader_session(fd, progress, |reader, _info, progress| {
+    let (info, save) = with_reader_session(fd, transport, progress, |reader, _info, progress| {
         progress.message("Connected. Dumping camera save...");
         Ok(reader.dump_save(progress)?)
     })?;
@@ -491,6 +534,7 @@ fn load_gallery_from_fd(
 
 fn delete_photos_from_fd(
     fd: jint,
+    transport: UsbTransport,
     save_path: PathBuf,
     output_dir: PathBuf,
     physical_slots_csv: &str,
@@ -511,9 +555,10 @@ fn delete_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
-        Ok(reader.delete_album_photos(&save, &slots, progress)?)
-    })?;
+    let (info, _order) =
+        with_reader_session(fd, transport, progress, |reader, _info, progress| {
+            Ok(reader.delete_album_photos(&save, &slots, progress)?)
+        })?;
 
     let updated = apply_album_delete(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
@@ -529,6 +574,7 @@ fn delete_photos_from_fd(
 
 fn recover_photos_from_fd(
     fd: jint,
+    transport: UsbTransport,
     save_path: PathBuf,
     output_dir: PathBuf,
     physical_slots_csv: &str,
@@ -549,9 +595,10 @@ fn recover_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
-        Ok(reader.recover_album_photos(&save, &slots, progress)?)
-    })?;
+    let (info, _order) =
+        with_reader_session(fd, transport, progress, |reader, _info, progress| {
+            Ok(reader.recover_album_photos(&save, &slots, progress)?)
+        })?;
 
     let updated = apply_album_recover(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
@@ -596,6 +643,7 @@ fn recover_photos_from_save(
 
 fn reorder_photos_from_fd(
     fd: jint,
+    transport: UsbTransport,
     save_path: PathBuf,
     output_dir: PathBuf,
     physical_slots_csv: &str,
@@ -613,9 +661,10 @@ fn reorder_photos_from_fd(
         backup_path.display()
     ));
 
-    let (info, _order) = with_reader_session(fd, progress, |reader, _info, progress| {
-        Ok(reader.reorder_album_photos(&save, &slots, progress)?)
-    })?;
+    let (info, _order) =
+        with_reader_session(fd, transport, progress, |reader, _info, progress| {
+            Ok(reader.reorder_album_photos(&save, &slots, progress)?)
+        })?;
 
     let updated = apply_album_reorder(&save, &slots)?;
     std::fs::write(&save_path, &updated)?;
@@ -732,6 +781,7 @@ fn parse_algorithm_overrides(json: &str) -> AppResult<Vec<(String, String)>> {
 
 fn with_reader_session<T, P, F>(
     fd: jint,
+    transport: UsbTransport,
     progress: &mut P,
     operation: F,
 ) -> AppResult<(CartridgeReaderInfo, T)>
@@ -739,7 +789,11 @@ where
     P: Progress,
     F: FnOnce(&CartridgeReader, &CartridgeReaderInfo, &mut P) -> AppResult<T>,
 {
-    let (reader, info) = CartridgeReader::connect(fd, progress)?;
+    let (reader, info) = CartridgeReader::connect_with_transport(
+        fd as std::os::unix::io::RawFd,
+        transport,
+        progress,
+    )?;
     let result = operation(&reader, &info, progress);
     reader.finish_operation(result.is_ok(), progress);
     result.map(|value| (info, value))

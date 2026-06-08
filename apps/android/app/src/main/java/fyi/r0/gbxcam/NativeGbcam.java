@@ -20,10 +20,22 @@ final class NativeGbcam {
 
     static native String paletteColors();
 
-    static native String loadGalleryFromFd(int fd, String outputDir, int paletteIndex, Progress progress);
+    static native String loadGalleryFromFd(
+            int fd,
+            int interfaceNumber,
+            int epOut,
+            int epIn,
+            boolean initializeCh340,
+            String outputDir,
+            int paletteIndex,
+            Progress progress);
 
     static native String deletePhotosFromFd(
             int fd,
+            int interfaceNumber,
+            int epOut,
+            int epIn,
+            boolean initializeCh340,
             String savePath,
             String outputDir,
             String physicalSlotsCsv,
@@ -32,6 +44,10 @@ final class NativeGbcam {
 
     static native String recoverPhotosFromFd(
             int fd,
+            int interfaceNumber,
+            int epOut,
+            int epIn,
+            boolean initializeCh340,
             String savePath,
             String outputDir,
             String physicalSlotsCsv,
@@ -47,6 +63,10 @@ final class NativeGbcam {
 
     static native String reorderPhotosFromFd(
             int fd,
+            int interfaceNumber,
+            int epOut,
+            int epIn,
+            boolean initializeCh340,
             String savePath,
             String outputDir,
             String physicalSlotsCsv,
@@ -69,5 +89,10 @@ final class NativeGbcam {
             String defaultAlgorithm,
             String algorithmOverridesJson);
 
-    static native boolean isGameBoyCameraInserted(int fd);
+    static native boolean isGameBoyCameraInserted(
+            int fd,
+            int interfaceNumber,
+            int epOut,
+            int epIn,
+            boolean initializeCh340);
 }
