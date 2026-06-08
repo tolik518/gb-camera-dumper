@@ -126,9 +126,14 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
 
     @Override
     public void onLoadRequested() {
-        if (!usb.isConnected()) {
+        GbxCartDevices.ReaderDetection detection = usb.detection();
+        if (detection != null && !detection.supported) {
+            UiStyle.messageDialog(activity, "Unsupported cartridge reader", detection.unsupportedMessage);
+            return;
+        }
+        if (!usb.isReaderPresent()) {
             Toast.makeText(activity,
-                    "No supported cartridge reader connected. Plug in GBxCart RW or GBFlash and try again.",
+                    "No cartridge reader connected. Connect a GBxCart RW, GBFlash, or Joey Jr reader.",
                     Toast.LENGTH_LONG).show();
             return;
         }

@@ -3,10 +3,15 @@ package fyi.r0.gbxcam;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 
+import org.json.JSONObject;
+
 import java.util.Locale;
 import java.util.Map;
 
 final class GbxCartDevices {
+    static final String CONTACT_DEVELOPER_SUFFIX =
+            " Please contact the developer if you need this reader supported.";
+
     private static final int VID_WCH = 0x1A86;
     private static final int PID_CH340 = 0x7523;
     private static final int VID_STM = 0x0483;
@@ -14,22 +19,22 @@ final class GbxCartDevices {
 
     enum ReaderFamily {
         CH340_GB_READER(
-                "GBxCart RW / GBFlash CH340 cartridge reader",
-                "Native support can attempt GBxCart RW and GBFlash on CH340.",
+                "CH340 cartridge reader",
+                "GBxCart RW or GBFlash",
                 true),
         JOEY_JR(
                 "Joey Jr",
-                "Detected, but native Joey Jr support is not implemented yet.",
+                "BennVenn Joey Jr",
                 false);
 
-        final String label;
-        final String supportNote;
-        final boolean canAttemptNativeSession;
+        final String usbLabel;
+        final String flashGbxName;
+        final boolean requiresNativeProbe;
 
-        ReaderFamily(String label, String supportNote, boolean canAttemptNativeSession) {
-            this.label = label;
-            this.supportNote = supportNote;
-            this.canAttemptNativeSession = canAttemptNativeSession;
+        ReaderFamily(String usbLabel, String flashGbxName, boolean requiresNativeProbe) {
+            this.usbLabel = usbLabel;
+            this.flashGbxName = flashGbxName;
+            this.requiresNativeProbe = requiresNativeProbe;
         }
     }
 
@@ -42,20 +47,58 @@ final class GbxCartDevices {
             this.family = family;
         }
 
-        boolean canAttemptNativeSession() {
-            return family.canAttemptNativeSession;
+        boolean requiresNativeProbe() {
+            return family.requiresNativeProbe;
         }
 
-        String label() {
-            return family.label;
+        String usbLabel() {
+            return family.usbLabel;
         }
 
-        String supportNote() {
-            return family.supportNote;
+        String flashGbxName() {
+            return family.flashGbxName;
         }
 
         NativeTransport nativeTransport() {
-            return nativeTransportFor(device, family);
+            return nativeTransportFor(family);
+        }
+
+        ReaderDetection staticDetection() {
+            if (family == ReaderFamily.JOEY_JR) {
+                return ReaderDetection.unsupported(
+                        family.flashGbxName,
+                        family.flashGbxName + " is connected but not supported by GBxCAM Viewer yet."
+                                + CONTACT_DEVELOPER_SUFFIX);
+            }
+            return null;
+        }
+    }
+
+    static final class ReaderDetection {
+        final String label;
+        final boolean supported;
+        final String unsupportedMessage;
+
+        ReaderDetection(String label, boolean supported, String unsupportedMessage) {
+            this.label = label;
+            this.supported = supported;
+            this.unsupportedMessage = unsupportedMessage;
+        }
+
+        static ReaderDetection unsupported(String label, String unsupportedMessage) {
+            return new ReaderDetection(label, false, unsupportedMessage);
+        }
+
+        static ReaderDetection fromJson(String json) throws Exception {
+            JSONObject root = new JSONObject(json);
+            String label = root.getString("label");
+            boolean supported = root.getBoolean("supported");
+            String unsupportedMessage = root.optString("unsupportedMessage", "");
+            if (!supported && unsupportedMessage.isEmpty()) {
+                unsupportedMessage = label + " is connected but not supported by GBxCAM Viewer yet."
+                        + CONTACT_DEVELOPER_SUFFIX;
+            }
+            return new ReaderDetection(label, supported, unsupportedMessage);
         }
     }
 
@@ -80,21 +123,13 @@ final class GbxCartDevices {
         if (usbManager == null) {
             return null;
         }
-        Candidate fallback = null;
         for (Map.Entry<String, UsbDevice> entry : usbManager.getDeviceList().entrySet()) {
-            UsbDevice device = entry.getValue();
-            Candidate candidate = candidateFor(device);
-            if (candidate == null) {
-                continue;
-            }
-            if (candidate.canAttemptNativeSession()) {
+            Candidate candidate = candidateFor(entry.getValue());
+            if (candidate != null) {
                 return candidate;
             }
-            if (fallback == null) {
-                fallback = candidate;
-            }
         }
-        return fallback;
+        return null;
     }
 
     private static Candidate candidateFor(UsbDevice device) {
@@ -111,13 +146,13 @@ final class GbxCartDevices {
 
     static NativeTransport nativeTransport(UsbDevice device) {
         Candidate candidate = candidateFor(device);
-        if (candidate == null || !candidate.canAttemptNativeSession()) {
+        if (candidate == null || !candidate.requiresNativeProbe()) {
             return null;
         }
         return candidate.nativeTransport();
     }
 
-    private static NativeTransport nativeTransportFor(UsbDevice device, ReaderFamily family) {
+    private static NativeTransport nativeTransportFor(ReaderFamily family) {
         if (family == ReaderFamily.CH340_GB_READER) {
             return new NativeTransport(0, 0x02, 0x82, true);
         }

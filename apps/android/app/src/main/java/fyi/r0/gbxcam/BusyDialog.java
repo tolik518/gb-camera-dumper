@@ -121,7 +121,7 @@ final class BusyDialog {
         content.addView(statusText, statusParams);
 
         slowText = new TextView(context);
-        slowText.setText("Please stand by... Game Boy Camera cartridges run on battery-backed SRAM from the '90s — they write one byte at a time. Vintage hardware, vintage speed. 🎮");
+        slowText.setText("Please stand by... Game Boy Camera cartridges are from the '90s and they write one byte at a time :)");
         slowText.setTextColor(colors.textMuted);
         slowText.setTextSize(11);
         slowText.setGravity(Gravity.CENTER);

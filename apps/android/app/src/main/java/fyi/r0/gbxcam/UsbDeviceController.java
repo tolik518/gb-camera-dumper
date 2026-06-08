@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 
@@ -24,14 +25,17 @@ final class UsbDeviceController {
         /** A user-facing log line. */
         void onUsbLog(String message);
 
-        /** Connection state observed while starting a permission-gated action. */
+        /** A supported reader is ready for cartridge operations. */
         void onConnectionChanged(boolean connected);
 
-        /** A device was attached; {@code found} is true when it is our supported GBxCart. */
-        void onDeviceAttached(boolean found);
+        /** A known reader was attached. {@code supported} is false for detected-but-unsupported hardware. */
+        void onReaderAttached(GbxCartDevices.ReaderDetection detection);
 
         /** A device was detached; {@code wasDisconnected} is true when it was our active device. */
         void onDeviceDetached(boolean wasDisconnected);
+
+        /** A connected reader was identified but is not supported yet. */
+        void onUnsupportedReader(String message);
 
         void onPermissionGranted();
 
@@ -43,6 +47,7 @@ final class UsbDeviceController {
     private final Listener listener;
     private UsbDevice selectedDevice;
     private GbxCartDevices.Candidate selectedCandidate;
+    private GbxCartDevices.ReaderDetection selectedDetection;
     private Runnable pendingAction;
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -50,7 +55,7 @@ final class UsbDeviceController {
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-                listener.onDeviceAttached(refresh());
+                handleRefresh();
                 return;
             }
             if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
@@ -58,9 +63,7 @@ final class UsbDeviceController {
                 boolean disconnected = selectedDevice != null
                         && (candidate == null || candidate.device != selectedDevice);
                 if (disconnected) {
-                    selectedDevice = null;
-                    selectedCandidate = null;
-                    pendingAction = null;
+                    clearSelection();
                 }
                 listener.onDeviceDetached(disconnected);
                 return;
@@ -77,10 +80,15 @@ final class UsbDeviceController {
             }
             selectedDevice = device;
             listener.onPermissionGranted();
+            handleRefresh();
             Runnable pending = pendingAction;
             pendingAction = null;
             if (pending != null) {
-                pending.run();
+                if (isConnected()) {
+                    pending.run();
+                } else if (selectedDetection != null && !selectedDetection.supported) {
+                    listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+                }
             }
         }
     };
@@ -99,9 +107,16 @@ final class UsbDeviceController {
         return selectedDevice;
     }
 
+    GbxCartDevices.ReaderDetection detection() {
+        return selectedDetection;
+    }
+
+    boolean isReaderPresent() {
+        return selectedDevice != null;
+    }
+
     boolean isConnected() {
-        GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
-        return candidate != null && candidate.canAttemptNativeSession();
+        return selectedDetection != null && selectedDetection.supported;
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -123,46 +138,129 @@ final class UsbDeviceController {
         }
     }
 
-    /** Re-discovers the device, logs the result, and returns true when found. */
+    /** Re-discovers the device, probes when possible, and returns true when a reader is present. */
     boolean refresh() {
-        GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
-        if (candidate == null) {
-            selectedDevice = null;
-            selectedCandidate = null;
-            listener.onUsbLog("Supported cartridge reader not found. Connect GBxCart RW or GBFlash, then tap Load Camera.");
-            return false;
-        }
-        if (!candidate.canAttemptNativeSession()) {
-            selectedDevice = null;
-            selectedCandidate = null;
-            listener.onUsbLog(candidate.label() + " found. " + candidate.supportNote());
-            return false;
-        }
-        selectedCandidate = candidate;
-        selectedDevice = candidate.device;
-        listener.onUsbLog(String.format(
-                "%s found: VID 0x%04X, PID 0x%04X. %s",
-                candidate.label(),
-                selectedDevice.getVendorId(),
-                selectedDevice.getProductId(),
-                candidate.supportNote()));
-        return true;
+        return handleRefresh();
     }
 
-    /** Runs {@code action} once the device is present and USB permission is granted. */
+    /** Runs {@code action} once a supported reader is present and USB permission is granted. */
     void withPermission(Runnable action) {
-        if (!refresh()) {
+        if (!handleRefresh()) {
             listener.onConnectionChanged(false);
+            return;
+        }
+        if (selectedDetection != null && !selectedDetection.supported) {
+            listener.onConnectionChanged(false);
+            listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+            return;
+        }
+        if (selectedDetection == null) {
+            listener.onConnectionChanged(false);
+            listener.onUsbLog("USB permission is required to identify the connected cartridge reader.");
+            pendingAction = action;
+            if (!usbManager.hasPermission(selectedDevice)) {
+                listener.onUsbLog("Requesting USB permission for " + selectedCandidate.flashGbxName() + "...");
+                usbManager.requestPermission(selectedDevice, permissionIntent());
+            }
             return;
         }
         listener.onConnectionChanged(true);
         if (!usbManager.hasPermission(selectedDevice)) {
             pendingAction = action;
-            listener.onUsbLog("Requesting USB permission for " + selectedCandidate.label() + "...");
+            listener.onUsbLog("Requesting USB permission for " + selectedDetection.label + "...");
             usbManager.requestPermission(selectedDevice, permissionIntent());
             return;
         }
         action.run();
+    }
+
+    private boolean handleRefresh() {
+        GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
+        if (candidate == null) {
+            clearSelection();
+            listener.onUsbLog("No cartridge reader found. Connect a GBxCart RW, GBFlash, or Joey Jr device.");
+            listener.onConnectionChanged(false);
+            return false;
+        }
+
+        selectedCandidate = candidate;
+        selectedDevice = candidate.device;
+
+        if (!candidate.requiresNativeProbe()) {
+            selectedDetection = candidate.staticDetection();
+            listener.onUsbLog(candidate.flashGbxName() + " detected: " + GbxCartDevices.describe(selectedDevice));
+            listener.onReaderAttached(selectedDetection);
+            listener.onConnectionChanged(isConnected());
+            if (!selectedDetection.supported) {
+                listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+            }
+            return true;
+        }
+
+        listener.onUsbLog(candidate.flashGbxName() + " detected: " + GbxCartDevices.describe(selectedDevice));
+        if (!usbManager.hasPermission(selectedDevice)) {
+            selectedDetection = null;
+            listener.onReaderAttached(null);
+            listener.onConnectionChanged(false);
+            listener.onUsbLog("Grant USB permission to identify this cartridge reader.");
+            return true;
+        }
+
+        selectedDetection = probeReader(selectedDevice);
+        listener.onReaderAttached(selectedDetection);
+        listener.onConnectionChanged(isConnected());
+        if (selectedDetection != null) {
+            listener.onUsbLog((selectedDetection.supported ? "Supported reader: " : "Unsupported reader: ")
+                    + selectedDetection.label);
+            if (!selectedDetection.supported) {
+                listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+            }
+        }
+        return true;
+    }
+
+    private GbxCartDevices.ReaderDetection probeReader(UsbDevice device) {
+        UsbDeviceConnection connection = null;
+        try {
+            connection = usbManager.openDevice(device);
+            if (connection == null) {
+                return GbxCartDevices.ReaderDetection.unsupported(
+                        "CH340 cartridge reader",
+                        "Could not open the USB device."
+                                + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
+            }
+            GbxCartDevices.NativeTransport transport = GbxCartDevices.nativeTransport(device);
+            if (transport == null) {
+                return GbxCartDevices.ReaderDetection.unsupported(
+                        "CH340 cartridge reader",
+                        "This cartridge reader transport is not configured yet."
+                                + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
+            }
+            String json = NativeGbcam.detectReaderFromFd(
+                    connection.getFileDescriptor(),
+                    transport.interfaceNumber,
+                    transport.epOut,
+                    transport.epIn,
+                    transport.initializeCh340,
+                    message -> listener.onUsbLog(message));
+            return GbxCartDevices.ReaderDetection.fromJson(json);
+        } catch (Exception e) {
+            return GbxCartDevices.ReaderDetection.unsupported(
+                    "CH340 cartridge reader",
+                    "Could not identify the cartridge reader: " + e.getMessage()
+                            + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
+        } finally {
+            if (connection != null) {
+                connection.close();
+            }
+        }
+    }
+
+    private void clearSelection() {
+        selectedDevice = null;
+        selectedCandidate = null;
+        selectedDetection = null;
+        pendingAction = null;
     }
 
     private PendingIntent permissionIntent() {

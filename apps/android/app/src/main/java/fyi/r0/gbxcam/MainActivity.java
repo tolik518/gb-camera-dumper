@@ -21,6 +21,7 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     private GbcamOperationRunner operationRunner;
     private GalleryController controller;
     private StartupDialog startupDialog;
+    private String lastUnsupportedReaderMessage;
     private final ExecutorService previewExecutor = Executors.newFixedThreadPool(3);
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
 
@@ -59,9 +60,9 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
 
         usb.register();
         log("Rust core loaded: " + NativeGbcam.version());
-        boolean deviceFound = usb.refresh();
-        screen.setDeviceConnected(deviceFound);
-        if (deviceFound && settings.autoLoad()) {
+        usb.refresh();
+        updateReaderUi();
+        if (usb.isConnected() && settings.autoLoad()) {
             controller.autoLoadCamera();
         } else if (settings.loadCache()) {
             controller.loadCachedGallery();
@@ -95,9 +96,9 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        boolean deviceFound = usb.refresh();
-        screen.setDeviceConnected(deviceFound);
-        if (deviceFound && settings.autoLoad()) {
+        usb.refresh();
+        updateReaderUi();
+        if (usb.isConnected() && settings.autoLoad()) {
             controller.autoLoadCamera();
         }
     }
@@ -121,21 +122,45 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     }
 
     @Override
-    public void onDeviceAttached(boolean found) {
-        screen.setDeviceConnected(found);
-        if (found && settings.autoLoad()) {
+    public void onReaderAttached(GbxCartDevices.ReaderDetection detection) {
+        updateReaderUi();
+        if (usb.isConnected() && settings.autoLoad()) {
             controller.autoLoadCamera();
         }
-        if (startupDialog != null) startupDialog.markDeviceAttached(found);
+        if (startupDialog != null) {
+            startupDialog.markDeviceAttached(usb.isReaderPresent());
+        }
+    }
+
+    @Override
+    public void onUnsupportedReader(String message) {
+        if (message == null || message.equals(lastUnsupportedReaderMessage)) {
+            return;
+        }
+        lastUnsupportedReaderMessage = message;
+        UiStyle.messageDialog(this, "Unsupported cartridge reader", message);
     }
 
     @Override
     public void onDeviceDetached(boolean wasDisconnected) {
         if (wasDisconnected) {
             log("Cartridge reader disconnected.");
-            screen.setDeviceConnected(false);
+            lastUnsupportedReaderMessage = null;
+            updateReaderUi();
         }
         if (startupDialog != null) startupDialog.markDeviceDetached();
+    }
+
+    private void updateReaderUi() {
+        GbxCartDevices.ReaderDetection detection = usb.detection();
+        if (detection != null) {
+            screen.setReaderStatus(true, detection.supported, detection.label);
+        } else if (usb.isReaderPresent()) {
+            screen.setReaderStatus(true, true, "Cartridge reader");
+        } else {
+            screen.setReaderStatus(false, false, "");
+        }
+        screen.setDeviceConnected(usb.isConnected());
     }
 
     @Override

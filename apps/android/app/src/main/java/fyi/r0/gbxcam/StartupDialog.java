@@ -123,7 +123,7 @@ final class StartupDialog {
         Button loadCamera = UiStyle.button(activity, "Load Camera", accent, colors.surfaceRaised, accent);
         loadCamera.setOnClickListener(v -> {
             if (!usb.isConnected()) {
-                onLoadRequested.run(); // shows toast; popup stays open
+                onLoadRequested.run(); // shows toast or unsupported dialog; popup stays open
                 return;
             }
             if (dontShow.isChecked()) {

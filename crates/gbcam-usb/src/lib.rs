@@ -39,6 +39,8 @@ pub enum GbcamUsbError {
     },
     #[error("{0}")]
     Protocol(String),
+    #[error("{0}")]
+    UnsupportedReader(String),
     #[error("core error: {0}")]
     Core(#[from] gbxcam_core::GbcamCoreError),
 }
@@ -72,6 +74,21 @@ pub enum CartridgeReaderInfo {
     GbFlash(GbFlashInfo),
     GbxCartRw13(GbxCartInfo),
     GbxCartRw14(GbxCartInfo),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedReader {
+    pub label: String,
+    pub supported: bool,
+}
+
+impl DetectedReader {
+    pub fn unsupported_user_message(&self) -> String {
+        format!(
+            "{} is connected but not supported by GBxCAM Viewer yet. Please contact the developer.",
+            self.label
+        )
+    }
 }
 
 impl CartridgeReaderInfo {
@@ -267,6 +284,39 @@ impl CartridgeReader {
         Self::connect_with_transport(fd, UsbTransport::ch340(), progress)
     }
 
+    pub fn detect_with_transport(
+        fd: RawFd,
+        transport: UsbTransport,
+        progress: &mut impl Progress,
+    ) -> Result<DetectedReader> {
+        progress.message("Detecting cartridge reader...");
+        let mut dev = UsbDev::open_transport(fd, transport, progress)?;
+        match dev.query_gbxcart_info(progress) {
+            Ok(info) => Ok(detected_from_gbxcart(&info)),
+            Err(gbxcart_error) => {
+                dev.clear_local_rx();
+                let _ = dev.drain_input(20, 16);
+                if transport.initialize_ch340 {
+                    dev.apply_ch340_line_rate(GBFLASH_BAUD, progress)?;
+                }
+                match dev.query_gbflash_info(progress) {
+                    Ok(info) => Ok(detected_from_gbflash(&info)),
+                    Err(_) => {
+                        if transport.initialize_ch340 {
+                            Ok(DetectedReader {
+                                label: "CH340 USB device (unrecognized cartridge reader)"
+                                    .to_string(),
+                                supported: false,
+                            })
+                        } else {
+                            Err(gbxcart_error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn connect_with_transport(
         fd: RawFd,
         transport: UsbTransport,
@@ -281,17 +331,45 @@ impl CartridgeReader {
                 let _ = dev.drain_input(20, 16);
                 dev.apply_ch340_line_rate(GBFLASH_BAUD, progress)?;
                 match dev.query_gbflash_info(progress) {
-                    Ok(info) => Ok((
-                        CartridgeReader::GbFlash(dev),
-                        CartridgeReaderInfo::GbFlash(info),
-                    )),
-                    Err(_) => Err(gbxcart_error),
+                    Ok(info) => {
+                        let detected = detected_from_gbflash(&info);
+                        if !detected.supported {
+                            return Err(GbcamUsbError::UnsupportedReader(
+                                detected.unsupported_user_message(),
+                            ));
+                        }
+                        Ok((
+                            CartridgeReader::GbFlash(dev),
+                            CartridgeReaderInfo::GbFlash(info),
+                        ))
+                    }
+                    Err(_) => {
+                        if let Ok(detected) = detected_from_gbxcart_probe_error(&gbxcart_error) {
+                            return Err(GbcamUsbError::UnsupportedReader(
+                                detected.unsupported_user_message(),
+                            ));
+                        }
+                        Err(GbcamUsbError::UnsupportedReader(
+                            DetectedReader {
+                                label: "CH340 USB device (unrecognized cartridge reader)"
+                                    .to_string(),
+                                supported: false,
+                            }
+                            .unsupported_user_message(),
+                        ))
+                    }
                 }
             }
         }
     }
 
     fn from_gbxcart_info(dev: UsbDev, info: GbxCartInfo) -> Result<(Self, CartridgeReaderInfo)> {
+        let detected = detected_from_gbxcart(&info);
+        if !detected.supported {
+            return Err(GbcamUsbError::UnsupportedReader(
+                detected.unsupported_user_message(),
+            ));
+        }
         match info.pcb_ver {
             4 => Ok((
                 CartridgeReader::GbxCartRw13(dev),
@@ -301,9 +379,15 @@ impl CartridgeReader {
                 CartridgeReader::GbxCartRw14(dev),
                 CartridgeReaderInfo::GbxCartRw14(info),
             )),
-            pcb_ver => Err(GbcamUsbError::Protocol(format!(
-                "Unsupported GBxCart RW PCB version 0x{pcb_ver:02X}. Currently supported: v1.3 and v1.4."
-            ))),
+            pcb_ver => Err(GbcamUsbError::UnsupportedReader(
+                detected_from_gbxcart(&GbxCartInfo {
+                    pcb_ver,
+                    ofw_ver: info.ofw_ver,
+                    cfw_ver: info.cfw_ver,
+                    name: info.name.clone(),
+                })
+                .unsupported_user_message(),
+            )),
         }
     }
 
@@ -460,10 +544,7 @@ impl UsbDev {
         if !self.transport.initialize_ch340 {
             return Ok(());
         }
-        progress.message(&format!(
-            "Setting CH340 line rate to {} baud...",
-            baud_rate
-        ));
+        progress.message(&format!("Setting CH340 line rate to {} baud...", baud_rate));
         ch340_set_baud_rate(self, baud_rate)?;
         ch340_set_handshake(self, CH340_BIT_RTS | CH340_BIT_DTR)?;
         std::thread::sleep(Duration::from_millis(200));
@@ -1782,6 +1863,75 @@ impl UsbDev {
     }
 }
 
+fn gbxcart_pcb_name(pcb_ver: u8) -> &'static str {
+    match pcb_ver {
+        2 => "v1.1/v1.2",
+        4 => "v1.3",
+        5 => "v1.4",
+        6 => "v1.4a/b/c",
+        90 => "XMAS v1.0",
+        100 => "Mini v1.0",
+        101 => "v1.4 DMG",
+        _ => "unknown revision",
+    }
+}
+
+fn is_gbxcart_pcb_supported(pcb_ver: u8) -> bool {
+    matches!(pcb_ver, 4 | 5 | 6)
+}
+
+fn detected_from_gbxcart(info: &GbxCartInfo) -> DetectedReader {
+    let pcb_name = gbxcart_pcb_name(info.pcb_ver);
+    let label = match (&info.name, info.cfw_ver, info.ofw_ver, info.pcb_ver) {
+        (Some(name), cfw, _, _) if cfw >= 12 => format!(
+            "{name} (GBxCart RW {pcb_name}, OFW R{}, CFW L{cfw})",
+            info.ofw_ver
+        ),
+        (_, 0, ofw, pcb) if pcb < 5 && ofw > 0 => {
+            format!("GBxCart RW {pcb_name} (OFW R{ofw})")
+        }
+        _ => format!("GBxCart RW {pcb_name}"),
+    };
+    DetectedReader {
+        label,
+        supported: is_gbxcart_pcb_supported(info.pcb_ver),
+    }
+}
+
+fn detected_from_gbflash(info: &GbFlashInfo) -> DetectedReader {
+    let pcb_name = match info.pcb_ver {
+        5 => "early",
+        10 => "v1.0",
+        11 => "v1.1",
+        12 => "v1.2",
+        13 => "v1.3",
+        _ => "unknown",
+    };
+    let label = match &info.name {
+        Some(name) if info.cfw_ver >= 12 => {
+            format!("{name} (GBFlash {pcb_name}, CFW L{})", info.cfw_ver)
+        }
+        _ => format!("GBFlash {pcb_name} (CFW L{})", info.cfw_ver),
+    };
+    DetectedReader {
+        label,
+        supported: matches!(info.pcb_ver, 5 | 12 | 13),
+    }
+}
+
+fn detected_from_gbxcart_probe_error(error: &GbcamUsbError) -> Result<DetectedReader> {
+    let GbcamUsbError::Protocol(message) = error else {
+        return Err(GbcamUsbError::Protocol(error.to_string()));
+    };
+    if message.contains("Not a GBxCart RW device") {
+        return Ok(DetectedReader {
+            label: "CH340 USB device (not a GBxCart RW or GBFlash reader)".to_string(),
+            supported: false,
+        });
+    }
+    Err(GbcamUsbError::Protocol(message.clone()))
+}
+
 fn validate_gbxcart_probe(pcb_ver: u8, ofw_ver: u8) -> Result<()> {
     if pcb_ver == 0 {
         return Err(GbcamUsbError::Protocol(
@@ -1905,6 +2055,52 @@ mod tests {
         assert_eq!(CMD_DISABLE_PULLUPS, 0xAC);
         assert_eq!(CMD_CART_PWR_ON, 0xF2);
         assert_eq!(CMD_CART_PWR_OFF, 0xF3);
+    }
+
+    #[test]
+    fn detected_reader_labels_match_flashgbx_pcb_names() {
+        let v13 = detected_from_gbxcart(&GbxCartInfo {
+            pcb_ver: 4,
+            ofw_ver: 4,
+            cfw_ver: 12,
+            name: None,
+        });
+        assert!(v13.supported);
+        assert_eq!(v13.label, "GBxCart RW v1.3");
+
+        let legacy = detected_from_gbxcart(&GbxCartInfo {
+            pcb_ver: 2,
+            ofw_ver: 4,
+            cfw_ver: 0,
+            name: None,
+        });
+        assert!(!legacy.supported);
+        assert_eq!(legacy.label, "GBxCart RW v1.1/v1.2 (OFW R4)");
+
+        let xmas = detected_from_gbxcart(&GbxCartInfo {
+            pcb_ver: 90,
+            ofw_ver: 4,
+            cfw_ver: 0,
+            name: None,
+        });
+        assert!(!xmas.supported);
+        assert!(xmas.label.contains("XMAS"));
+
+        let flash = detected_from_gbflash(&GbFlashInfo {
+            pcb_ver: 13,
+            cfw_ver: 12,
+            name: Some("My GBFlash".to_string()),
+        });
+        assert!(flash.supported);
+        assert!(flash.label.contains("My GBFlash"));
+
+        let unsupported_flash = detected_from_gbflash(&GbFlashInfo {
+            pcb_ver: 10,
+            cfw_ver: 12,
+            name: None,
+        });
+        assert!(!unsupported_flash.supported);
+        assert!(unsupported_flash.label.contains("GBFlash"));
     }
 
     #[test]

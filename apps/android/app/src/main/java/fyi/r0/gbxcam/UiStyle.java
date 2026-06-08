@@ -357,6 +357,36 @@ final class UiStyle {
         return dialog;
     }
 
+    static Dialog messageDialog(Context context, String title, String message) {
+        Palette colors = palette(context);
+        Dialog dialog = baseDialog(context);
+
+        LinearLayout content = dialogContent(context, colors);
+        content.addView(dialogHeader(context, title, null, colors, dialog));
+
+        TextView body = new TextView(context);
+        body.setText(message);
+        body.setTextColor(colors.textSecondary);
+        body.setTextSize(14);
+        body.setLineSpacing(dp(context, 2), 1.0f);
+        LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        bodyParams.setMargins(0, dp(context, 12), 0, dp(context, 14));
+        content.addView(body, bodyParams);
+
+        Button ok = button(context, "OK", colors.primary, colors.surfaceRaised, colors.primary);
+        ok.setOnClickListener(v -> dialog.dismiss());
+        content.addView(ok, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        dialog.setContentView(content);
+        sizeDialog(dialog, context, 32, 560);
+        dialog.show();
+        return dialog;
+    }
+
     static Dialog confirmDialog(
             Context context,
             String title,

@@ -102,6 +102,9 @@ final class MainScreen implements PaletteMenu.Host {
 
     private GalleryState gallery;
     private boolean deviceConnected;
+    private boolean readerPresent;
+    private boolean readerSupported;
+    private String readerLabel = "";
     private boolean busy;
     private boolean logsVisible;
     private boolean selectMode;
@@ -379,14 +382,37 @@ final class MainScreen implements PaletteMenu.Host {
         updateActions();
     }
 
+    void setReaderStatus(boolean present, boolean supported, String label) {
+        this.readerPresent = present;
+        this.readerSupported = supported;
+        this.readerLabel = label != null ? label : "";
+        updateConnectionSubtitle();
+    }
+
     void setDeviceConnected(boolean connected) {
         this.deviceConnected = connected;
-        if (gallery != null) {
-            subtitle.setText((connected ? "Connected" : "Cached") + " · " + photoCount(gallery.photos.size()));
-        } else {
-            subtitle.setText(connected ? "Device connected" : "Connect GBxCart RW or GBFlash to load photos");
-        }
+        updateConnectionSubtitle();
         updateActions();
+    }
+
+    private void updateConnectionSubtitle() {
+        if (gallery != null) {
+            subtitle.setText((deviceConnected ? "Connected" : "Cached") + " · " + photoCount(gallery.photos.size()));
+            return;
+        }
+        if (!readerPresent) {
+            subtitle.setText("Connect a cartridge reader to load photos");
+        } else if (deviceConnected) {
+            subtitle.setText("Device connected");
+        } else if (readerSupported) {
+            subtitle.setText(readerLabel.isEmpty()
+                    ? "Cartridge reader connected"
+                    : readerLabel + " connected");
+        } else {
+            subtitle.setText(readerLabel.isEmpty()
+                    ? "Unsupported reader connected"
+                    : readerLabel + " (unsupported)");
+        }
     }
 
     void setBusy(boolean busy, String message, BusyDialog.Direction direction) {
