@@ -42,6 +42,7 @@ final class UsbDeviceController {
     private final UsbManager usbManager;
     private final Listener listener;
     private UsbDevice selectedDevice;
+    private GbxCartDevices.Candidate selectedCandidate;
     private Runnable pendingAction;
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -53,9 +54,12 @@ final class UsbDeviceController {
                 return;
             }
             if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-                boolean disconnected = selectedDevice != null && GbxCartDevices.find(usbManager) == null;
+                GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
+                boolean disconnected = selectedDevice != null
+                        && (candidate == null || candidate.device != selectedDevice);
                 if (disconnected) {
                     selectedDevice = null;
+                    selectedCandidate = null;
                     pendingAction = null;
                 }
                 listener.onDeviceDetached(disconnected);
@@ -96,7 +100,8 @@ final class UsbDeviceController {
     }
 
     boolean isConnected() {
-        return GbxCartDevices.find(usbManager) != null;
+        GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
+        return candidate != null && candidate.canAttemptNativeSession();
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -120,15 +125,27 @@ final class UsbDeviceController {
 
     /** Re-discovers the device, logs the result, and returns true when found. */
     boolean refresh() {
-        selectedDevice = GbxCartDevices.find(usbManager);
-        if (selectedDevice == null) {
-            listener.onUsbLog("GBxCart RW 1.4 not found. Connect it, then tap Load Camera.");
+        GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
+        if (candidate == null) {
+            selectedDevice = null;
+            selectedCandidate = null;
+            listener.onUsbLog("Supported cartridge reader not found. Connect GBxCart RW 1.4, then tap Load Camera.");
             return false;
         }
+        if (!candidate.canAttemptNativeSession()) {
+            selectedDevice = null;
+            selectedCandidate = null;
+            listener.onUsbLog(candidate.label() + " found. " + candidate.supportNote());
+            return false;
+        }
+        selectedCandidate = candidate;
+        selectedDevice = candidate.device;
         listener.onUsbLog(String.format(
-                "GBxCart RW 1.4 candidate found: VID 0x%04X, PID 0x%04X",
+                "%s found: VID 0x%04X, PID 0x%04X. %s",
+                candidate.label(),
                 selectedDevice.getVendorId(),
-                selectedDevice.getProductId()));
+                selectedDevice.getProductId(),
+                candidate.supportNote()));
         return true;
     }
 
@@ -141,7 +158,7 @@ final class UsbDeviceController {
         listener.onConnectionChanged(true);
         if (!usbManager.hasPermission(selectedDevice)) {
             pendingAction = action;
-            listener.onUsbLog("Requesting USB permission...");
+            listener.onUsbLog("Requesting USB permission for " + selectedCandidate.label() + "...");
             usbManager.requestPermission(selectedDevice, permissionIntent());
             return;
         }
