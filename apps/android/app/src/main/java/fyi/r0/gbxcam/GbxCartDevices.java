@@ -15,7 +15,7 @@ final class GbxCartDevices {
     enum ReaderFamily {
         CH340_GB_READER(
                 "GBxCart RW / GBFlash CH340 cartridge reader",
-                "Native support currently targets GBxCart RW 1.4 on CH340.",
+                "Native support can attempt GBxCart RW and GBFlash on CH340.",
                 true),
         JOEY_JR(
                 "Joey Jr",

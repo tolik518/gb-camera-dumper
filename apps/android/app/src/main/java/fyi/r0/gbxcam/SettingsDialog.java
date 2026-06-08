@@ -64,7 +64,7 @@ final class SettingsDialog {
         CheckBox autoLoad = UiStyle.settingsCheckBox(
                 activity,
                 "Auto-load camera on launch",
-                "Starts reading the camera automatically when a GBxCart RW 1.4 is connected.",
+                "Starts reading the camera automatically when a supported cartridge reader is connected.",
                 settings.autoLoad(),
                 accent);
         CheckBox loadCache = UiStyle.settingsCheckBox(

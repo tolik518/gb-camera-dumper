@@ -217,9 +217,22 @@ impl ReaderProfile {
             max_buffer_write: WRITE_CHUNK,
         }
     }
+
+    fn gbflash(_info: &GbFlashInfo, custom_firmware_power_control: bool) -> Self {
+        Self {
+            kind: CartridgeReaderKind::GbFlash,
+            power_control: if custom_firmware_power_control {
+                CartPowerControl::CustomFirmware
+            } else {
+                CartPowerControl::None
+            },
+            max_buffer_write: 0x800,
+        }
+    }
 }
 
 pub enum CartridgeReader {
+    GbFlash(UsbDev),
     GbxCartRw13(UsbDev),
     GbxCartRw14(UsbDev),
 }
@@ -234,10 +247,10 @@ impl CartridgeReader {
                 dev.clear_local_rx();
                 let _ = dev.drain_input(20, 16);
                 match dev.query_gbflash_info(progress) {
-                    Ok(info) => Err(GbcamUsbError::Protocol(format!(
-                        "GBFlash detected (PCB v{}, CFW L{}), but GBFlash is not supported yet.",
-                        info.pcb_ver, info.cfw_ver
-                    ))),
+                    Ok(info) => Ok((
+                        CartridgeReader::GbFlash(dev),
+                        CartridgeReaderInfo::GbFlash(info),
+                    )),
                     Err(_) => Err(gbxcart_error),
                 }
             }
@@ -262,6 +275,7 @@ impl CartridgeReader {
 
     pub fn finish_operation(&self, success: bool, progress: &mut impl Progress) {
         match self {
+            CartridgeReader::GbFlash(dev) => dev.finish_operation(success, progress),
             CartridgeReader::GbxCartRw13(dev) => dev.finish_operation(success, progress),
             CartridgeReader::GbxCartRw14(dev) => dev.finish_operation(success, progress),
         }
@@ -269,6 +283,7 @@ impl CartridgeReader {
 
     pub fn read_cartridge_report(&self) -> Result<CartridgeReport> {
         match self {
+            CartridgeReader::GbFlash(dev) => dev.read_cartridge_report(),
             CartridgeReader::GbxCartRw13(dev) => dev.read_cartridge_report(),
             CartridgeReader::GbxCartRw14(dev) => dev.read_cartridge_report(),
         }
@@ -276,6 +291,7 @@ impl CartridgeReader {
 
     pub fn dump_save(&self, progress: &mut impl Progress) -> Result<Vec<u8>> {
         match self {
+            CartridgeReader::GbFlash(dev) => dev.dump_save(progress),
             CartridgeReader::GbxCartRw13(dev) => dev.dump_save(progress),
             CartridgeReader::GbxCartRw14(dev) => dev.dump_save(progress),
         }
@@ -283,6 +299,7 @@ impl CartridgeReader {
 
     pub fn erase_save(&self, save_backup: &[u8], progress: &mut impl Progress) -> Result<()> {
         match self {
+            CartridgeReader::GbFlash(dev) => dev.erase_save(save_backup, progress),
             CartridgeReader::GbxCartRw13(dev) => dev.erase_save(save_backup, progress),
             CartridgeReader::GbxCartRw14(dev) => dev.erase_save(save_backup, progress),
         }
@@ -295,6 +312,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbFlash(dev) => {
+                dev.delete_album_photos(save_backup, physical_slots, progress)
+            }
             CartridgeReader::GbxCartRw13(dev) => {
                 dev.delete_album_photos(save_backup, physical_slots, progress)
             }
@@ -311,6 +331,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbFlash(dev) => {
+                dev.recover_album_photos(save_backup, physical_slots, progress)
+            }
             CartridgeReader::GbxCartRw13(dev) => {
                 dev.recover_album_photos(save_backup, physical_slots, progress)
             }
@@ -327,6 +350,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbFlash(dev) => {
+                dev.reorder_album_photos(save_backup, physical_slots_in_display_order, progress)
+            }
             CartridgeReader::GbxCartRw13(dev) => {
                 dev.reorder_album_photos(save_backup, physical_slots_in_display_order, progress)
             }
@@ -461,6 +487,7 @@ impl UsbDev {
         }
 
         let mut name = None;
+        let mut custom_firmware_power_control = false;
         if cfw_ver >= 12 {
             let nlen = self.read_u8()? as usize;
             let mut nbuf = vec![0u8; nlen];
@@ -470,15 +497,22 @@ impl UsbDev {
                     .trim_matches('\0')
                     .to_string(),
             );
-            let _cart_power = self.read_u8()?;
+            custom_firmware_power_control = self.read_u8()? == 1;
             let _boot = self.read_u8()?;
         }
 
-        Ok(GbFlashInfo {
+        self.fw_ver = cfw_ver;
+        self.has_cart_power = custom_firmware_power_control;
+        let info = GbFlashInfo {
             pcb_ver,
             cfw_ver,
             name,
-        })
+        };
+        self.profile = ReaderProfile::gbflash(&info, custom_firmware_power_control);
+        progress.message(&format!(
+            "[debug][gbflash] firmware: pcb=0x{pcb_ver:02X} cfw=L{cfw_ver} custom_cart_power_control={custom_firmware_power_control}"
+        ));
+        Ok(info)
     }
 
     fn claim_interface(&self) -> Result<()> {
@@ -1815,6 +1849,16 @@ mod tests {
         assert_eq!(profile.kind, CartridgeReaderKind::GbxCartRw14);
         assert_eq!(profile.power_control, CartPowerControl::CustomFirmware);
         assert_eq!(profile.max_buffer_write, WRITE_CHUNK);
+
+        let gbflash = GbFlashInfo {
+            pcb_ver: 13,
+            cfw_ver: 12,
+            name: None,
+        };
+        let profile = ReaderProfile::gbflash(&gbflash, true);
+        assert_eq!(profile.kind, CartridgeReaderKind::GbFlash);
+        assert_eq!(profile.power_control, CartPowerControl::CustomFirmware);
+        assert_eq!(profile.max_buffer_write, 0x800);
     }
 
     #[test]

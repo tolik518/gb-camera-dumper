@@ -132,7 +132,7 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     @Override
     public void onDeviceDetached(boolean wasDisconnected) {
         if (wasDisconnected) {
-            log("GBxCart RW 1.4 disconnected.");
+            log("Cartridge reader disconnected.");
             screen.setDeviceConnected(false);
         }
         if (startupDialog != null) startupDialog.markDeviceDetached();

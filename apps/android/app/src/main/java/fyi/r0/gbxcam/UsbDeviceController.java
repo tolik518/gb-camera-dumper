@@ -129,7 +129,7 @@ final class UsbDeviceController {
         if (candidate == null) {
             selectedDevice = null;
             selectedCandidate = null;
-            listener.onUsbLog("Supported cartridge reader not found. Connect GBxCart RW 1.4, then tap Load Camera.");
+            listener.onUsbLog("Supported cartridge reader not found. Connect GBxCart RW or GBFlash, then tap Load Camera.");
             return false;
         }
         if (!candidate.canAttemptNativeSession()) {
