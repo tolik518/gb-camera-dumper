@@ -128,7 +128,7 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
     public void onLoadRequested() {
         if (!usb.isConnected()) {
             Toast.makeText(activity,
-                    "No GBxCart RW connected. Plug in the cartridge reader and try again.",
+                    "No GBxCart RW 1.4 connected. Plug in the supported cartridge reader and try again.",
                     Toast.LENGTH_LONG).show();
             return;
         }

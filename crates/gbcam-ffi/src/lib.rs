@@ -720,7 +720,7 @@ where
     P: Progress,
     F: FnOnce(&UsbDev, &GbxCartInfo, &mut P) -> AppResult<T>,
 {
-    progress.message("Connecting to GBxCart RW...");
+    progress.message("Connecting to GBxCart RW 1.4...");
     let (dev, info) = UsbDev::connect(fd, progress)?;
     let result = operation(&dev, &info, progress);
     dev.finish_operation(result.is_ok(), progress);

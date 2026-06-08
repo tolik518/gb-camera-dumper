@@ -61,7 +61,7 @@ final class StartupDialog {
         int accent = screen.accentColor();
 
         LinearLayout content = UiStyle.dialog(
-                activity, dialog, "How to connect", "Game Boy Camera + GBxCart RW + phone");
+                activity, dialog, "How to connect", "Game Boy Camera + GBxCart RW 1.4 + phone");
 
         LinearLayout steps = new LinearLayout(activity);
         steps.setOrientation(LinearLayout.VERTICAL);
@@ -74,14 +74,14 @@ final class StartupDialog {
         TextView step3Label = new TextView(activity);
         steps.addView(connectionStep(
                 "1",
-                boldSpan("Connect GBxCart RW to your phone via USB (USB-C to USB-C cable).",
+                boldSpan("Connect GBxCart RW 1.4 to your phone via USB (USB-C to USB-C cable).",
                         "USB-C to USB-C"),
                 step1Label,
                 colors,
                 accent));
         steps.addView(connectionStep(
                 "2",
-                boldSpan("Insert the Game Boy Camera cartridge into GBxCart RW.",
+                boldSpan("Insert the Game Boy Camera cartridge into GBxCart RW 1.4.",
                         "Game Boy Camera"),
                 step2Label,
                 colors,

@@ -27,7 +27,7 @@ final class UsbDeviceController {
         /** Connection state observed while starting a permission-gated action. */
         void onConnectionChanged(boolean connected);
 
-        /** A device was attached; {@code found} is true when it is our GBxCart. */
+        /** A device was attached; {@code found} is true when it is our supported GBxCart. */
         void onDeviceAttached(boolean found);
 
         /** A device was detached; {@code wasDisconnected} is true when it was our active device. */
@@ -122,11 +122,11 @@ final class UsbDeviceController {
     boolean refresh() {
         selectedDevice = GbxCartDevices.find(usbManager);
         if (selectedDevice == null) {
-            listener.onUsbLog("GBxCart RW not found. Connect it, then tap Load Camera.");
+            listener.onUsbLog("GBxCart RW 1.4 not found. Connect it, then tap Load Camera.");
             return false;
         }
         listener.onUsbLog(String.format(
-                "GBxCart RW found: VID 0x%04X, PID 0x%04X",
+                "GBxCart RW 1.4 candidate found: VID 0x%04X, PID 0x%04X",
                 selectedDevice.getVendorId(),
                 selectedDevice.getProductId()));
         return true;

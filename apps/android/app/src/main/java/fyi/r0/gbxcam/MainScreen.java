@@ -384,7 +384,7 @@ final class MainScreen implements PaletteMenu.Host {
         if (gallery != null) {
             subtitle.setText((connected ? "Connected" : "Cached") + " · " + photoCount(gallery.photos.size()));
         } else {
-            subtitle.setText(connected ? "Device connected — tap Load Camera" : "Connect GBxCart to load photos");
+            subtitle.setText(connected ? "Device connected — tap Load Camera" : "Connect GBxCart RW 1.4 to load photos");
         }
         updateActions();
     }

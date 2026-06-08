@@ -169,7 +169,7 @@ impl UsbDev {
 
         if pcb_ver == 0 {
             return Err(GbcamUsbError::Protocol(
-                "No response from GBxCart RW. Check connections.".to_string(),
+                "No response from GBxCart RW 1.4. Check connections.".to_string(),
             ));
         }
 

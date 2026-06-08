@@ -19,6 +19,8 @@ final class GbxCartDevices {
         }
         for (Map.Entry<String, UsbDevice> entry : usbManager.getDeviceList().entrySet()) {
             UsbDevice device = entry.getValue();
+            // Current native code initializes CH340 directly and only implements
+            // the GBxCart RW 1.4 command flow.
             if (device.getVendorId() == VID_WCH && device.getProductId() == PID_CH340) {
                 return device;
             }

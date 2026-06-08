@@ -7,7 +7,13 @@ Download the apk on the [releases page](https://github.com/tolik518/GBxCAM-Viewe
 
 - Android phone
 - GB Camera
-- [GBxCart RW 1.4 or later](https://www.gbxcart.com/)
+- [GBxCart RW 1.4](https://www.gbxcart.com/)
+
+## Hardware support
+
+GBxCAM Viewer currently talks directly to the GBxCart RW CH340 serial protocol
+and is only known to work with GBxCart RW 1.4. GBxCart RW 1.3 and other
+cartridge readers are not supported by the current implementation.
 
 ## License
 
