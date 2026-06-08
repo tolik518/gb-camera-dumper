@@ -55,23 +55,27 @@ pub struct GbxCartInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartridgeReaderKind {
+    GbxCartRw13,
     GbxCartRw14,
 }
 
 #[derive(Debug, Clone)]
 pub enum CartridgeReaderInfo {
+    GbxCartRw13(GbxCartInfo),
     GbxCartRw14(GbxCartInfo),
 }
 
 impl CartridgeReaderInfo {
     pub fn kind(&self) -> CartridgeReaderKind {
         match self {
+            CartridgeReaderInfo::GbxCartRw13(_) => CartridgeReaderKind::GbxCartRw13,
             CartridgeReaderInfo::GbxCartRw14(_) => CartridgeReaderKind::GbxCartRw14,
         }
     }
 
     pub fn gbxcart_info(&self) -> Option<&GbxCartInfo> {
         match self {
+            CartridgeReaderInfo::GbxCartRw13(info) => Some(info),
             CartridgeReaderInfo::GbxCartRw14(info) => Some(info),
         }
     }
@@ -152,39 +156,53 @@ const SRAM_VERIFY_WINDOW: usize = 0x200;
 const SRAM_VERIFY_RETRIES: usize = 3;
 
 pub enum CartridgeReader {
+    GbxCartRw13(UsbDev),
     GbxCartRw14(UsbDev),
 }
 
 impl CartridgeReader {
     pub fn connect(fd: RawFd, progress: &mut impl Progress) -> Result<(Self, CartridgeReaderInfo)> {
-        progress.message("Connecting to GBxCart RW 1.4...");
+        progress.message("Connecting to cartridge reader...");
         let (dev, info) = UsbDev::connect(fd, progress)?;
-        Ok((
-            CartridgeReader::GbxCartRw14(dev),
-            CartridgeReaderInfo::GbxCartRw14(info),
-        ))
+        match info.pcb_ver {
+            4 => Ok((
+                CartridgeReader::GbxCartRw13(dev),
+                CartridgeReaderInfo::GbxCartRw13(info),
+            )),
+            5 | 6 => Ok((
+                CartridgeReader::GbxCartRw14(dev),
+                CartridgeReaderInfo::GbxCartRw14(info),
+            )),
+            pcb_ver => Err(GbcamUsbError::Protocol(format!(
+                "Unsupported GBxCart RW PCB version 0x{pcb_ver:02X}. Currently supported: v1.3 and v1.4."
+            ))),
+        }
     }
 
     pub fn finish_operation(&self, success: bool, progress: &mut impl Progress) {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => dev.finish_operation(success, progress),
             CartridgeReader::GbxCartRw14(dev) => dev.finish_operation(success, progress),
         }
     }
 
     pub fn read_cartridge_report(&self) -> Result<CartridgeReport> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => dev.read_cartridge_report(),
             CartridgeReader::GbxCartRw14(dev) => dev.read_cartridge_report(),
         }
     }
 
     pub fn dump_save(&self, progress: &mut impl Progress) -> Result<Vec<u8>> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => dev.dump_save(progress),
             CartridgeReader::GbxCartRw14(dev) => dev.dump_save(progress),
         }
     }
 
     pub fn erase_save(&self, save_backup: &[u8], progress: &mut impl Progress) -> Result<()> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => dev.erase_save(save_backup, progress),
             CartridgeReader::GbxCartRw14(dev) => dev.erase_save(save_backup, progress),
         }
     }
@@ -196,6 +214,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => {
+                dev.delete_album_photos(save_backup, physical_slots, progress)
+            }
             CartridgeReader::GbxCartRw14(dev) => {
                 dev.delete_album_photos(save_backup, physical_slots, progress)
             }
@@ -209,6 +230,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => {
+                dev.recover_album_photos(save_backup, physical_slots, progress)
+            }
             CartridgeReader::GbxCartRw14(dev) => {
                 dev.recover_album_photos(save_backup, physical_slots, progress)
             }
@@ -222,6 +246,9 @@ impl CartridgeReader {
         progress: &mut impl Progress,
     ) -> Result<[u8; ORDER_COUNT]> {
         match self {
+            CartridgeReader::GbxCartRw13(dev) => {
+                dev.reorder_album_photos(save_backup, physical_slots_in_display_order, progress)
+            }
             CartridgeReader::GbxCartRw14(dev) => {
                 dev.reorder_album_photos(save_backup, physical_slots_in_display_order, progress)
             }

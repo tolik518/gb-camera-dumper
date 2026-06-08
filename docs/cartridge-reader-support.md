@@ -1,7 +1,8 @@
 # Cartridge Reader Support
 
-GBxCAM Viewer currently supports one hardware path: GBxCart RW 1.4 using the
-CH340 USB serial bridge and the GBxCart RW firmware command protocol.
+GBxCAM Viewer currently supports the GBxCart RW CH340 path. GBxCart RW 1.4 is
+the known-good target. GBxCart RW 1.3 is detected separately and routed through
+the same command implementation so legacy-specific fixes can be isolated.
 
 The Android device filter and native USB implementation are intentionally narrow:
 
@@ -14,8 +15,7 @@ The Android device filter and native USB implementation are intentionally narrow
 - The command flow is the GBxCart RW DMG path used for Game Boy Camera SRAM
   reads and writes.
 
-GBxCart RW 1.3 and other cartridge readers are not supported by the current
-implementation.
+Other cartridge readers are not supported by the current native implementation.
 
 ## FlashGBX Reference
 
@@ -45,8 +45,8 @@ The local code has started growing a reader-driver boundary:
 
 - `gbcam-usb::CartridgeReader` is the session wrapper used by native callers.
 - `gbcam-usb::CartridgeReaderInfo` describes the connected hardware reader.
-- The only live hardware variant is currently `GbxCartRw14`, which forwards to
-  the existing `UsbDev` implementation.
+- The live hardware variants are currently `GbxCartRw13` and `GbxCartRw14`.
+  Both forward to the existing `UsbDev` implementation for now.
 - Android-side discovery can identify known reader USB IDs before native
   protocol probing exists. Unsupported readers are reported instead of being
   treated as missing GBxCart devices.
@@ -56,8 +56,8 @@ The next implementation steps are:
 1. Open the device and probe firmware identity in native code.
 2. Select a concrete reader implementation:
    - GBxCart RW 1.4 driver, using the current code.
-   - GBxCart RW 1.3 legacy driver, with firmware-dependent command waits and
-     buffer limits.
+   - GBxCart RW 1.3 legacy behavior, with firmware-dependent command waits and
+     buffer limits if hardware testing shows the shared path is insufficient.
    - GBFlash driver, if its Game Boy Camera SRAM path works with the shared LK
      commands.
    - Joey Jr driver, with its separate USB identity/probe path.

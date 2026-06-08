@@ -855,6 +855,7 @@ fn palette_from_jint(index: jint) -> PaletteId {
 
 fn connected_label(info: &GallerySourceInfo) -> String {
     match info {
+        GallerySourceInfo::Reader(CartridgeReaderInfo::GbxCartRw13(info)) => gbxcart_label(info),
         GallerySourceInfo::Reader(CartridgeReaderInfo::GbxCartRw14(info)) => gbxcart_label(info),
         GallerySourceInfo::CachedSave => "Cached save".to_string(),
     }
