@@ -152,6 +152,8 @@ const USB_DIR_IN: u8 = 0x80;
 const CH340_INTERFACE: u32 = 0;
 const CH340_EP_OUT: u32 = 0x02;
 const CH340_EP_IN: u32 = 0x82;
+const CH340_BIT_RTS: u8 = 1 << 6;
+const CH340_BIT_DTR: u8 = 1 << 5;
 
 const BULK_TIMEOUT: u32 = 3000;
 const CTRL_TIMEOUT: u32 = 1000;
@@ -446,6 +448,7 @@ impl UsbDev {
         if dev.transport.initialize_ch340 {
             ch340_initialize(&dev)?;
             ch340_set_baud_rate(&dev, 1_000_000)?;
+            ch340_set_handshake(&dev, CH340_BIT_RTS | CH340_BIT_DTR)?;
             std::thread::sleep(Duration::from_millis(200));
             dev.flush_endpoints();
             dev.drain_input(20, 16)?;
@@ -1768,9 +1771,13 @@ fn ch340_initialize(dev: &UsbDev) -> Result<()> {
     let _ = dev.ctrl_in(0x95, 0x0706, 0, &mut state);
     dev.ctrl_out(0xa1, 0x501f, 0xd90a)?;
     ch340_set_baud_rate(dev, 9_600)?;
-    dev.ctrl_out(0xa4, 0xffff, 0)?;
+    ch340_set_handshake(dev, CH340_BIT_RTS | CH340_BIT_DTR)?;
     let _ = dev.ctrl_in(0x95, 0x0706, 0, &mut state);
     Ok(())
+}
+
+fn ch340_set_handshake(dev: &UsbDev, control: u8) -> Result<()> {
+    dev.ctrl_out(0xa4, !(control as u16), 0)
 }
 
 fn ch340_set_baud_rate(dev: &UsbDev, baud_rate: u32) -> Result<()> {
@@ -1863,6 +1870,12 @@ mod tests {
         assert_eq!(transport.ep_out, 0x02);
         assert_eq!(transport.ep_in, 0x82);
         assert!(transport.initialize_ch340);
+    }
+
+    #[test]
+    fn ch340_handshake_asserts_rts_and_dtr_active_low() {
+        let control = CH340_BIT_RTS | CH340_BIT_DTR;
+        assert_eq!(!(control as u16), 0xFF9F);
     }
 
     #[test]
