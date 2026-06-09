@@ -4,14 +4,9 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
-import android.os.Handler;
-import android.os.Looper;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.style.StyleSpan;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -19,43 +14,32 @@ import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import java.util.concurrent.ExecutorService;
-
 /**
- * Startup connection guide plus its lightweight cartridge polling. The dialog owns
- * only its UI state; the host still owns USB lifecycle and gallery loading.
+ * Startup connection guide. The dialog owns only its UI state; the host still
+ * owns USB lifecycle and gallery loading.
  */
 final class StartupDialog {
-    private static final String TAG = "GbcamApp";
-
     private final Activity activity;
     private final MainScreen screen;
     private final UsbDeviceController usb;
     private final AppSettings settings;
-    private final ExecutorService backgroundExecutor;
     private final Runnable onLoadRequested;
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable cartridgeCheckRunnable = this::doCartridgeCheck;
 
     private TextView step1Label;
     private TextView step2Label;
     private int stepDoneColor;
     private int stepDefaultColor;
-    private boolean step2Checking;
-    private boolean disposed;
 
     StartupDialog(Activity activity, MainScreen screen, UsbDeviceController usb,
-            AppSettings settings, ExecutorService backgroundExecutor, Runnable onLoadRequested) {
+            AppSettings settings, Runnable onLoadRequested) {
         this.activity = activity;
         this.screen = screen;
         this.usb = usb;
         this.settings = settings;
-        this.backgroundExecutor = backgroundExecutor;
         this.onLoadRequested = onLoadRequested;
     }
 
     void show() {
-        stopChecking();
         Dialog dialog = UiStyle.baseDialog(activity);
         UiStyle.Palette colors = UiStyle.palette(activity);
         int accent = screen.accentColor();
@@ -98,7 +82,6 @@ final class StartupDialog {
             if (screen.gallery() != null) {
                 step2Label.setTextColor(stepDoneColor);
             }
-            doCartridgeCheck();
         }
         content.addView(steps, matchWidthWrapContent());
 
@@ -122,7 +105,7 @@ final class StartupDialog {
 
         Button loadCamera = UiStyle.button(activity, "Load Camera", accent, colors.surfaceRaised, accent);
         loadCamera.setOnClickListener(v -> {
-            if (!usb.isConnected()) {
+            if (!usb.isReaderPresent()) {
                 onLoadRequested.run(); // shows toast or unsupported dialog; popup stays open
                 return;
             }
@@ -147,14 +130,11 @@ final class StartupDialog {
     void markDeviceAttached(boolean found) {
         if (!found || step1Label == null) return;
         step1Label.setTextColor(stepDoneColor);
-        stopChecking();
-        doCartridgeCheck();
     }
 
     void markDeviceDetached() {
         if (step1Label != null) step1Label.setTextColor(stepDefaultColor);
         if (step2Label != null) step2Label.setTextColor(stepDefaultColor);
-        stopChecking();
     }
 
     void markCameraLoaded() {
@@ -164,70 +144,12 @@ final class StartupDialog {
     }
 
     void dispose() {
-        disposed = true;
         clearLabels();
     }
 
-    private void doCartridgeCheck() {
-        if (step2Label == null || usb.device() == null || step2Checking) return;
-        if (screen != null && screen.isBusy()) {
-            handler.postDelayed(cartridgeCheckRunnable, 5_000);
-            return;
-        }
-        step2Checking = true;
-        UsbDevice device = usb.device();
-        backgroundExecutor.execute(() -> {
-            UsbDeviceConnection conn = null;
-            boolean isCamera = false;
-            try {
-                conn = usb.manager().openDevice(device);
-                if (conn != null) {
-                    GbxCartDevices.NativeTransport transport = GbxCartDevices.nativeTransport(device);
-                    if (transport != null) {
-                        isCamera = NativeGbcam.isGameBoyCameraInserted(
-                                conn.getFileDescriptor(),
-                                transport.interfaceNumber,
-                                transport.epOut,
-                                transport.epIn,
-                                transport.initializeCh340);
-                    }
-                }
-            } catch (Throwable t) {
-                Log.w(TAG, "Startup cartridge check failed", t);
-            } finally {
-                if (conn != null) {
-                    conn.close();
-                }
-            }
-            boolean finalIsCamera = isCamera;
-            postToUi(() -> {
-                step2Checking = false;
-                if (step2Label == null || usb.device() != device) return;
-                step2Label.setTextColor(finalIsCamera ? stepDoneColor : stepDefaultColor);
-                if (step2Label.isAttachedToWindow()) {
-                    handler.postDelayed(cartridgeCheckRunnable, 12_000);
-                }
-            });
-        });
-    }
-
-    private void stopChecking() {
-        handler.removeCallbacks(cartridgeCheckRunnable);
-        step2Checking = false;
-    }
-
     private void clearLabels() {
-        stopChecking();
         step1Label = null;
         step2Label = null;
-    }
-
-    private void postToUi(Runnable action) {
-        activity.runOnUiThread(() -> {
-            if (!disposed) {
-                action.run();
-            }
-        });
     }
 
     private static SpannableString boldSpan(String text, String substring) {

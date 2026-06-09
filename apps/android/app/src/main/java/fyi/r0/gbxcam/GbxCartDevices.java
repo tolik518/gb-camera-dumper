@@ -3,8 +3,6 @@ package fyi.r0.gbxcam;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 
-import org.json.JSONObject;
-
 import java.util.Locale;
 import java.util.Map;
 
@@ -19,22 +17,23 @@ final class GbxCartDevices {
 
     enum ReaderFamily {
         CH340_GB_READER(
-                "CH340 cartridge reader",
                 "GBxCart RW or GBFlash",
-                true),
+                true,
+                null),
         JOEY_JR(
-                "Joey Jr",
                 "BennVenn Joey Jr",
-                false);
+                false,
+                "BennVenn Joey Jr is connected but not supported by GBxCAM Viewer yet."
+                        + CONTACT_DEVELOPER_SUFFIX);
 
-        final String usbLabel;
-        final String flashGbxName;
-        final boolean requiresNativeProbe;
+        final String label;
+        final boolean canAttemptCameraLoad;
+        final String unsupportedMessage;
 
-        ReaderFamily(String usbLabel, String flashGbxName, boolean requiresNativeProbe) {
-            this.usbLabel = usbLabel;
-            this.flashGbxName = flashGbxName;
-            this.requiresNativeProbe = requiresNativeProbe;
+        ReaderFamily(String label, boolean canAttemptCameraLoad, String unsupportedMessage) {
+            this.label = label;
+            this.canAttemptCameraLoad = canAttemptCameraLoad;
+            this.unsupportedMessage = unsupportedMessage;
         }
     }
 
@@ -47,58 +46,43 @@ final class GbxCartDevices {
             this.family = family;
         }
 
-        boolean requiresNativeProbe() {
-            return family.requiresNativeProbe;
-        }
-
-        String usbLabel() {
-            return family.usbLabel;
-        }
-
-        String flashGbxName() {
-            return family.flashGbxName;
+        boolean canAttemptCameraLoad() {
+            return family.canAttemptCameraLoad;
         }
 
         NativeTransport nativeTransport() {
             return nativeTransportFor(family);
         }
 
-        ReaderDetection staticDetection() {
-            if (family == ReaderFamily.JOEY_JR) {
-                return ReaderDetection.unsupported(
-                        family.flashGbxName,
-                        family.flashGbxName + " is connected but not supported by GBxCAM Viewer yet."
-                                + CONTACT_DEVELOPER_SUFFIX);
+        ReaderStatus readerStatus() {
+            if (family.canAttemptCameraLoad) {
+                return ReaderStatus.canAttemptCameraLoad(family.label);
             }
-            return null;
+            return ReaderStatus.unsupported(family.label, family.unsupportedMessage);
+        }
+
+        String label() {
+            return family.label;
         }
     }
 
-    static final class ReaderDetection {
+    static final class ReaderStatus {
         final String label;
-        final boolean supported;
+        final boolean canAttemptCameraLoad;
         final String unsupportedMessage;
 
-        ReaderDetection(String label, boolean supported, String unsupportedMessage) {
+        private ReaderStatus(String label, boolean canAttemptCameraLoad, String unsupportedMessage) {
             this.label = label;
-            this.supported = supported;
+            this.canAttemptCameraLoad = canAttemptCameraLoad;
             this.unsupportedMessage = unsupportedMessage;
         }
 
-        static ReaderDetection unsupported(String label, String unsupportedMessage) {
-            return new ReaderDetection(label, false, unsupportedMessage);
+        static ReaderStatus canAttemptCameraLoad(String label) {
+            return new ReaderStatus(label, true, "");
         }
 
-        static ReaderDetection fromJson(String json) throws Exception {
-            JSONObject root = new JSONObject(json);
-            String label = root.getString("label");
-            boolean supported = root.getBoolean("supported");
-            String unsupportedMessage = root.optString("unsupportedMessage", "");
-            if (!supported && unsupportedMessage.isEmpty()) {
-                unsupportedMessage = label + " is connected but not supported by GBxCAM Viewer yet."
-                        + CONTACT_DEVELOPER_SUFFIX;
-            }
-            return new ReaderDetection(label, supported, unsupportedMessage);
+        static ReaderStatus unsupported(String label, String unsupportedMessage) {
+            return new ReaderStatus(label, false, unsupportedMessage);
         }
     }
 
@@ -146,7 +130,7 @@ final class GbxCartDevices {
 
     static NativeTransport nativeTransport(UsbDevice device) {
         Candidate candidate = candidateFor(device);
-        if (candidate == null || !candidate.requiresNativeProbe()) {
+        if (candidate == null || !candidate.canAttemptCameraLoad()) {
             return null;
         }
         return candidate.nativeTransport();

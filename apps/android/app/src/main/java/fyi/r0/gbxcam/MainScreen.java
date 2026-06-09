@@ -103,7 +103,7 @@ final class MainScreen implements PaletteMenu.Host {
     private GalleryState gallery;
     private boolean deviceConnected;
     private boolean readerPresent;
-    private boolean readerSupported;
+    private boolean readerCanAttemptCameraLoad;
     private String readerLabel = "";
     private boolean busy;
     private boolean logsVisible;
@@ -382,9 +382,9 @@ final class MainScreen implements PaletteMenu.Host {
         updateActions();
     }
 
-    void setReaderStatus(boolean present, boolean supported, String label) {
+    void setReaderStatus(boolean present, boolean canAttemptCameraLoad, String label) {
         this.readerPresent = present;
-        this.readerSupported = supported;
+        this.readerCanAttemptCameraLoad = canAttemptCameraLoad;
         this.readerLabel = label != null ? label : "";
         updateConnectionSubtitle();
     }
@@ -404,7 +404,7 @@ final class MainScreen implements PaletteMenu.Host {
             subtitle.setText("Connect a cartridge reader to load photos");
         } else if (deviceConnected) {
             subtitle.setText("Device connected");
-        } else if (readerSupported) {
+        } else if (readerCanAttemptCameraLoad) {
             subtitle.setText(readerLabel.isEmpty()
                     ? "Cartridge reader connected"
                     : readerLabel + " connected");

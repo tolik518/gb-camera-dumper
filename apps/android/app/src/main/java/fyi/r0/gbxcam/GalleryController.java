@@ -126,9 +126,9 @@ final class GalleryController implements MainScreen.Listener, GbcamOperationRunn
 
     @Override
     public void onLoadRequested() {
-        GbxCartDevices.ReaderDetection detection = usb.detection();
-        if (detection != null && !detection.supported) {
-            UiStyle.messageDialog(activity, "Unsupported cartridge reader", detection.unsupportedMessage);
+        GbxCartDevices.ReaderStatus status = usb.readerStatus();
+        if (status != null && !status.canAttemptCameraLoad) {
+            UiStyle.messageDialog(activity, "Unsupported cartridge reader", status.unsupportedMessage);
             return;
         }
         if (!usb.isReaderPresent()) {

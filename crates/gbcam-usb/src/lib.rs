@@ -284,39 +284,6 @@ impl CartridgeReader {
         Self::connect_with_transport(fd, UsbTransport::ch340(), progress)
     }
 
-    pub fn detect_with_transport(
-        fd: RawFd,
-        transport: UsbTransport,
-        progress: &mut impl Progress,
-    ) -> Result<DetectedReader> {
-        progress.message("Detecting cartridge reader...");
-        let mut dev = UsbDev::open_transport(fd, transport, progress)?;
-        match dev.query_gbxcart_info(progress) {
-            Ok(info) => Ok(detected_from_gbxcart(&info)),
-            Err(gbxcart_error) => {
-                dev.clear_local_rx();
-                let _ = dev.drain_input(20, 16);
-                if transport.initialize_ch340 {
-                    dev.apply_ch340_line_rate(GBFLASH_BAUD, progress)?;
-                }
-                match dev.query_gbflash_info(progress) {
-                    Ok(info) => Ok(detected_from_gbflash(&info)),
-                    Err(_) => {
-                        if transport.initialize_ch340 {
-                            Ok(DetectedReader {
-                                label: "CH340 USB device (unrecognized cartridge reader)"
-                                    .to_string(),
-                                supported: false,
-                            })
-                        } else {
-                            Err(gbxcart_error)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     pub fn connect_with_transport(
         fd: RawFd,
         transport: UsbTransport,

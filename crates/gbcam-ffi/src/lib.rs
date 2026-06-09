@@ -4,9 +4,7 @@ use gbxcam_core::{
     write_rgb_png, AutoRgbMergeOptions, GbcamSave, PaletteId, PhotoKind, RgbMergeAlgorithm,
     RgbMergeOrder, ValidationSeverity, DEFAULT_PALETTE_INDEX,
 };
-use gbxcam_usb::{
-    CartridgeReader, CartridgeReaderInfo, DetectedReader, GbxCartInfo, Progress, UsbTransport,
-};
+use gbxcam_usb::{CartridgeReader, CartridgeReaderInfo, GbxCartInfo, Progress, UsbTransport};
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jboolean, jint, jstring};
@@ -465,59 +463,6 @@ impl Progress for JniProgress<'_, '_> {
     }
 }
 
-#[no_mangle]
-pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_detectReaderFromFd<'local>(
-    env: jni::EnvUnowned<'local>,
-    _class: JClass<'local>,
-    fd: jint,
-    interface: jint,
-    ep_out: jint,
-    ep_in: jint,
-    initialize_ch340: jboolean,
-    progress: JObject<'local>,
-) -> jstring {
-    with_jni(&env, |env| {
-        let result = {
-            let mut progress = JniProgress::new(env, progress);
-            detect_reader_from_fd(
-                fd,
-                usb_transport(interface, ep_out, ep_in, initialize_ch340),
-                &mut progress,
-            )
-        };
-        java_result(env, result, "Cartridge reader detection failed")
-    })
-}
-
-#[no_mangle]
-pub extern "system" fn Java_fyi_r0_gbxcam_NativeGbcam_isGameBoyCameraInserted(
-    _env: jni::EnvUnowned,
-    _class: JClass,
-    fd: jint,
-    interface: jint,
-    ep_out: jint,
-    ep_in: jint,
-    initialize_ch340: jboolean,
-) -> jboolean {
-    let ok = CartridgeReader::connect_with_transport(
-        fd as std::os::unix::io::RawFd,
-        usb_transport(interface, ep_out, ep_in, initialize_ch340),
-        &mut NoJniProgress,
-    )
-    .and_then(|(reader, _info)| {
-        let report = reader.read_cartridge_report();
-        reader.finish_operation(report.is_ok(), &mut NoJniProgress);
-        report
-    })
-    .map(|r| r.mapper == 0xFC) // 0xFC = MAPPER_MAC_GBD
-    .unwrap_or(false);
-    ok as jboolean
-}
-
-struct NoJniProgress;
-
-impl Progress for NoJniProgress {}
-
 fn usb_transport(
     interface: jint,
     ep_out: jint,
@@ -530,28 +475,6 @@ fn usb_transport(
         ep_in: ep_in as u32,
         initialize_ch340,
     }
-}
-
-fn detect_reader_from_fd(
-    fd: jint,
-    transport: UsbTransport,
-    progress: &mut impl Progress,
-) -> AppResult<String> {
-    let detected = CartridgeReader::detect_with_transport(
-        fd as std::os::unix::io::RawFd,
-        transport,
-        progress,
-    )?;
-    Ok(detected_reader_json(&detected))
-}
-
-fn detected_reader_json(detected: &DetectedReader) -> String {
-    serde_json::json!({
-        "label": detected.label,
-        "supported": detected.supported,
-        "unsupportedMessage": detected.unsupported_user_message(),
-    })
-    .to_string()
 }
 
 fn load_gallery_from_fd(

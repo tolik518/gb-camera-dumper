@@ -7,7 +7,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 
@@ -28,8 +27,8 @@ final class UsbDeviceController {
         /** A supported reader is ready for cartridge operations. */
         void onConnectionChanged(boolean connected);
 
-        /** A known reader was attached. {@code supported} is false for detected-but-unsupported hardware. */
-        void onReaderAttached(GbxCartDevices.ReaderDetection detection);
+        /** A known reader was attached. {@code canAttemptCameraLoad} is false for unsupported hardware. */
+        void onReaderAttached(GbxCartDevices.ReaderStatus status);
 
         /** A device was detached; {@code wasDisconnected} is true when it was our active device. */
         void onDeviceDetached(boolean wasDisconnected);
@@ -47,7 +46,7 @@ final class UsbDeviceController {
     private final Listener listener;
     private UsbDevice selectedDevice;
     private GbxCartDevices.Candidate selectedCandidate;
-    private GbxCartDevices.ReaderDetection selectedDetection;
+    private GbxCartDevices.ReaderStatus selectedReaderStatus;
     private Runnable pendingAction;
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -61,7 +60,7 @@ final class UsbDeviceController {
             if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 GbxCartDevices.Candidate candidate = GbxCartDevices.find(usbManager);
                 boolean disconnected = selectedDevice != null
-                        && (candidate == null || candidate.device != selectedDevice);
+                        && (candidate == null || !sameUsbDevice(candidate.device, selectedDevice));
                 if (disconnected) {
                     clearSelection();
                 }
@@ -86,8 +85,8 @@ final class UsbDeviceController {
             if (pending != null) {
                 if (isConnected()) {
                     pending.run();
-                } else if (selectedDetection != null && !selectedDetection.supported) {
-                    listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+                } else if (selectedReaderStatus != null && !selectedReaderStatus.canAttemptCameraLoad) {
+                    listener.onUnsupportedReader(selectedReaderStatus.unsupportedMessage);
                 }
             }
         }
@@ -107,8 +106,8 @@ final class UsbDeviceController {
         return selectedDevice;
     }
 
-    GbxCartDevices.ReaderDetection detection() {
-        return selectedDetection;
+    GbxCartDevices.ReaderStatus readerStatus() {
+        return selectedReaderStatus;
     }
 
     boolean isReaderPresent() {
@@ -116,7 +115,11 @@ final class UsbDeviceController {
     }
 
     boolean isConnected() {
-        return selectedDetection != null && selectedDetection.supported;
+        return selectedReaderStatus != null && selectedReaderStatus.canAttemptCameraLoad;
+    }
+
+    boolean hasPendingAction() {
+        return pendingAction != null;
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -138,7 +141,7 @@ final class UsbDeviceController {
         }
     }
 
-    /** Re-discovers the device, probes when possible, and returns true when a reader is present. */
+    /** Re-discovers the device and returns true when a known reader USB family is present. */
     boolean refresh() {
         return handleRefresh();
     }
@@ -149,28 +152,19 @@ final class UsbDeviceController {
             listener.onConnectionChanged(false);
             return;
         }
-        if (selectedDetection != null && !selectedDetection.supported) {
+        if (selectedReaderStatus != null && !selectedReaderStatus.canAttemptCameraLoad) {
             listener.onConnectionChanged(false);
-            listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+            listener.onUnsupportedReader(selectedReaderStatus.unsupportedMessage);
             return;
         }
-        if (selectedDetection == null) {
-            listener.onConnectionChanged(false);
-            listener.onUsbLog("USB permission is required to identify the connected cartridge reader.");
-            pendingAction = action;
-            if (!usbManager.hasPermission(selectedDevice)) {
-                listener.onUsbLog("Requesting USB permission for " + selectedCandidate.flashGbxName() + "...");
-                usbManager.requestPermission(selectedDevice, permissionIntent());
-            }
-            return;
-        }
-        listener.onConnectionChanged(true);
         if (!usbManager.hasPermission(selectedDevice)) {
             pendingAction = action;
-            listener.onUsbLog("Requesting USB permission for " + selectedDetection.label + "...");
+            String label = selectedReaderStatus != null ? selectedReaderStatus.label : selectedCandidate.label();
+            listener.onUsbLog("Requesting USB permission for " + label + "...");
             usbManager.requestPermission(selectedDevice, permissionIntent());
             return;
         }
+        listener.onConnectionChanged(true);
         action.run();
     }
 
@@ -184,83 +178,60 @@ final class UsbDeviceController {
         }
 
         selectedCandidate = candidate;
+        boolean sameDevice = sameUsbDevice(selectedDevice, candidate.device);
         selectedDevice = candidate.device;
 
-        if (!candidate.requiresNativeProbe()) {
-            selectedDetection = candidate.staticDetection();
-            listener.onUsbLog(candidate.flashGbxName() + " detected: " + GbxCartDevices.describe(selectedDevice));
-            listener.onReaderAttached(selectedDetection);
+        if (sameDevice && selectedReaderStatus != null) {
             listener.onConnectionChanged(isConnected());
-            if (!selectedDetection.supported) {
-                listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
+            return true;
+        }
+
+        if (!candidate.canAttemptCameraLoad()) {
+            selectedReaderStatus = candidate.readerStatus();
+            listener.onUsbLog(candidate.label() + " detected: " + GbxCartDevices.describe(selectedDevice));
+            listener.onReaderAttached(selectedReaderStatus);
+            listener.onConnectionChanged(isConnected());
+            if (!selectedReaderStatus.canAttemptCameraLoad) {
+                listener.onUnsupportedReader(selectedReaderStatus.unsupportedMessage);
             }
             return true;
         }
 
-        listener.onUsbLog(candidate.flashGbxName() + " detected: " + GbxCartDevices.describe(selectedDevice));
+        listener.onUsbLog(candidate.label() + " detected: " + GbxCartDevices.describe(selectedDevice));
         if (!usbManager.hasPermission(selectedDevice)) {
-            selectedDetection = null;
+            selectedReaderStatus = null;
             listener.onReaderAttached(null);
             listener.onConnectionChanged(false);
             listener.onUsbLog("Grant USB permission to identify this cartridge reader.");
             return true;
         }
 
-        selectedDetection = probeReader(selectedDevice);
-        listener.onReaderAttached(selectedDetection);
+        selectedReaderStatus = candidate.readerStatus();
+        listener.onReaderAttached(selectedReaderStatus);
         listener.onConnectionChanged(isConnected());
-        if (selectedDetection != null) {
-            listener.onUsbLog((selectedDetection.supported ? "Supported reader: " : "Unsupported reader: ")
-                    + selectedDetection.label);
-            if (!selectedDetection.supported) {
-                listener.onUnsupportedReader(selectedDetection.unsupportedMessage);
-            }
-        }
+        listener.onUsbLog("Supported USB reader family: " + selectedReaderStatus.label);
         return true;
-    }
-
-    private GbxCartDevices.ReaderDetection probeReader(UsbDevice device) {
-        UsbDeviceConnection connection = null;
-        try {
-            connection = usbManager.openDevice(device);
-            if (connection == null) {
-                return GbxCartDevices.ReaderDetection.unsupported(
-                        "CH340 cartridge reader",
-                        "Could not open the USB device."
-                                + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
-            }
-            GbxCartDevices.NativeTransport transport = GbxCartDevices.nativeTransport(device);
-            if (transport == null) {
-                return GbxCartDevices.ReaderDetection.unsupported(
-                        "CH340 cartridge reader",
-                        "This cartridge reader transport is not configured yet."
-                                + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
-            }
-            String json = NativeGbcam.detectReaderFromFd(
-                    connection.getFileDescriptor(),
-                    transport.interfaceNumber,
-                    transport.epOut,
-                    transport.epIn,
-                    transport.initializeCh340,
-                    message -> listener.onUsbLog(message));
-            return GbxCartDevices.ReaderDetection.fromJson(json);
-        } catch (Exception e) {
-            return GbxCartDevices.ReaderDetection.unsupported(
-                    "CH340 cartridge reader",
-                    "Could not identify the cartridge reader: " + e.getMessage()
-                            + GbxCartDevices.CONTACT_DEVELOPER_SUFFIX);
-        } finally {
-            if (connection != null) {
-                connection.close();
-            }
-        }
     }
 
     private void clearSelection() {
         selectedDevice = null;
         selectedCandidate = null;
-        selectedDetection = null;
+        selectedReaderStatus = null;
         pendingAction = null;
+    }
+
+    private static boolean sameUsbDevice(UsbDevice left, UsbDevice right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        String leftName = left.getDeviceName();
+        String rightName = right.getDeviceName();
+        return left.getVendorId() == right.getVendorId()
+                && left.getProductId() == right.getProductId()
+                && (leftName == null ? rightName == null : leftName.equals(rightName));
     }
 
     private PendingIntent permissionIntent() {

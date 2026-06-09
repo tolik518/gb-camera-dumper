@@ -88,19 +88,4 @@ final class NativeGbcam {
             String order3,
             String defaultAlgorithm,
             String algorithmOverridesJson);
-
-    static native String detectReaderFromFd(
-            int fd,
-            int interfaceNumber,
-            int epOut,
-            int epIn,
-            boolean initializeCh340,
-            Progress progress);
-
-    static native boolean isGameBoyCameraInserted(
-            int fd,
-            int interfaceNumber,
-            int epOut,
-            int epIn,
-            boolean initializeCh340);
 }

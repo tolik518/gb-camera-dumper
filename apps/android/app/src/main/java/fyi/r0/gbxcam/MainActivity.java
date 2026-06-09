@@ -49,7 +49,7 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
                 backups, pipeline, palettes, previewExecutor, backgroundExecutor, paletteIndex,
                 () -> { if (startupDialog != null) startupDialog.markCameraLoaded(); });
         startupDialog = new StartupDialog(
-                this, screen, usb, settings, backgroundExecutor, () -> controller.onLoadRequested());
+                this, screen, usb, settings, () -> controller.onLoadRequested());
         screen.setListener(controller);
         screen.setBitmapExecutor(previewExecutor);
         screen.setPaletteIndex(paletteIndex);
@@ -122,9 +122,9 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     }
 
     @Override
-    public void onReaderAttached(GbxCartDevices.ReaderDetection detection) {
+    public void onReaderAttached(GbxCartDevices.ReaderStatus status) {
         updateReaderUi();
-        if (usb.isConnected() && settings.autoLoad()) {
+        if (usb.isConnected() && settings.autoLoad() && !usb.hasPendingAction()) {
             controller.autoLoadCamera();
         }
         if (startupDialog != null) {
@@ -152,9 +152,9 @@ public class MainActivity extends Activity implements UsbDeviceController.Listen
     }
 
     private void updateReaderUi() {
-        GbxCartDevices.ReaderDetection detection = usb.detection();
-        if (detection != null) {
-            screen.setReaderStatus(true, detection.supported, detection.label);
+        GbxCartDevices.ReaderStatus status = usb.readerStatus();
+        if (status != null) {
+            screen.setReaderStatus(true, status.canAttemptCameraLoad, status.label);
         } else if (usb.isReaderPresent()) {
             screen.setReaderStatus(true, true, "Cartridge reader");
         } else {
